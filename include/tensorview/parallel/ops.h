@@ -1,0 +1,48 @@
+/*
+TODO add some ops (e.g. atomic) that can be used in both cuda and openmp.
+TODO add CAS
+*/
+#pragma once
+#include <tensorview/core/all.h>
+namespace tv {
+
+template <typename T> struct AtomicFetchAdd {
+  TV_HOST_DEVICE_INLINE T operator()(T *addr, T val) {
+#ifdef __CUDA_ARCH__
+    return atomicAdd(addr, val);
+#else
+    T t;
+#ifdef _MSC_VER
+#pragma omp critical
+#else
+#pragma omp atomic capture
+#endif
+    {
+      t = *addr;
+      *addr += val;
+    }
+    return t;
+#endif
+  }
+};
+
+template <typename T> struct AtomicAdd {
+  TV_HOST_DEVICE_INLINE void operator()(T *addr, T val) {
+#ifdef __CUDA_ARCH__
+    atomicAdd(addr, val);
+#else
+#ifdef _MSC_VER
+#pragma omp critical
+    { 
+      addr[0] += val; 
+    }
+
+#else
+#pragma omp atomic
+    addr[0] += val; 
+#endif
+#endif
+  }
+};
+
+} // namespace tv

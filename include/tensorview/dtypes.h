@@ -1,0 +1,240 @@
+#pragma once
+#ifdef TV_CUDA
+#include <cuda.h>
+#include <cuda_fp16.h>
+#endif
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+#include <cuda_bf16.h>
+#endif
+#include <algorithm>
+#include <type_traits>
+
+#define TV_UNKNOWN_DTYPE_STRING "unknown"
+
+namespace tv {
+enum DType {
+  bool_ = 0,
+  float16 = 1,
+  float32 = 2,
+  float64 = 3,
+  int8 = 4,
+  int16 = 5,
+  int32 = 6,
+  int64 = 7,
+  uint8 = 8,
+  uint16 = 9,
+  uint32 = 10,
+  uint64 = 11,
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+  bfloat16 = 12,
+  tf32 = 13,
+#endif
+  custom16 = 100,
+  custom32 = 101,
+  custom48 = 102,
+  custom64 = 103,
+  custom80 = 104,
+  custom96 = 105,
+  custom128 = 106,
+  unknown = -1
+};
+
+/*
+#ifdef TV_CUDA
+using half_t = __half;
+using half2_t = __half2;
+#endif
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+using bfloat16_t = __nv_bfloat16;
+using bfloat162_t = __nv_bfloat162;
+#endif
+*/
+
+namespace detail {
+
+constexpr bool strings_equal(char const *a, char const *b) {
+  return *a == *b && (*a == '\0' || strings_equal(a + 1, b + 1));
+}
+
+template <typename T> constexpr DType get_custom_dtype() {
+  if (sizeof(T) == 2) {
+    return custom16;
+  } else if (sizeof(T) == 4) {
+    return custom32;
+  } else if (sizeof(T) == 6) {
+    return custom48;
+  } else if (sizeof(T) == 8) {
+    return custom64;
+  } else if (sizeof(T) == 10) {
+    return custom80;
+  } else if (sizeof(T) == 12) {
+    return custom96;
+  } else if (sizeof(T) == 16) {
+    return custom128;
+  } else {
+    return unknown;
+  }
+}
+
+template <typename T> struct TypeToString {
+  static constexpr const char *value = TV_UNKNOWN_DTYPE_STRING;
+};
+
+template <typename T> struct TypeToDtype {
+  static constexpr DType dtype = get_custom_dtype<T>();
+};
+
+template <> struct TypeToDtype<int32_t> {
+  static constexpr DType dtype = int32;
+};
+#ifdef TV_CUDA
+template <> struct TypeToDtype<__half> {
+  static constexpr DType dtype = float16;
+};
+#endif
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+template <> struct TypeToDtype<__nv_bfloat16> {
+  static constexpr DType dtype = bfloat16;
+};
+#endif
+template <> struct TypeToDtype<float> {
+  static constexpr DType dtype = float32;
+};
+template <> struct TypeToDtype<double> {
+  static constexpr DType dtype = float64;
+};
+template <> struct TypeToDtype<int16_t> {
+  static constexpr DType dtype = int16;
+};
+template <> struct TypeToDtype<int8_t> { static constexpr DType dtype = int8; };
+template <> struct TypeToDtype<int64_t> {
+  static constexpr DType dtype = int64;
+};
+template <> struct TypeToDtype<uint8_t> {
+  static constexpr DType dtype = uint8;
+};
+template <> struct TypeToDtype<uint16_t> {
+  static constexpr DType dtype = uint16;
+};
+template <> struct TypeToDtype<uint32_t> {
+  static constexpr DType dtype = uint32;
+};
+template <> struct TypeToDtype<uint64_t> {
+  static constexpr DType dtype = uint64;
+};
+template <> struct TypeToDtype<bool> { static constexpr DType dtype = bool_; };
+
+} // namespace detail
+
+template <class T>
+constexpr DType type_v = detail::TypeToDtype<std::decay_t<T>>::dtype;
+
+template <typename T> constexpr const char *dtype_str(T t) {
+  switch (t) {
+  case DType::bool_:
+    return "bool";
+  case DType::float32:
+    return "float32";
+  case DType::int8:
+    return "int8";
+  case DType::int16:
+    return "int16";
+  case DType::int32:
+    return "int32";
+  case DType::float64:
+    return "float64";
+  case DType::int64:
+    return "int64";
+  case DType::uint8:
+    return "uint8";
+  case DType::uint16:
+    return "uint16";
+  case DType::uint32:
+    return "uint32";
+  case DType::uint64:
+    return "uint64";
+  case DType::float16:
+    return "half";
+  case DType::custom16:
+    return "custom16";
+  case DType::custom32:
+    return "custom32";
+  case DType::custom48:
+    return "custom48";
+  case DType::custom64:
+    return "custom64";
+  case DType::custom80:
+    return "custom80";
+  case DType::custom96:
+    return "custom96";
+  case DType::custom128:
+    return "custom128";
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+  case DType::tf32:
+    return "tf32";
+  case DType::bfloat16:
+    return "bfloat16";
+#endif
+  default:
+    return TV_UNKNOWN_DTYPE_STRING;
+  }
+}
+
+// we can define template specs to extend detail::TypeToString.
+template <typename T>
+constexpr const char *type_s =
+    detail::strings_equal(dtype_str(type_v<T>), TV_UNKNOWN_DTYPE_STRING)
+        ? detail::TypeToString<std::decay_t<T>>::value
+        : dtype_str(type_v<T>);
+
+} // namespace tv
+
+// from pytorch aten/src/ATen/Dispatch.h. 
+// these macros should only be used with cuda extend lambdas
+// because they don't support generic lambda,
+// otherwise you should always use tv::dispatch functions.
+#define TV_PRIVATE_CASE_TYPE_USING_HINT(NAME, enum_type, type, HINT, ...)      \
+  case enum_type: {                                                            \
+    using HINT = type;                                                         \
+    return __VA_ARGS__();                                                      \
+  }
+
+#define TV_PRIVATE_CASE_TYPE(NAME, enum_type, type, ...)                       \
+  TV_PRIVATE_CASE_TYPE_USING_HINT(NAME, enum_type, type, scalar_t, __VA_ARGS__)
+
+#define TV_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...)                            \
+  [&] {                                                                        \
+    switch (TYPE) {                                                            \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::float64, double, __VA_ARGS__)             \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::float32, float, __VA_ARGS__)              \
+    default:                                                                   \
+      TV_THROW_INVALID_ARG(#NAME, " not implemented for '",                    \
+                           tv::dtype_str(TYPE), "'");                          \
+    }                                                                          \
+  }()
+
+#define TV_DISPATCH_FLOATING_TYPES_AND_HALF(TYPE, NAME, ...)                   \
+  [&] {                                                                        \
+    switch (TYPE) {                                                            \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::float64, double, __VA_ARGS__)             \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::float32, float, __VA_ARGS__)              \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::float16, __half, __VA_ARGS__)             \
+    default:                                                                   \
+      TV_THROW_INVALID_ARG(#NAME, " not implemented for '",                    \
+                           tv::dtype_str(TYPE), "'");                          \
+    }                                                                          \
+  }()
+
+#define TV_DISPATCH_INTEGRAL_TYPES(TYPE, NAME, ...)                            \
+  [&] {                                                                        \
+    switch (TYPE) {                                                            \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::uint8, uint8_t, __VA_ARGS__)              \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::int8, int8_t, __VA_ARGS__)                \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::int32, int32_t, __VA_ARGS__)              \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::int64, int64_t, __VA_ARGS__)              \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::int16, __VA_ARGS__)                       \
+    default:                                                                   \
+      TV_THROW_INVALID_ARG(#NAME, " not implemented for '",                    \
+                           tv::dtype_str(TYPE), "'");                          \
+    }                                                                          \
+  }()
