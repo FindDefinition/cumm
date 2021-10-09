@@ -57,7 +57,7 @@ jobs:
         shell: powershell
   
   build:
-    # needs: build-windows
+    needs: build-windows
     runs-on: ubuntu-20.04
     strategy:
       matrix:
@@ -88,7 +88,7 @@ jobs:
 
       - name: Build a binary wheel and test
         env:
-          DOCKER_IMAGE: scrin/manylinux-cuda:cu${{ matrix.cuda-version }}-devel
+          DOCKER_IMAGE: scrin/manylinux2014-cuda:cu${{ matrix.cuda-version }}-devel
           PLAT: manylinux2014_x86_64
         run: |
           docker run --rm -e PLAT=$PLAT -e CUMM_CUDA_VERSION=${{ matrix.cuda-version }} -v `pwd`:/io $DOCKER_IMAGE bash -c "/io/tools/build-wheels.sh"
