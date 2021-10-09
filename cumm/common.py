@@ -161,7 +161,7 @@ class CUDALibs(pccm.Class):
             lib64 = linux_cuda_root / f"lib64"
         self.build_meta.includes.append(include)
         self.build_meta.libraries.extend(
-            ["cuda", "cudart", "cublas", "cublasLt", "curand"])
+            ["cudart"])
         self.build_meta.compiler_to_cflags["nvcc"] = gpu_arch_flags
         # if not compat.InWindows:
         #     self.build_meta.compiler_to_ldflags["g++,clang++"] = ["-Wl,-rpath='/usr/local/cuda/lib64'", f"-Wl,-rpath-link='{lib64}'"]

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #ifdef TV_CUDA
 #include <cuda.h>
 #include <cuda_fp16.h>

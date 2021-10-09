@@ -19,15 +19,20 @@ from setuptools.extension import Extension
 
 # Package meta-data.
 NAME = 'cumm'
+cuda_ver = os.environ.get("CUMM_CUDA_VERSION", "")
+if cuda_ver:
+    cuda_ver = cuda_ver.replace(".", "") # 10.2 to 102
+    NAME += "cumm-cu{}".format(cuda_ver)
+
 DESCRIPTION = 'CUda Matrix Multiply library'
 URL = 'https://github.com/FindDefinition/cumm'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
-REQUIRES_PYTHON = '>=3.7'
+REQUIRES_PYTHON = '>=3.6'
 VERSION = None
 
 # What packages are required for this module to be executed?
-REQUIRED = ["pccm>=0.2.0", "pybind11>=2.6.0", "fire", "numpy"]
+REQUIRED = ["pccm>=0.2.3", "pybind11>=2.6.0", "fire", "numpy"]
 
 # What packages are optional?
 EXTRAS = {
@@ -146,7 +151,7 @@ else:
         'upload': UploadCommand,
         'build_ext': PCCMBuild,
     }
-    from cumm.cudasim.arrayref import ArrayPtr
+    from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind
     ext_modules: List[Extension] = [
         PCCMExtension([ArrayPtr(), TensorViewBind()],

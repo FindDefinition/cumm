@@ -6,7 +6,7 @@ from .build_meta import ENABLE_JIT
 
 if ENABLE_JIT:
     from cumm.constants import PACKAGE_ROOT
-    from cumm.cudasim.arrayref import ArrayPtr
+    from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind
 
     pccm.builder.build_pybind([ArrayPtr(), TensorViewBind()],

@@ -1,10 +1,8 @@
 from os import read
 from typing import List, Optional
 
-import numpy as np
 import pccm
 
-from cumm import dtypes
 from cumm.common import PyBind11, TensorView, TensorViewCPU
 from cumm.constants import PACKAGE_ROOT
 
@@ -16,7 +14,7 @@ with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView, PyBind11)
+        self.add_dependency(TensorViewCPU, PyBind11)
         self.add_include("tensorview/pybind_utils.h")
 
     @pccm.pybind.mark
@@ -45,7 +43,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         return tv::Tensor(tv::TensorShape(shape), tv::DType(dtype), device, pinned, managed);
     }), py::arg("shape"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false)
     .def(py::init([]() {
-        return tv::Tensor( );
+        return tv::Tensor();
     }))
     .def("clone", [](const tv::Tensor& ten, bool pinned, bool use_cpu_copy){
       return ten.clone(pinned, use_cpu_copy);
@@ -102,7 +100,13 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
       auto& shape = t.strides();
       return std::vector<int64_t>(shape.begin(), shape.end());
     });
-
+  // from_blob is used for pytorch.
+  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
+      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, tv::DType(dtype), device);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
+  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
+      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, tv::DType(dtype), device);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
   m.def("zeros", [](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed){
     return tv::zeros(shape, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 

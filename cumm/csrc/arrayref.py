@@ -1,10 +1,8 @@
 from os import read
 from typing import List, Optional
 
-import numpy as np
 import pccm
 
-from cumm import dtypes
 from cumm.common import TensorView, TensorViewCPU
 
 
@@ -24,7 +22,7 @@ class ArrayPtr(pccm.Class, pccm.pybind.PybindClassMixin):
         # suitable for low precision dtypes.
         self.add_pybind_member("meta_data_",
                                "tv::Tensor",
-                               pyanno="spconv.tensorview.Tensor",
+                               pyanno="cumm.tensorview.Tensor",
                                readwrite=False)
 
         # self.add_pybind_member("num_smem_bank_", "int", readwrite=False)
@@ -42,11 +40,11 @@ class ArrayPtr(pccm.Class, pccm.pybind.PybindClassMixin):
         code.arg("external_data",
                  "tv::Tensor",
                  "tv::Tensor()",
-                 pyanno="spconv.tensorview.Tensor = Tensor()")
+                 pyanno="cumm.tensorview.Tensor = Tensor()")
         code.arg("meta_data",
                  "tv::Tensor",
                  "tv::Tensor()",
-                 pyanno="spconv.tensorview.Tensor = Tensor()")
+                 pyanno="cumm.tensorview.Tensor = Tensor()")
 
         # code.arg("num_smem_bank", "int", "32")
         # code.arg("bank_byte_size", "int", "4")
@@ -343,7 +341,7 @@ class ArrayPtr(pccm.Class, pccm.pybind.PybindClassMixin):
         auto start = byte_offset_ / itemsize_;
         return data_.slice_first_axis(start, start + get_length());
         """)
-        return code.ret("tv::Tensor", "spconv.tensorview.Tensor")
+        return code.ret("tv::Tensor", "cumm.tensorview.Tensor")
 
     @pccm.pybind.mark_prop_getter(prop_name="meta_data")
     @pccm.member_function
@@ -354,7 +352,7 @@ class ArrayPtr(pccm.Class, pccm.pybind.PybindClassMixin):
         auto start = byte_offset_ / itemsize_;
         return meta_data_.slice_first_axis(start, start + get_length());
         """)
-        return code.ret("tv::Tensor", "spconv.tensorview.Tensor")
+        return code.ret("tv::Tensor", "cumm.tensorview.Tensor")
 
     @pccm.pybind.mark
     @pccm.member_function

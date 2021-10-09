@@ -17,7 +17,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 
 from cumm import cudasim
-from cumm.core_cc.cudasim.arrayref import ArrayPtr
+from cumm.core_cc.csrc.arrayref import ArrayPtr
 
 
 async def smem_bank_conflicit_check(array_ptr: ArrayPtr,
