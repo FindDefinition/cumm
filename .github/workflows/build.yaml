@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.8', '3.9', '3.10'] # we only support three newest python version in windows.
-        cuda-version: ['10.2', '11.1', '11.4']
+        cuda-version: ['10.2', '11.1']
     steps:
       - uses: actions/checkout@master
       - name: Install CUDA

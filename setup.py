@@ -19,10 +19,11 @@ from setuptools.extension import Extension
 
 # Package meta-data.
 NAME = 'cumm'
+RELEASE_NAME = NAME
 cuda_ver = os.environ.get("CUMM_CUDA_VERSION", "")
 if cuda_ver:
     cuda_ver = cuda_ver.replace(".", "") # 10.2 to 102
-    NAME += "cumm-cu{}".format(cuda_ver)
+    RELEASE_NAME += "-cu{}".format(cuda_ver)
 
 DESCRIPTION = 'CUda Matrix Multiply library'
 URL = 'https://github.com/FindDefinition/cumm'
@@ -162,7 +163,7 @@ else:
 
 # Where the magic happens:
 setup(
-    name=NAME,
+    name=RELEASE_NAME,
     version=about['__version__'],
     description=DESCRIPTION,
     long_description=long_description,
