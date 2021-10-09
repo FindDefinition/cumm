@@ -12,13 +12,6 @@ $CUDA_KNOWN_URLS = @{
     "11.4" = "https://developer.download.nvidia.com/compute/cuda/11.4.2/network_installers/cuda_11.4.2_win10_network.exe";
 }
 
-# @todo - change this to be based on _MSC_VER intead, or invert it to be CUDA keyed instead?
-$VISUAL_STUDIO_MIN_CUDA = @{
-    "2019" = "10.1";
-    "2017" = "10.0"; # Depends on which version of 2017! 9.0 to 10.0 depending on  version
-    "2015" = "8.0"; # might support older, unsure.
-}
-
 # cuda_runtime.h is in nvcc <= 10.2, but cudart >= 11.0
 # @todo - make this easier to vary per CUDA version.
 $CUDA_PACKAGES_IN = @(
@@ -46,24 +39,6 @@ if(-not $cuda_ver_matched){
 }
 $CUDA_MAJOR=$Matches.major
 $CUDA_MINOR=$Matches.minor
-
-## ---------------------------
-## Visual studio support check
-## ---------------------------
-# Exit if visual studio is too new for the cuda version.
-$VISUAL_STUDIO = $env:visual_studio.trim()
-if ($VISUAL_STUDIO.length -ge 4) {
-$VISUAL_STUDIO_YEAR = $VISUAL_STUDIO.Substring($VISUAL_STUDIO.Length-4)
-    if ($VISUAL_STUDIO_YEAR.length -eq 4 -and $VISUAL_STUDIO_MIN_CUDA.containsKey($VISUAL_STUDIO_YEAR)){
-        $MINIMUM_CUDA_VERSION = $VISUAL_STUDIO_MIN_CUDA[$VISUAL_STUDIO_YEAR]
-        if ([version]$CUDA_VERSION_FULL -lt [version]$MINIMUM_CUDA_VERSION) {
-            Write-Output "Error: Visual Studio $($VISUAL_STUDIO_YEAR) requires CUDA >= $($MINIMUM_CUDA_VERSION)"
-            exit 1
-        }
-    }
-} else {
-    Write-Output "Warning: Unknown Visual Studio Version. CUDA version may be insufficient."
-}
 
 ## ------------------------------------------------
 ## Select CUDA packages to install from environment
