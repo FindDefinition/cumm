@@ -9,52 +9,53 @@ on:
       - '*'
   
 jobs:
-  # build-windows:
-  #   runs-on: windows-latest
-  #   strategy:
-  #     matrix:
-  #       python-version: ['3.8', '3.9', '3.10'] # we only support three newest python version in windows.
-  #       cuda-version: ['10.2', '11.1']
-  #   steps:
-  #     - uses: actions/checkout@master
-  #     - name: Install CUDA
-  #       env: 
-  #         cuda: ${{ matrix.cuda-version }}
-  #       shell: powershell
-  #       run: .\scripts\install_windows_cuda.ps1
-  #     - name: Set up Python ${{ matrix.python-version }}
-  #       uses: actions/setup-python@v2
-  #       with:
-  #         python-version: ${{ matrix.python-version }}
-  #     - uses: ilammy/msvc-dev-cmd@v1
-  #     - name: Install pep build
-  #       run: >-
-  #         python -m
-  #         pip install
-  #         build
-  #         --user
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10'] # we only support three newest python version in windows.
+        cuda-version: ['10.2', '11.1']
+    steps:
+      - uses: actions/checkout@master
+      - name: Install CUDA
+        env: 
+          cuda: ${{ matrix.cuda-version }}
+        shell: powershell
+        run: .\scripts\install_windows_cuda.ps1
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Install pep build
+        run: >-
+          python -m
+          pip install
+          build
+          --user
 
-  #     - name: Build a windows binary wheel
-  #       run: |
-  #         $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
-  #         $Env:CUMM_ENABLE_JIT = "0"
-  #         python -m build --wheel --outdir dist/ .
-  #       shell: powershell
+      - name: Build a windows binary wheel
+        run: |
+          $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
+          $Env:CUMM_ENABLE_JIT = "0"
+          nvcc -V
+          python -m build --wheel --outdir dist/ .
+        shell: powershell
 
-  #     - name: test
-  #       run: |
-  #         python -m pip install --upgrade pip twine wheel
-  #         python -m pip install pytest
-  #         # python -m pip install cumm -f ./dist
-  #         # pytest ./test
-  #       shell: powershell
-  #     - name: Publish a Python distribution to PyPI
-  #       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
-  #       run: |
-  #         $Env:TWINE_USERNAME = "__token__"
-  #         $Env:TWINE_PASSWORD = "${{ secrets.pypi_password }}"
-  #         twine upload dist/*
-  #       shell: powershell
+      - name: test
+        run: |
+          python -m pip install --upgrade pip twine wheel
+          python -m pip install pytest
+          # python -m pip install cumm -f ./dist
+          # pytest ./test
+        shell: powershell
+      - name: Publish a Python distribution to PyPI
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+        run: |
+          $Env:TWINE_USERNAME = "__token__"
+          $Env:TWINE_PASSWORD = "${{ secrets.pypi_password }}"
+          twine upload dist/*
+        shell: powershell
   
   build:
     # needs: build-windows
