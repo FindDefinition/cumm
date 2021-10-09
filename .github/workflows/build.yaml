@@ -9,55 +9,55 @@ on:
       - '*'
   
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    strategy:
-      matrix:
-        python-version: ['3.8', '3.9', '3.10'] # we only support three newest python version in windows.
-        cuda-version: ['10.2', '11.1']
-    steps:
-      - uses: actions/checkout@master
-      - name: Install CUDA
-        env: 
-          cuda: ${{ matrix.cuda-version }}
-        shell: powershell
-        run: .\scripts\install_windows_cuda.ps1
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-      - uses: ilammy/msvc-dev-cmd@v1
-      - name: Install pep517
-        run: >-
-          python -m
-          pip install
-          pep517
-          --user
+  # build-windows:
+  #   runs-on: windows-latest
+  #   strategy:
+  #     matrix:
+  #       python-version: ['3.8', '3.9', '3.10'] # we only support three newest python version in windows.
+  #       cuda-version: ['10.2', '11.1']
+  #   steps:
+  #     - uses: actions/checkout@master
+  #     - name: Install CUDA
+  #       env: 
+  #         cuda: ${{ matrix.cuda-version }}
+  #       shell: powershell
+  #       run: .\scripts\install_windows_cuda.ps1
+  #     - name: Set up Python ${{ matrix.python-version }}
+  #       uses: actions/setup-python@v2
+  #       with:
+  #         python-version: ${{ matrix.python-version }}
+  #     - uses: ilammy/msvc-dev-cmd@v1
+  #     - name: Install pep build
+  #       run: >-
+  #         python -m
+  #         pip install
+  #         build
+  #         --user
 
-      - name: Build a windows binary wheel
-        run: |
-          $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
-          $Env:CUMM_ENABLE_JIT = "0"
-          python -m pep517.build --binary --out-dir dist/ .
-        shell: powershell
+  #     - name: Build a windows binary wheel
+  #       run: |
+  #         $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
+  #         $Env:CUMM_ENABLE_JIT = "0"
+  #         python -m build --binary --out-dir dist/ .
+  #       shell: powershell
 
-      - name: test
-        run: |
-          python -m pip install --upgrade pip twine wheel
-          python -m pip install pytest
-          # python -m pip install cumm -f ./dist
-          # pytest ./test
-        shell: powershell
-      - name: Publish a Python distribution to PyPI
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
-        run: |
-          $Env:TWINE_USERNAME = "__token__"
-          $Env:TWINE_PASSWORD = "${{ secrets.pypi_password }}"
-          twine upload dist/*
-        shell: powershell
+  #     - name: test
+  #       run: |
+  #         python -m pip install --upgrade pip twine wheel
+  #         python -m pip install pytest
+  #         # python -m pip install cumm -f ./dist
+  #         # pytest ./test
+  #       shell: powershell
+  #     - name: Publish a Python distribution to PyPI
+  #       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+  #       run: |
+  #         $Env:TWINE_USERNAME = "__token__"
+  #         $Env:TWINE_PASSWORD = "${{ secrets.pypi_password }}"
+  #         twine upload dist/*
+  #       shell: powershell
   
   build:
-    needs: build-windows
+    # needs: build-windows
     runs-on: ubuntu-20.04
     strategy:
       matrix:
@@ -71,17 +71,17 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install pep517
+      - name: Install pep build
         run: >-
           python -m
           pip install
-          pep517
+          build
           --user
 
       - name: Build a source tarball
         run: >-
           python -m
-          pep517.build
+          build
           --source
           --out-dir dist/
           .
