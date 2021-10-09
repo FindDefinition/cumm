@@ -38,7 +38,7 @@ jobs:
   #       run: |
   #         $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
   #         $Env:CUMM_ENABLE_JIT = "0"
-  #         python -m build --binary --out-dir dist/ .
+  #         python -m build --wheel --outdir dist/ .
   #       shell: powershell
 
   #     - name: test
@@ -82,8 +82,8 @@ jobs:
         run: >-
           python -m
           build
-          --source
-          --out-dir dist/
+          --sdist
+          --outdir dist/
           .
 
       - name: Build a binary wheel and test
