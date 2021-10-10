@@ -97,6 +97,8 @@ class GemmParams:
         ...
 class GemmMainUnitTest:
     @staticmethod
+    def get_all_algo_desp() -> List[GemmAlgoDesp]: ...
+    @staticmethod
     def matmul2(params: GemmParams) -> None: 
         """
         Args:

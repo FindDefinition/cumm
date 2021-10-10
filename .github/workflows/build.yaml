@@ -41,6 +41,7 @@ jobs:
           $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
           $Env:CUMM_ENABLE_JIT = "0"
           nvcc -V
+          ninja --version
           python -m build --wheel --outdir dist/ .
         shell: powershell
 

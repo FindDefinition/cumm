@@ -7,7 +7,6 @@ from typing import List, Tuple, Union
 from cumm.gemm import constants, layout, thread_map, core
 from cumm.common import TensorView, GemmBasic
 from cumm.gemm.arch import instmma 
-from codeai.astex import lineprof
 from cumm import dtypes
 from cumm.gemm import bases 
 

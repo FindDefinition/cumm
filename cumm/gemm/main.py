@@ -16,7 +16,6 @@ from cumm.common import PyBind11, TensorView, TensorViewKernel, GemmBasic
 from cumm import cudasim
 from cumm.gemm import codeops, kernel 
 from ccimport import compat
-from codeai.astex import lineprof
 from pccm.core import CodeFormatter, FunctionCode
 # from myclang import clangformat
 from cumm import dtypes
@@ -738,6 +737,7 @@ class GemmMainUnitTest(pccm.Class):
         std::vector<GemmAlgoDesp> desps;
         """)
         for ker in self.all_kernels:
+            code.raw("{")
             code.raw(f"""
             GemmAlgoDesp desp;
             desp.dtype_a = {ker.dtype_a.tv_dtype};
@@ -758,13 +758,14 @@ class GemmMainUnitTest(pccm.Class):
                 code.raw(f"desp.tensorop = {{-1, -1, -1}};")
             code.raw(f"""
             desp.num_stage = {ker.num_stage};
-            desp.algo = {ker.algo.value};
+            desp.algo = "{ker.algo.value}";
             desp.split_k_serial_set({pccm.boolean(ker.splitk_serial)});
             desp.split_k_parallel_set({pccm.boolean(ker.splitk_parallel)});
-            desp.shuffle_type = {ker.shuffle_stride.value};
+            desp.shuffle_type = "{ker.shuffle_stride.value}";
 
-            desps.push_back(desp)
+            desps.push_back(desp);
             """)
+            code.raw("}")
         code.raw(f"""
         return desps;
         """)
