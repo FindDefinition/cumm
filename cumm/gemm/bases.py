@@ -34,7 +34,10 @@ class DTypeBase(pccm.ParameterizedClass):
             self.access_pointer = f"{self.access_t} *"
             self.const_access_pointer = f"const {self.access_t} *"
         else:
-            fmt = "tv::array<{}, {}, {}>"
+            if alignment > 0:
+                fmt = "tv::alignedarray<{}, {}, {}>"
+            else:
+                fmt = "tv::array<{}, {}>"
             # here we must use int4/2/1 instead of standard float16 array
             # to make sure expected ptx is generated.
             # if we use float16[8] as a 128bit access type,

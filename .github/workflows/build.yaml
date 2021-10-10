@@ -18,6 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - name: Install CUDA
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags') || ${{ matrix.cuda-version }} == '11.1')
         env: 
           cuda: ${{ matrix.cuda-version }}
         shell: powershell

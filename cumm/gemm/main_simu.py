@@ -21,6 +21,8 @@ import codeai.visualization as vis
 VIS_IP = "127.0.0.1:50073"
 
 GEMM_VIS_GLOBAL_SCALE = 10
+import os 
+os.environ["CUMM_DEBUG"] = "0"
 
 def vis_in_relay(figs):
     vis.vis_figures(VIS_IP, figs)
@@ -375,23 +377,30 @@ def _asdv_test_simt_python(coord_input: bool = False):
                 n = 256 + 40
                 k = 56
                 m = 64
-                n = 64
+                n = 128
                 k = 32
                 m = max(params.ts[0], m)
                 n = max(params.ts[1], n)
                 k = max(params.ts[2], k)
-
+                print(m, n, k)
                 a = np.random.randint(-5, 5, size=[m, k]).astype(np.int8)
                 b = np.random.randint(-5, 5, size=[k, n]).astype(np.int8)
                 # print("DATA GEN FINISH")
                 dtype_np_c = dtypes.get_npdtype(params.dtype_c)
-                c = (a.astype(dtype_np_c) @ b.astype(dtype_np_c)).astype(
+                c = (a.astype(np.float32) @ b.astype(np.float32)).astype(
                     dtypes.get_npdtype(params.dtype_c))
+                c_dev_0 = a[:4] @ b[:, :4]
+                c_dev_1 = a[16:20] @ b[:, :4]
+                c_dev_2 = a[4:8] @ b[:, :4]
+                print(params.trans_a, params.trans_b, params.trans_c)
+                print(c_dev_0)
+                print(a.T[:, :4])
+                print(b[:, :8])
+
             if params.trans_a:
                 a = np.ascontiguousarray(a.transpose(1, 0))
             if params.trans_b:
                 b = np.ascontiguousarray(b.transpose(1, 0))
-
             if params.trans_c:
                 c = np.ascontiguousarray(c.transpose(1, 0))
             # print("WTF PREPARED")

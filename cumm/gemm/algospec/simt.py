@@ -48,6 +48,7 @@ class InputSimt(bases.Input):
             self.input_trans_load_b = False
             self.input_last_residual = True
         else:
+            # for DP4A, we need to transpose matrix to MK/NK
             self.input_trans_load_a = trans_a
             self.input_trans_load_b = not trans_b
             self.input_last_residual = False

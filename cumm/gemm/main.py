@@ -6,21 +6,22 @@ from cumm.core_cc.csrc.arrayref import ArrayPtr
 import sys
 from pathlib import Path
 
-from cumm.gemm.algospec.core import ShuffleStrideType, TensorOpParams
+from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
 import pccm
 import numpy as np
 from cumm.constants import CUTLASS_MODE
 
-from typing import Tuple, Optional, List
-from cumm.common import TensorView, TensorViewKernel, GemmBasic
+from typing import Callable, Dict, Tuple, Optional, List
+from cumm.common import PyBind11, TensorView, TensorViewKernel, GemmBasic
 from cumm import cudasim
-from cumm.gemm import kernel 
+from cumm.gemm import codeops, kernel 
 from ccimport import compat
 from codeai.astex import lineprof
-from pccm.core import CodeFormatter
+from pccm.core import CodeFormatter, FunctionCode
 # from myclang import clangformat
 from cumm import dtypes
 from cumm.gemm.core import metaseq, seq, MetaArray, array_type
+import os 
 
 class GemmAlgoParams(object):
     def __init__(self,
@@ -80,11 +81,19 @@ class GemmAlgoParams(object):
         res += f"_m{self.ts[0]}n{self.ts[1]}k{self.ts[2]}"
         res += f"m{self.wts[0]}n{self.wts[1]}k{self.wts[2]}"
         if self.tensorop is not None:
-            tss = self.tensorop.shape
-            res += f"T{tss[0]}{tss[1]}{tss[2]}"
+            tes = self.tensorop.shape
+            res += f"T{tes[0]}{tes[1]}{tes[2]}"
         res += f"_{self.num_stage}"
         if self.shuffle_stride != ShuffleStrideType.NoShuffle:
             res += f"_{self.shuffle_stride.value}"
+        if self.splitk_serial:
+            res += "1"
+        else:
+            res += "0"
+        if self.splitk_parallel:
+            res += "1"
+        else:
+            res += "0"
         return res
 
 
@@ -113,6 +122,27 @@ def gen_gemm_params(ts,
                 if not p.skipped():
                     res.append(p)
 
+    return res
+
+def gen_shuffle_params(ts,
+                    wts,
+                    dss: List[str],
+                    stage: int,
+                    algo: kernel.GemmAlgo,
+                    tensorop: Optional[kernel.TensorOpParams]):
+    res = []
+    for ds in dss:
+        for tb in [False, True]:
+            p = GemmAlgoParams(ts, wts, stage, ds, False, tb, False,
+                                algo, tensorop, False, False,
+                                ShuffleStrideType.ShuffleAC)
+            if not p.skipped():
+                res.append(p)
+        p = GemmAlgoParams(ts, wts, stage, ds, True, False, False,
+                            algo, tensorop, True, False,
+                            ShuffleStrideType.ShuffleAB)
+        if not p.skipped():
+            res.append(p)
     return res
 
 
@@ -169,22 +199,181 @@ class IGemmMaskIterator(pccm.Class):
     def increment(self):
         pass
 
-class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
+class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
+        self.add_dependency(TensorView)
         # why not std::optional?
         # c++17 requires cuda11. to support cuda 10.2, we can't use c++17 for now.
-        self.add_pybind_member("a,b,c", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
-        self.add_member("trans_a_,trans_b_,trans_c_", "std::string") # use string to add optional value
+        self.add_member("dtype_a,dtype_b,dtype_c", "int") # -1 means unset
+        self.add_member("trans_a_,trans_b_,trans_c_", "int") # -1 means unset
         self.add_pybind_member("tile_shape,warp_tile_shape", "std::array<int, 3>", pyanno="Tuple[int, int, int]")
         self.add_pybind_member("num_stage", "int")
         self.add_pybind_member("dacc,dcomp", "int")
         self.add_pybind_member("algo", "std::string")
         self.add_pybind_member("tensorop", "std::array<int, 3>", "std::array<int, 3>{}")
+        self.add_pybind_member("split_k_serial_", "int", "0") # -1 means unset
+        self.add_pybind_member("split_k_parallel_", "int", "0") # -1 means unset
+        self.add_pybind_member("shuffle_type", "std::string", f"\"{ShuffleStrideType.NoShuffle.value}\"")
+
+    @pccm.pybind.mark 
+    @pccm.constructor
+    def default_ctor(self):
+        code = pccm.FunctionCode()
+        code.ctor_init("dtype_a", "int(tv::unknown)")
+        code.ctor_init("dtype_b", "int(tv::unknown)")
+        code.ctor_init("dtype_c", "int(tv::unknown)")
+
+        code.ctor_init("trans_a_", "-1")
+        code.ctor_init("trans_b_", "-1")
+        code.ctor_init("trans_c_", "-1")
+        code.ctor_init("tile_shape", "{-1, -1, -1}")
+        code.ctor_init("warp_tile_shape", "{-1, -1, -1}")
+        code.ctor_init("num_stage", "-1")
+        code.ctor_init("dacc", "int(tv::unknown)")
+        code.ctor_init("dcomp", "int(tv::unknown)")
+        code.ctor_init("algo", "\"\"")
+        code.ctor_init("tensorop", "{-1, -1, -1}")
+        code.ctor_init("shuffle_type", f"\"{ShuffleStrideType.NoShuffle.value}\"")
+        code.ctor_init("split_k_serial_", "0")
+        code.ctor_init("split_k_parallel_", "0")
+
+        return code 
+
+
+    @pccm.pybind.mark_prop_getter(prop_name="split_k_serial")
+    @pccm.member_function
+    def split_k_serial(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        return split_k_serial_ == 1;
+        """)
+        return code.ret("bool") 
+
+    @pccm.pybind.mark_prop_setter(prop_name="split_k_serial")
+    @pccm.member_function
+    def split_k_serial_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "bool")
+        code.raw(f"""
+        split_k_serial_ = val ? 1 : 0;
+        """)
+        return code 
+
+    @pccm.pybind.mark_prop_getter(prop_name="split_k_parallel")
+    @pccm.member_function
+    def split_k_parallel(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        return split_k_parallel_ == 1;
+        """)
+        return code.ret("bool") 
+
+    @pccm.pybind.mark_prop_setter(prop_name="split_k_parallel")
+    @pccm.member_function
+    def split_k_parallel_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "bool")
+        code.raw(f"""
+        split_k_parallel_ = val ? 1 : 0;
+        """)
+        return code 
+
+    @pccm.pybind.mark
+    @pccm.member_function
+    def check_valid(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        TV_ASSERT_RT_ERR(trans_a_ != -1 && !trans_b_ != -1 && trans_c_ != -1 && !algo.empty(), 
+            "trans_a, trans_b, trans_c and algo must be set");
+        for (int i = 0; i < 3; ++i){{
+            TV_ASSERT_RT_ERR(tile_shape[i] > 0 && warp_tile_shape[i] > 0, 
+                "tile_shape and warp_tile_shape must be set, but they are", tile_shape, warp_tile_shape);
+        }}
+        if (algo != "{GemmAlgo.Simt.value}" && algo != "{GemmAlgo.SimtDP4A.value}" && algo != "{GemmAlgo.SimtDP2A.value}"){{
+            // tensor op must not empty
+            for (int i = 0; i < 3; ++i){{
+                TV_ASSERT_RT_ERR(tensorop[i] > 0, 
+                    "tensorop must be set, but they are", tensorop);
+            }}
+        }}
+        TV_ASSERT_RT_ERR(dtype_a != int(tv::unknown) && dtype_b != int(tv::unknown) && dtype_c != int(tv::unknown), 
+            "dacc and dcomp must be set to valid value");
+
+        TV_ASSERT_RT_ERR(dacc != int(tv::unknown) && dcomp != int(tv::unknown), "dacc and dcomp must be set to valid value");
+        TV_ASSERT_RT_ERR(num_stage > 0, "num_stage must larger than zero");
+        """)
+        return code
+
+
+    @pccm.pybind.mark_prop_getter(prop_name="trans_a")
+    @pccm.member_function
+    def trans_a(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        return trans_a_ == 1;
+        """)
+        return code.ret("bool") 
+
+    @pccm.pybind.mark_prop_setter(prop_name="trans_a")
+    @pccm.member_function
+    def trans_a_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "bool")
+        code.raw(f"""
+        trans_a_ = val ? 1 : 0;
+        """)
+        return code 
+
+    @pccm.pybind.mark_prop_getter(prop_name="trans_b")
+    @pccm.member_function
+    def trans_b(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        return trans_b_ == 1;
+        """)
+        return code.ret("bool") 
+
+    @pccm.pybind.mark_prop_setter(prop_name="trans_b")
+    @pccm.member_function
+    def trans_b_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "bool")
+        code.raw(f"""
+        trans_b_ = val ? 1 : 0;
+        """)
+        return code 
+
+    @pccm.pybind.mark_prop_getter(prop_name="trans_c")
+    @pccm.member_function
+    def trans_c(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        return trans_c_ == 1;
+        """)
+        return code.ret("bool") 
+
+    @pccm.pybind.mark_prop_setter(prop_name="trans_c")
+    @pccm.member_function
+    def trans_c_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "bool")
+        code.raw(f"""
+        trans_c_ = val ? 1 : 0;
+        """)
+        return code 
+
+class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorView, GemmAlgoDesp)
+        # why not std::optional?
+        # c++17 requires cuda11. to support cuda 10.2, we can't use c++17 for now.
+        self.add_pybind_member("algo_desp", "GemmAlgoDesp", pyanno="GemmAlgoDesp")
+        self.add_member("a,b,c", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
         self.add_pybind_member("split_k_slices", "int", "1")
         self.add_pybind_member("workspace", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
         # for spatial sparse convolution (split kernel algorithm)
-        self.add_pybind_member("shuffle_type", "std::string", f"\"{ShuffleStrideType.NoShuffle.value}\"")
         self.add_pybind_member("a_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("b_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("c_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
@@ -193,133 +382,225 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.constructor
     def default_ctor(self):
         code = pccm.FunctionCode()
-        code.raw(f"""
-        
+        code.ctor_init("a", "tv::Tensor()")
+        code.ctor_init("b", "tv::Tensor()")
+        code.ctor_init("c", "tv::Tensor()")
+        code.ctor_init("split_k_slices", "1")
+        code.ctor_init("workspace", "tv::Tensor()")
+        code.ctor_init("a_inds", "tv::Tensor()")
+        code.ctor_init("b_inds", "tv::Tensor()")
+        code.ctor_init("c_inds", "tv::Tensor()")
 
-        """)
+        return code 
 
-    @pccm.pybind.mark_prop_getter("trans_a")
+
+    @pccm.pybind.mark
     @pccm.member_function
-    def trans_a_get(self):
+    def check_valid(self):
         code = pccm.FunctionCode()
         code.raw(f"""
-        return trans_a_ == "true";
+        algo_desp.check_valid();
+        TV_ASSERT_RT_ERR(!a.empty() && !b.empty() && !c.empty(), 
+            "a,b,c must not empty");
+        if (algo_desp.shuffle_type == "{ShuffleStrideType.ShuffleAC.value}"){{
+            TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "a_inds,c_inds tensor must not empty");
+        }}else if (algo_desp.shuffle_type == "{ShuffleStrideType.ShuffleAB.value}"){{
+            TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "a_inds,b_inds tensor must not empty");
+        }}
         """)
-        return code.ret("bool") 
+        return code
 
-    @pccm.pybind.mark_prop_setter("trans_a")
+    @pccm.pybind.mark_prop_getter(prop_name="a")
     @pccm.member_function
-    def trans_a_set(self):
+    def a_get(self):
         code = pccm.FunctionCode()
-        code.arg("val", "bool")
         code.raw(f"""
-        trans_a_ = val ? "true" : "false;
+        return a;
+        """)
+        return code.ret("tv::Tensor") 
+
+    @pccm.pybind.mark_prop_setter(prop_name="a")
+    @pccm.member_function
+    def a_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "tv::Tensor")
+        code.raw(f"""
+        a = val;
+        algo_desp.dtype_a = int(a.dtype());
         """)
         return code 
 
-    @pccm.pybind.mark_prop_getter("trans_b")
+    @pccm.pybind.mark_prop_getter(prop_name="b")
     @pccm.member_function
-    def trans_b_get(self):
+    def b_get(self):
         code = pccm.FunctionCode()
         code.raw(f"""
-        return trans_b_ == "true";
+        return b;
         """)
-        return code.ret("bool") 
+        return code.ret("tv::Tensor") 
 
-    @pccm.pybind.mark_prop_setter("trans_b")
+    @pccm.pybind.mark_prop_setter(prop_name="b")
     @pccm.member_function
-    def trans_b_set(self):
+    def b_set(self):
         code = pccm.FunctionCode()
-        code.arg("val", "bool")
+        code.arg("val", "tv::Tensor")
         code.raw(f"""
-        trans_b_ = val ? "true" : "false;
+        b = val;
+        algo_desp.dtype_b = int(b.dtype());
         """)
         return code 
+    @pccm.pybind.mark_prop_getter(prop_name="c")
+    @pccm.member_function
+    def c_get(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        return c;
+        """)
+        return code.ret("tv::Tensor") 
 
+    @pccm.pybind.mark_prop_setter(prop_name="c")
+    @pccm.member_function
+    def c_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "tv::Tensor")
+        code.raw(f"""
+        c = val;
+        algo_desp.dtype_c = int(c.dtype());
+        """)
+        return code 
 
 class GemmMainUnitTest(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic)
+        self.add_dependency(TensorView, GemmBasic, GemmParams)
+        is_debug = os.getenv("CUMM_DEBUG", None)
+        if is_debug is not None and is_debug == "1":
+            self.simt_params = [
+                # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
+                # *gen_gemm_params((64, 64, 16),
+                #                  (32, 32, 16), 2, "f16,f16,f16,f16,f16",
+                #                  kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params((64, 64, 32),
+                #                  (32, 32, 32), 2, "s8,s8,s32,s32,s32",
+                #                  kernel.GemmAlgo.SimtDP4A, None),
+                *gen_gemm_params((128, 128, 8),
+                                (32, 64, 8), 2, "f32,f32,f32,f32,f32",
+                                kernel.GemmAlgo.Simt, None),
+                *gen_gemm_params((128, 128, 8),
+                                (32, 64, 8), 2, "f32,f32,f32,f32,f32",
+                                kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAB, splitk_serial=True),
 
-        # unit test params: [ts, wts, stage, dtypes, trans, algo, tensorop]
-        self.simt_params = [
-            # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
-            # *gen_gemm_params((64, 64, 16),
-            #                  (32, 32, 16), 2, "f16,f16,f16,f16,f16",
-            #                  kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params((64, 64, 32),
-            #                  (32, 32, 32), 2, "s8,s8,s32,s32,s32",
-            #                  kernel.GemmAlgo.SimtDP4A, None),
-            *gen_gemm_params((128, 128, 8),
-                             (32, 64, 8), 2, "f32,f32,f32,f32,f32",
-                             kernel.GemmAlgo.Simt, None),
-            *gen_gemm_params((128, 128, 8),
-                             (32, 64, 8), 2, "f32,f32,f32,f32,f32",
-                             kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAB, splitk_serial=True),
+                # *gen_gemm_params((32, 128, 16),
+                #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
+                #                  kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params((64, 128, 32),
+                #                  (32, 64, 32), 2, "s8,s8,s32,s32,s32",
+                #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC),
+                # *gen_gemm_params((32, 32, 32),
+                #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
+                #                  kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
+                # *gen_gemm_params((128, 64, 32),
+                #                  (64, 32, 32), 2, "s8,s8,s32,s32,s32",
+                #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
 
-            # *gen_gemm_params((32, 128, 16),
-            #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
-            #                  kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params((64, 128, 32),
-            #                  (32, 64, 32), 2, "s8,s8,s32,s32,s32",
-            #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC),
-            # *gen_gemm_params((32, 32, 32),
-            #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
-            #                  kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
-            # *gen_gemm_params((128, 64, 32),
-            #                  (64, 32, 32), 2, "s8,s8,s32,s32,s32",
-            #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
+                # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((8, 64, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((64, 128, 8), (32, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
+            ]  # type: List[GemmAlgoParams]
+            self.volta_params = [
+                # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params((64, 64, 32),
+                #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
+                #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+            ]
+            self.turing_params = [
+                # *gen_gemm_params(
+                #     (64, 64, 32),
+                #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
+                #     TensorOpParams((16, 8, 8))),
+                # interleave = 4:
+                # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
 
-            # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((8, 64, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((64, 128, 8), (32, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
-        ]  # type: List[GemmAlgoParams]
-        self.volta_params = [
-            # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params((64, 64, 32),
-            #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
-            #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-        ]
-        self.turing_params = [
-            # *gen_gemm_params(
-            #     (64, 64, 32),
-            #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
-            #     TensorOpParams((16, 8, 8))),
-            # interleave = 4:
-            # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
+                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
 
-            # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
+                # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
+            ]
+            # self.turing_s8_params = [
+            #     *gen_gemm_params((128, 128, 64), (64, 64, 64), 2, "s8,s8,s8,s32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+            #     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+            #     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+            #     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+            #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+            #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
+            # ]
+            # print(self.simt_params[0].dtype_b)
+            # raise NotImplementedError
+        else:
+            self.simt_params = [
+                *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
+                *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
+                *gen_shuffle_params((128, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
+                *gen_shuffle_params((128, 128, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
+                *gen_shuffle_params((64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
+                # *gen_shuffle_params((128, 128, 8), (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((128, 128, 8), (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((64, 128, 8), (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((64, 128, 8), (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((128, 64, 8), (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((128, 64, 8), (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((64, 64, 8), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((32, 64, 16), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((64, 32, 16), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                # *gen_shuffle_params((32, 32, 32), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
 
-            # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
-        ]
-        # self.turing_s8_params = [
-        #     *gen_gemm_params((128, 128, 64), (64, 64, 64), 2, "s8,s8,s8,s32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
-        # ]
-        # print(self.simt_params[0].dtype_b)
-        # raise NotImplementedError
+                # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
+            ]  # type: List[GemmAlgoParams]
+            self.volta_params = [
+                # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params((64, 64, 32),
+                #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
+                #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+            ]
+            self.turing_params = [
+                # *gen_gemm_params(
+                #     (64, 64, 32),
+                #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
+                #     TensorOpParams((16, 8, 8))),
+                # interleave = 4:
+                # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
+
+                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
+
+                # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
+            ]
+
         self.all_params = self.simt_params + self.volta_params + self.turing_params
         self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
         # self.add_impl_only_dependency(self.shuffle_matmul_ref, SpconvKernel)
@@ -381,223 +662,311 @@ class GemmMainUnitTest(pccm.Class):
     #     """)
     #     return code 
 
+    def matmul_select_helper(self, code: FunctionCode):
+        """if based algorithm selector
+        """
+        tabc_to_kers = codeops.group_by(lambda x: (x.trans_a, x.trans_b, x.trans_c), self.all_kernels)
+        func: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (x.warp_tile_shape[0], x.warp_tile_shape[1], x.warp_tile_shape[2])
+        func2: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (x.num_stage, x.dtype_acc.tv_dtype, x.dtype_comp.tv_dtype)
+        func3: Callable[[kernel.GemmKernel], Optional[Tuple[int, int, int]]] = lambda x: (x.tensorop[0], x.tensorop[1], x.tensorop[2]) if x.tensorop is not None else None
+
+        for tabc, tabc_kers in tabc_to_kers.items():
+            if_tests = [
+                f"algo_desp.trans_a() == {pccm.boolean(tabc[0])}",
+                f"algo_desp.trans_b() == {pccm.boolean(tabc[1])}",
+                f"algo_desp.trans_c() == {pccm.boolean(tabc[2])}",
+            ]
+            with code.if_(" && ".join(if_tests)):
+                ts_to_kers = codeops.group_by(lambda x: (x.tile_shape[0], x.tile_shape[1], x.tile_shape[2]), tabc_kers)
+                for ts, ts_kers in ts_to_kers.items():
+                    with code.if_(f"algo_desp.tile_shape == std::array<int, 3>{{{ts[0]}, {ts[1]}, {ts[2]}}}"):
+                        wts_to_kers = codeops.group_by(func, ts_kers)
+                        for wts, wts_kers in wts_to_kers.items():
+                            with code.if_(f"algo_desp.warp_tile_shape == std::array<int, 3>{{{wts[0]}, {wts[1]}, {wts[2]}}}"):
+                                saccomp_to_kers = codeops.group_by(func2, wts_kers)
+                                for saccomp, saccomp_kers in saccomp_to_kers.items():
+                                    saccomp_if_tests = [
+                                        f"algo_desp.num_stage == {saccomp[0]}",
+                                        f"algo_desp.dacc == {saccomp[1]}",
+                                        f"algo_desp.dcomp == {saccomp[2]}",
+                                    ]
+                                    with code.if_(" && ".join(saccomp_if_tests)):
+                                        spks_to_kers = codeops.group_by(lambda k: k.splitk_serial, saccomp_kers)
+                                        for spks, spks_kers in spks_to_kers.items():
+                                            spks_if_test = f"({pccm.boolean(spks)} && params.split_k_slices > 1) || (!{pccm.boolean(spks)} && params.split_k_slices == 1)"
+                                            with code.if_(spks_if_test):
+                                                top_to_kers = codeops.group_by(func3, spks_kers)
+                                                for top, top_kers in top_to_kers.items():
+                                                    algo_to_kers = codeops.group_by(lambda x: (x.algo, x.shuffle_stride), top_kers)
+
+                                                    if top is None:
+                                                        for (algo, shuf), algo_kers in algo_to_kers.items():
+                                                            assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
+                                                            with code.if_(f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""):
+                                                                dabc_to_kers = codeops.group_by(lambda x: (x.dtype_a.tv_dtype, x.dtype_b.tv_dtype, x.dtype_c.tv_dtype), algo_kers)
+                                                                for dabc, dabc_kers in dabc_to_kers.items():
+                                                                    assert len(dabc_kers) == 1, "find multiple kernels for one configuration"
+                                                                    dtype_if_tests = [ 
+                                                                        f"algo_desp.dtype_a == tv::DType({dabc[0]})",
+                                                                        f"algo_desp.dtype_b == tv::DType({dabc[1]})",
+                                                                        f"algo_desp.dtype_c == tv::DType({dabc[2]})",
+                                                                    ]
+                                                                    with code.if_(" && ".join(dtype_if_tests)):
+                                                                        yield dabc_kers[0]
+                                                    else:
+                                                        with code.if_(f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"):
+                                                            for (algo, shuf), algo_kers in algo_to_kers.items():
+                                                                assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
+                                                                with code.if_(f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""):
+                                                                    dabc_to_kers = codeops.group_by(lambda x: (x.dtype_a.tv_dtype, x.dtype_b.tv_dtype, x.dtype_c.tv_dtype), algo_kers)
+                                                                    for dabc, dabc_kers in dabc_to_kers.items():
+                                                                        assert len(dabc_kers) == 1, "find multiple kernels for one configuration"
+                                                                        dtype_if_tests = [ 
+                                                                            f"algo_desp.dtype_a == tv::DType({dabc[0]})",
+                                                                            f"algo_desp.dtype_b == tv::DType({dabc[1]})",
+                                                                            f"algo_desp.dtype_c == tv::DType({dabc[2]})",
+                                                                        ]
+                                                                        with code.if_(" && ".join(dtype_if_tests)):
+                                                                            yield dabc_kers[0]
+
 
     @pccm.pybind.mark
     @pccm.cuda.static_function
-    def matmul(self):
+    def get_all_algo_desp(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        std::vector<GemmAlgoDesp> desps;
+        """)
+        for ker in self.all_kernels:
+            code.raw(f"""
+            GemmAlgoDesp desp;
+            desp.dtype_a = {ker.dtype_a.tv_dtype};
+            desp.dtype_b = {ker.dtype_b.tv_dtype};
+            desp.dtype_c = {ker.dtype_c.tv_dtype};
+            desp.dacc = {ker.dtype_acc.tv_dtype};
+            desp.dcomp = {ker.dtype_comp.tv_dtype};
+
+            desp.trans_a_set({pccm.boolean(ker.trans_a)});
+            desp.trans_b_set({pccm.boolean(ker.trans_b)});
+            desp.trans_c_set({pccm.boolean(ker.trans_c)});
+            desp.tile_shape = {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}};
+            desp.warp_tile_shape = {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}};
+            """)
+            if ker.tensorop is not None:
+                code.raw(f"desp.tensorop = {{{ker.tensorop[0]}, {ker.tensorop[1]}, {ker.tensorop[2]}}};")
+            else:
+                code.raw(f"desp.tensorop = {{-1, -1, -1}};")
+            code.raw(f"""
+            desp.num_stage = {ker.num_stage};
+            desp.algo = {ker.algo.value};
+            desp.split_k_serial_set({pccm.boolean(ker.splitk_serial)});
+            desp.split_k_parallel_set({pccm.boolean(ker.splitk_parallel)});
+            desp.shuffle_type = {ker.shuffle_stride.value};
+
+            desps.push_back(desp)
+            """)
+        code.raw(f"""
+        return desps;
+        """)
+        return code.ret("std::vector<GemmAlgoDesp>")
+
+    @pccm.pybind.mark
+    @pccm.cuda.static_function(name="matmul2")
+    def matmul2(self):
         code = pccm.FunctionCode()
         for p, ker in zip(self.all_params, self.all_kernels):
             code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params, "GemmParams" + ker.get_algo_name())
             code.add_param_class( ker.get_algo_name(), ker, "Gemm" + ker.get_algo_name())
-
-        code.arg("a,b,c", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
-        code.arg("ta,tb,tc", "bool", pyanno="bool")
-        code.arg("ts,wts", "std::array<int, 3>", pyanno="Tuple[int, int, int]")
-        code.arg("num_stage", "int", pyanno="int")
-        code.arg("dacc,dcomp", "int", pyanno="int")
-        code.arg("algo", "std::string", pyanno="str")
-        code.arg("tensorop", "std::array<int, 3>", "std::array<int, 3>{}")
-        code.arg("split_k_slices", "int", "1")
-        code.arg("workspace", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        # for spatial sparse convolution (split kernel algorithm)
-        code.arg("shuffle_type", "std::string", f"\"{ShuffleStrideType.NoShuffle.value}\"", pyanno="str")
-        code.arg("a_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("b_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("c_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("params", "GemmParams", pyanno="GemmParams")
         # TODO spatial sparse conv (implicit gemm)
         code.raw(f"""
+        params.check_valid();
+        auto& algo_desp = params.algo_desp;
         bool found = false;
+        auto dacc = tv::DType(algo_desp.dacc);
+        auto dcomp = tv::DType(algo_desp.dcomp);
+        auto a = params.a;
+        auto b = params.b;
+        auto c = params.c;
+        auto ta = algo_desp.trans_a();
+        auto tb = algo_desp.trans_b();
+        auto tc = algo_desp.trans_c();
+
+        tv::Tensor a_ten = a;
+        tv::Tensor b_ten = b;
+        tv::Tensor c_ten = c;
+        auto trans_a = ta;
+        auto trans_b = tb;
+        auto trans_c = tc;
+        if (tc) {{
+            trans_a = !trans_a;
+            trans_b = !trans_b;
+            std::swap(trans_a, trans_b);
+            std::swap(a_ten, b_ten);
+        }}
+        int split_k_slices = params.split_k_slices;
+        auto workspace = params.workspace;
+        auto a_inds = params.a_inds;
+        auto c_inds = params.c_inds;
+        auto b_inds = params.b_inds;
+
         """)
-        for p, ker in zip(self.all_params, self.all_kernels):
-            if_tests = [
-                f"tv::type_v<{p.dtype_a}> == a.dtype()",
-                f"tv::type_v<{p.dtype_b}> == b.dtype()",
-                f"tv::type_v<{p.dtype_c}> == c.dtype()",
-                f"{pccm.boolean(p.trans_a)} == ta",
-                f"{pccm.boolean(p.trans_b)} == tb",
-                f"{pccm.boolean(p.trans_c)} == tc",
-                f"std::array<int, 3>{{{code.unpack(list(p.ts))}}} == ts",
-                f"std::array<int, 3>{{{code.unpack(list(p.wts))}}} == wts",
-                f"{p.num_stage} == num_stage",
-                f"{p.dtype_acc.tv_dtype} == dacc",
-                f"{p.dtype_comp.tv_dtype} == dcomp",
-                f"\"{p.algo.value}\" == algo",
-                f"\"{p.shuffle_stride.value}\" == shuffle_type",
-
-            ]
-            if p.tensorop is not None:
-                if_tests.append(
-                    f"std::array<int, 3>{{{code.unpack(list(p.tensorop.shape))}}} == tensorop"
-                )
-            if_test = " && ".join(if_tests)
+        for ker in self.matmul_select_helper(code):
             param_type_str = "GemmParams" + ker.get_algo_name()
-            """ker_groups = group_by(...)
-            for key, kers in ker_groups:
-                
-            """
-            with code.if_(if_test):
-                if not p.support_splitk():
-                    code.raw(f"""
-                    TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
-                    """)
+            code.raw(f"""
+            found = true;
+            """)
+            if not ker.support_splitk():
                 code.raw(f"""
-                found = true;
-                tv::Tensor a_ten = a;
-                tv::Tensor b_ten = b;
-                tv::Tensor c_ten = c;
-                auto trans_a = ta;
-                auto trans_b = tb;
-                auto trans_c = tc;
-
-                if (tc) {{
-                    trans_a = !trans_a;
-                    trans_b = !trans_b;
-                    std::swap(trans_a, trans_b);
-                    std::swap(a_ten, b_ten);
+                if (split_k_slices > 1){{
+                    TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
                 }}
                 """)
+            code.raw(f"""
+            """)
+            if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
+                code.raw(f"""
+                TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
+                auto m = a_inds.dim(0);
+                auto k = a_ten.dim(int(!trans_a));
+                auto k2 = b_ten.dim(int(trans_b));
+                auto n = b_ten.dim(int(!trans_b) );
+                """)
+            elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
+                code.raw(f"""
+                TV_ASSERT_RT_ERR(trans_a && !trans_b, "shuffle AB must be nt, i.e. backward weight");
+                auto m = a_ten.dim(int(trans_a));
+                auto k = a_inds.dim(0);
+                auto k2 = b_inds.dim(0);
+                auto n = b_ten.dim(int(!trans_b) );
+                """)
+            else:
+                code.raw(f"""
+                auto m = a_ten.dim(int(trans_a));
+                auto k = a_ten.dim(int(!trans_a));
+                auto k2 = b_ten.dim(int(trans_b));
+                auto n = b_ten.dim(int(!trans_b) );
+                """)
+
+            code.raw(f"""
+            TV_ASSERT_INVALID_ARG(k == k2, "error");
+            TV_ASSERT_INVALID_ARG(a_ten.dim(1) % {ker.input_spec.input_iter_a.sub_tile_shape[1]} == 0, "error");
+            TV_ASSERT_INVALID_ARG(b_ten.dim(1) % {ker.input_spec.input_iter_b.sub_tile_shape[1]} == 0, "error");
+
+
+            int workspace_size = 0;
+            auto logical_tile_count = {param_type_str}::get_logical_tile_count(m, n, k, split_k_slices);
+            if (split_k_slices > 1){{
+                if ({pccm.boolean(ker.splitk_serial)}){{
+                    workspace_size = sizeof(int) * logical_tile_count.x * logical_tile_count.y;
+                }} else if ({pccm.boolean(ker.splitk_parallel)}){{
+                    workspace_size = {ker.dtype_acc.itemsize()} * m * n * logical_tile_count.z;
+                }} else{{
+                    TV_THROW_INVALID_ARG("not impemented");
+                }}
+            }}
+            if (workspace_size > 0){{
+                if (!workspace.empty()){{
+                    TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
+                        "workspace at least", workspace_size, "bytes.");
+                }}else{{
+                    workspace = tv::zeros({{workspace_size}}, tv::uint8, 0);
+                }}
+            }}
+            """)
+            if CUTLASS_MODE:
+                code.raw(f"""
+                CutlassGemm::ThreadblockSwizzle threadblock_swizzle;
+
+                cutlass::gemm::GemmCoord grid_shape = threadblock_swizzle.get_tiled_shape(
+                    {{m, n, k}}, 
+                    {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}},
+                    1);
+
+                CutlassGemm::GemmKernel::Params params{{
+                    {{m, n, k}},
+                    grid_shape,
+                    {{a_ten.data_ptr<{ker.dtype_a}>(), a_ten.size(1)}},
+                    {{b_ten.data_ptr<{ker.dtype_b}>(), b_ten.size(1)}},
+                    {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.size(1)}},
+                    {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.size(1)}},
+                }};
+                dim3 grid = threadblock_swizzle.get_grid_shape(params.grid_tiled_shape);
+                tv::cuda::Launch launcher(grid, dim3({ker.num_threads}, 1, 1),
+                                            {ker.smem_size});
+                cudaError_t result;
+                if ({ker.smem_size} >= (48 << 10)) {{
+                    result = cudaFuncSetAttribute({ker.get_algo_name()}::gemm_kernel,
+                                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                    {ker.smem_size});
+                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                    result = cudaFuncSetAttribute(
+                        {ker.get_algo_name()}::gemm_kernel,
+                        cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                }}
+
+                launcher({ker.get_algo_name()}::gemm_kernel, params);
+                """)
+            else:
                 if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
                     code.raw(f"""
-                    TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
-                    auto m = a_inds.dim(0);
-                    auto k = a_ten.dim(int(!trans_a));
-                    auto k2 = b_ten.dim(int(trans_b));
-                    auto n = b_ten.dim(int(!trans_b) );
+                    TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "error");
+                    {param_type_str} params(
+                        m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_inds.data_ptr<const int>(), c_inds.data_ptr<const int>(),
+                        {ker.dtype_a}(1.0), {ker.dtype_b}(1.0), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
                 elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
                     code.raw(f"""
-                    TV_ASSERT_RT_ERR(trans_a && !trans_b, "shuffle AB must be nt, i.e. backward weight");
-                    auto m = a_ten.dim(int(trans_a));
-                    auto k = a_inds.dim(0);
-                    auto k2 = b_inds.dim(0);
-                    auto n = b_ten.dim(int(!trans_b) );
+                    TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
+                    {param_type_str} params(
+                        m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(),
+                        {ker.dtype_comp}(1.0), {ker.dtype_comp}(1.0), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
                 else:
                     code.raw(f"""
-                    auto m = a_ten.dim(int(trans_a));
-                    auto k = a_ten.dim(int(!trans_a));
-                    auto k2 = b_ten.dim(int(trans_b));
-                    auto n = b_ten.dim(int(!trans_b) );
+                    {param_type_str} params(
+                        m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                        {ker.dtype_comp}(1.0), {ker.dtype_comp}(1.0), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
 
                 code.raw(f"""
-                TV_ASSERT_INVALID_ARG(k == k2, "error");
-                TV_ASSERT_INVALID_ARG(a_ten.dim(1) % {ker.input_spec.input_iter_a.sub_tile_shape[1]} == 0, "error");
-                TV_ASSERT_INVALID_ARG(b_ten.dim(1) % {ker.input_spec.input_iter_b.sub_tile_shape[1]} == 0, "error");
-
-
-                int workspace_size = 0;
-                auto logical_tile_count = {param_type_str}::get_logical_tile_count(m, n, k, split_k_slices);
-                if (split_k_slices > 1){{
-                    if ({pccm.boolean(p.splitk_serial)}){{
-                        workspace_size = sizeof(int) * logical_tile_count.x * logical_tile_count.y;
-                    }} else if ({pccm.boolean(p.splitk_parallel)}){{
-                        workspace_size = {p.dtype_acc.itemsize()} * m * n * logical_tile_count.z;
-                    }} else{{
-                        TV_THROW_INVALID_ARG("not impemented");
-                    }}
+                tv::cuda::Launch launcher(params.grid_dims, dim3({ker.num_threads}),
+                                            {ker.smem_size});
+                cudaError_t result;
+                if ({ker.smem_size} >= (48 << 10)) {{
+                    result = cudaFuncSetAttribute({ker.get_algo_name()}::gemm_kernel,
+                                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                    {ker.smem_size});
+                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                    result = cudaFuncSetAttribute(
+                        {ker.get_algo_name()}::gemm_kernel,
+                        cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
                 }}
-                if (workspace_size > 0){{
-                    if (!workspace.empty()){{
-                        TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
-                            "workspace at least", workspace_size, "bytes.");
-                    }}else{{
-                        workspace = tv::zeros({{workspace_size}}, tv::uint8, 0);
-                    }}
-                }}
+                auto timer = tv::CudaContextTimer<>();
+                launcher({ker.get_algo_name()}::gemm_kernel, params);
+                cudaFuncAttributes attr;
+                checkCudaErrors(
+                    cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::gemm_kernel));
+                tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
                 """)
-                if CUTLASS_MODE:
-                    code.raw(f"""
-                    CutlassGemm::ThreadblockSwizzle threadblock_swizzle;
-
-                    cutlass::gemm::GemmCoord grid_shape = threadblock_swizzle.get_tiled_shape(
-                        {{m, n, k}}, 
-                        {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}},
-                        1);
-
-                    CutlassGemm::GemmKernel::Params params{{
-                        {{m, n, k}},
-                        grid_shape,
-                        {{a_ten.data_ptr<{ker.dtype_a}>(), a_ten.size(1)}},
-                        {{b_ten.data_ptr<{ker.dtype_b}>(), b_ten.size(1)}},
-                        {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.size(1)}},
-                        {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.size(1)}},
-                    }};
-                    dim3 grid = threadblock_swizzle.get_grid_shape(params.grid_tiled_shape);
-                    tv::cuda::Launch launcher(grid, dim3({ker.num_threads}, 1, 1),
-                                                {ker.smem_size});
-                    cudaError_t result;
-                    if ({ker.smem_size} >= (48 << 10)) {{
-                        result = cudaFuncSetAttribute({ker.get_algo_name()}::gemm_kernel,
-                                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                                        {ker.smem_size});
-                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
-                        result = cudaFuncSetAttribute(
-                            {ker.get_algo_name()}::gemm_kernel,
-                            cudaFuncAttributePreferredSharedMemoryCarveout, 100);
-                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
-                    }}
-
-                    launcher({ker.get_algo_name()}::gemm_kernel, params);
-                    """)
-                else:
-                    if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
-                        code.raw(f"""
-                        TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "error");
-                        {param_type_str} params(
-                            m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
-                            c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                            a_inds.data_ptr<const int>(), c_inds.data_ptr<const int>(),
-                            {p.dtype_a}(1.0), {p.dtype_b}(1.0), split_k_slices{", workspace.raw_data()" if p.support_splitk() else ""});
-                        """)
-                    elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
-                        code.raw(f"""
-                        TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
-                        {param_type_str} params(
-                            m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
-                            c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                            a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(),
-                            {p.dtype_comp}(1.0), {p.dtype_comp}(1.0), split_k_slices{", workspace.raw_data()" if p.support_splitk() else ""});
-                        """)
-                    else:
-                        code.raw(f"""
-                        {param_type_str} params(
-                            m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
-                            c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                            {p.dtype_comp}(1.0), {p.dtype_comp}(1.0), split_k_slices{", workspace.raw_data()" if p.support_splitk() else ""});
-                        """)
-
-                    code.raw(f"""
-                    tv::cuda::Launch launcher(params.grid_dims, dim3({ker.num_threads}),
-                                                {ker.smem_size});
-                    cudaError_t result;
-                    if ({ker.smem_size} >= (48 << 10)) {{
-                        result = cudaFuncSetAttribute({ker.get_algo_name()}::gemm_kernel,
-                                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                                        {ker.smem_size});
-                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
-                        result = cudaFuncSetAttribute(
-                            {ker.get_algo_name()}::gemm_kernel,
-                            cudaFuncAttributePreferredSharedMemoryCarveout, 100);
-                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
-                    }}
-                    auto timer = tv::CudaContextTimer<>();
-                    launcher({ker.get_algo_name()}::gemm_kernel, params);
-                    cudaFuncAttributes attr;
-                    checkCudaErrors(
-                        cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::gemm_kernel));
-                    tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
-                    """)
-
         code.raw("""
         if (!found){
-            TV_THROW_INVALID_ARG("Can't Found Algorithm for params:", ts, wts, num_stage, tv::dtype_str(a.dtype()), 
+            TV_THROW_INVALID_ARG("Can't Found Algorithm for params:", algo_desp.tile_shape, algo_desp.warp_tile_shape, 
+                algo_desp.num_stage, tv::dtype_str(a.dtype()), 
                 tv::dtype_str(b.dtype()), tv::dtype_str(c.dtype()), tv::dtype_str(dacc), 
-                tv::dtype_str(dcomp), ta, tb, tc, algo, tensorop);
+                tv::dtype_str(dcomp), ta, tb, tc, algo_desp.algo, algo_desp.tensorop);
         }
         """)
         return code
-    
+
+
     # @pccm.expose_main.mark 
     # @pccm.cuda.static_function
     def main_function(self):

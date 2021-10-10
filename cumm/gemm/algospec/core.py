@@ -23,3 +23,7 @@ class TensorOpParams(object):
 
     def to_string(self):
         return f"{self.shape[0]}{self.shape[1]}{self.shape[2]}"
+
+
+    def __getitem__(self, val: int):
+        return self.shape[val]

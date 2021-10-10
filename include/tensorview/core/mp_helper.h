@@ -1,3 +1,5 @@
+// disable weird warning when use alignas(0)
+#pragma GCC diagnostic ignored "-Wattributes"
 #ifndef MP_HELPER_H_
 #define MP_HELPER_H_
 #include "defs.h"
@@ -74,9 +76,9 @@ template <int... I>
 using mp_list_int = mp_list<std::integral_constant<int, I>...>;
 
 namespace detail {
-
+#ifndef __CUDACC_RTC__
 template <class... Ts, class F>
-constexpr F TV_HOST_DEVICE_INLINE mp_for_each_impl(mp_list<Ts...>, F &&f) {
+constexpr F mp_for_each_impl(mp_list<Ts...>, F &&f) {
   using A = int[sizeof...(Ts)];
   return (void)A{((void)f(Ts()), 0)...}, std::forward<F>(f);
 
@@ -85,9 +87,10 @@ constexpr F TV_HOST_DEVICE_INLINE mp_for_each_impl(mp_list<Ts...>, F &&f) {
 }
 
 template <class F>
-TV_HOST_DEVICE_INLINE constexpr F mp_for_each_impl(mp_list<>, F &&f) {
+constexpr F mp_for_each_impl(mp_list<>, F &&f) {
   return std::forward<F>(f);
 }
+#endif
 } // namespace detail
 
 template <class... T>
@@ -136,12 +139,12 @@ template <class A, template <class...> class B>
 constexpr auto mp_rename_v = detail::mp_rename_v_impl<A, B>::value;
 
 template <class L> using mp_size = mp_rename<L, mp_length>;
-
+#ifndef __CUDACC_RTC__
 template <class L, class F>
-TV_HOST_DEVICE_INLINE constexpr F mp_for_each(F &&f) {
+constexpr F mp_for_each(F &&f) {
   return detail::mp_for_each_impl(mp_rename<L, mp_list>(), std::forward<F>(f));
 }
-
+#endif
 template <unsigned N, unsigned... Ns> struct mp_prod_int {
   static constexpr unsigned value = N * mp_prod_int<Ns...>::value;
 };

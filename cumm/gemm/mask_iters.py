@@ -4,6 +4,7 @@ import numpy as np
 from typing import List, Optional, Union
 
 from pccm.targets.cuda_ptx import RegDType
+from cumm import cudasim
 from cumm.gemm import constants, layout, thread_map, bases
 from cumm.common import TensorView, GemmBasic, GemmBasicKernel
 from cumm.core_cc.csrc.arrayref import ArrayPtr
@@ -334,7 +335,6 @@ class SmemTileIterator(bases.GemmSmemIterator):
         if transposed_input:
             self.tile_shape_input_iter = self.tile_shape[::-1]
             self.access_shape_input = self.access_shape[::-1]
-
         else:
             self.tile_shape_input_iter = self.tile_shape
             self.access_shape_input = self.access_shape
@@ -614,7 +614,7 @@ class SmemTileIteratorV2(bases.GemmSmemIterator):
         delta = seq(delta[0] // self.interleave, delta[1] * self.interleave)
         self.thread_access_shape = access_shape
         self.iteration_delta = delta
-        # print(self.thread_access_shape, self.iteration_delta)
+        # print("self.thread_access_shape", self.thread_access_shape, self.iteration_delta)
         element_count = self.thread_access_shape.prod(
         ) * sub_tile_shape.prod()
 
@@ -630,7 +630,7 @@ class SmemTileIteratorV2(bases.GemmSmemIterator):
         self.smem_shape = smem_shape
         self.smem_vis_shape = seq(smem_shape[0] // self.interleave, smem_shape[1] * self.interleave)
         self.static_stride = smem_shape[1]
-        self.static_inc_strided = self.static_stride * self.iteration_delta[0] * self.dtype.itemsize()
+        self.static_inc_strided = self.static_stride * self.interleave * self.iteration_delta[0] * self.dtype.itemsize()
         if self.advance_axis == 1:
             self.static_inc_advance = self.tile_shape[1] * self.dtype.itemsize()
         else:
@@ -698,9 +698,10 @@ class SmemTileIteratorV2(bases.GemmSmemIterator):
             offset = (thread_offset[1] // self.interleave ) * stride * self.interleave + thread_offset[0] * self.interleave
         else:
             offset = (thread_offset[0] // self.interleave ) * stride * self.interleave + thread_offset[1] * self.interleave
+
         # print(offset)
         new_obj.pointer_ = (ptr + offset).change_access_byte_size(1)
-        new_obj.inc_strided_ = stride * new_obj.iteration_delta[strided] * (
+        new_obj.inc_strided_ = stride * self.interleave * new_obj.iteration_delta[strided] * (
             new_obj.dtype.itemsize())
         if new_obj.advance_axis == contig:
             new_obj.inc_advance_ = new_obj.tile_shape[contig] * (
@@ -822,14 +823,12 @@ class SmemTileIteratorV2(bases.GemmSmemIterator):
                 self.sub_tile_shape.prod())
             for c in range(self.thread_access_shape[contig]):
                 idx = c + s * self.thread_access_shape[contig]
-                await checkers.smem_bank_conflicit_check(
-                    access_ptr +
-                    c * self.iteration_delta[contig] // self.element_per_acc,
-                    0)
-                access_ptr[c * self.iteration_delta[contig] //
-                           self.element_per_acc] = frag_ptr[idx]
                 access_offset = c * self.iteration_delta[
                     contig] // self.element_per_acc
+
+                await checkers.smem_bank_conflicit_check(
+                    access_ptr + access_offset, 0)
+                access_ptr[access_offset] = frag_ptr[idx]
                 ptr_addrs[idx * frag_ptr.access_size:(idx + 1) *
                           frag_ptr.access_size] = np.arange(
                               (access_ptr + access_offset).offset,
@@ -1009,7 +1008,6 @@ class MaskTileIterator(bases.GemmInputIterator):
         self.add_member("residue_offset_", "int")
         self.add_member("is_residue_tile_", "bool")
         # self.add_member("residue_tile_idx_", "int")
-        print(self.shuffle_in_stride, self.advance_axis)
         self.add_member("predicates_",
                         str(dtypes.uint32),
                         array=f"[{self.num_pred_32}]")
@@ -1592,8 +1590,8 @@ class MaskTileIterator(bases.GemmInputIterator):
             for (int s = 0; s < {self.thread_access_shape[strided]}; ++s) {{
                 TV_PRAGMA_UNROLL
                 for (int c = 0; c < {self.thread_access_shape[contig]}; ++c) {{
-                    int idx = s * {self.thread_tensor_stride[0]} + c * {self.thread_tensor_stride[1]};
-                    t.transform(frag.data() + idx, frag.data() + idx);
+                    int idx = s * {self.thread_access_shape[contig]} + c;
+                    t.transform(frag.data() + idx * {self.sub_tile_shape.prod()}, frag.data() + idx * {self.sub_tile_shape.prod()});
                 }}
             }}
             """)
@@ -1637,18 +1635,18 @@ class MaskTileIterator(bases.GemmInputIterator):
             if (s != self.thread_access_shape[strided] - 1):
                 self.inc_stride_python()
         self.end_iter_python()
+        subtile_prod = self.sub_tile_shape.prod()
         if self.transpose_load:
             for s in range(self.thread_access_shape[strided]):
                 for c in range(self.thread_access_shape[contig]):
-                    idx = s * self.thread_tensor_stride[
-                        0] + c * self.thread_tensor_stride[1]
+                    idx = s * self.thread_access_shape[contig] + c
                     data = frag.data.numpy_view(
-                    )[idx:idx +
-                      self.sub_tile_shape.prod()].reshape(*self.sub_tile_shape)
+                    )[idx * subtile_prod:(idx + 1) *
+                      subtile_prod].reshape(*self.sub_tile_shape)
                     data_t = np.transpose(data, (1, 0))
                     frag.data.numpy_view(
-                    )[idx:idx +
-                      self.sub_tile_shape.prod()] = data_t.reshape(-1)
+                    )[idx * subtile_prod:(idx + 1) *
+                      subtile_prod] = data_t.reshape(-1)
         return ptr_addrs 
 
     @pccm.cuda.member_function(device=True, forceinline=True)

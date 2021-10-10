@@ -139,7 +139,6 @@ class GemmParams(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor
     def ctor(self):
-        print(self.tile_shape)
         code = pccm.FunctionCode()
         if CUTLASS_MODE:
             code.raw(f"""
@@ -375,7 +374,6 @@ class GemmKernel(pccm.ParameterizedClass):
         self.add_param_class("mma", self.mma_container, "Mma")
         self.add_param_class("output", self.output, "Output")
 
-
     def get_algo_name(self):
         res = f"{self.algo.value}_{self.dtype_a.shortcut()}{self.dtype_b.shortcut()}{self.dtype_c.shortcut()}"
         res += f"{self.dtype_acc.shortcut()}{self.dtype_comp.shortcut()}"
@@ -391,9 +389,20 @@ class GemmKernel(pccm.ParameterizedClass):
         res += f"_{self.num_stage}"
         if self.shuffle_stride != ShuffleStrideType.NoShuffle:
             res += f"_{self.shuffle_stride.value}"
+        if self.splitk_serial:
+            res += "1"
+        else:
+            res += "0"
+        if self.splitk_parallel:
+            res += "1"
+        else:
+            res += "0"
         return res
+        
+    def support_splitk(self):
+        return self.splitk_serial or self.splitk_parallel
 
-    @pccm.cuda.cuda_global_function(inline=True)
+    @pccm.cuda.cuda_global_function# (inline=True)
     def gemm_kernel(self):
         code = pccm.FunctionCode()
         if CUTLASS_MODE:
@@ -783,7 +792,8 @@ class GemmKernel(pccm.ParameterizedClass):
         await cudasim.syncthreads()
         if cudasim.threadIdx().x == 0:
             acc =  accumulators.data.numpy_view()
-            cudasim.debug_print("accumulators",acc.mean(), acc.max(), acc.min())
+            cudasim.debug_print("accumulators",acc.mean(), acc.max(), acc.min(), acc.shape)
+            cudasim.debug_print("accumulators",acc.reshape(8, 8)[:4, :4])
 
         output_op = self.output_spec.output_op.python_ctor(params.alpha, params.beta)
         
