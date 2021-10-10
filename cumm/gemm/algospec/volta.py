@@ -253,8 +253,11 @@ class OutputVolta(bases.Output):
                                                     self.smem_part_dilation,
                                                     self.warp_count,
                                                     output_op_count)
+        # self.shared_mem_alignment = dtype_acc.bitsize(
+        # ) * self.out_warp_tile_iter.element_per_acc // 8
         self.shared_mem_alignment = dtype_acc.bitsize(
         ) * self.out_warp_tile_iter.element_per_acc // 8
+        assert self.shared_mem_alignment == 8
         self.out_smem_loader = out_iters.OutSmemLoader(
             dtype_acc, self.out_smem_tmap, output_op_count,
             tile_shape[1] + self.out_smem_padding[1],

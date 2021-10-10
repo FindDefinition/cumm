@@ -191,7 +191,6 @@ class OutSmemLoader(GemmOutSmemLoader):
         element_count = self.iterations.prod() * self.element_per_acc_output
         assert element_count != 0, str(tmap.iterations)
         num_sub_access = min(128 // dtype.bitsize(), self.element_per_acc_output)
-
         self.loads_per_access = self.element_per_acc_output // num_sub_access
         self.num_sub_access = num_sub_access
 

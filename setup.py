@@ -154,6 +154,7 @@ else:
     }
     from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind
+    print("DEBUG0")
     ext_modules: List[Extension] = [
         PCCMExtension([ArrayPtr(), TensorViewBind()],
                       "cumm/core_cc",

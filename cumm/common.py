@@ -144,6 +144,7 @@ class CUDALibs(pccm.Class):
         super().__init__()
         gpu_arch_flags = _get_cuda_arch_flags()
         if compat.InWindows:
+            print("DEBUG1")
             nvcc_version = subprocess.check_output(["nvcc", "--version"
                                                     ]).decode("utf-8").strip()
             nvcc_version_str = nvcc_version.split("\n")[3]

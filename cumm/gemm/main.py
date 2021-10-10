@@ -572,12 +572,12 @@ class GemmMainUnitTest(pccm.Class):
                 # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
             ]  # type: List[GemmAlgoParams]
             self.volta_params = [
-                *gen_shuffle_params((64, 64, 32), (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                *gen_shuffle_params((128, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                *gen_shuffle_params((128, 256, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                *gen_shuffle_params((256, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                *gen_shuffle_params((128, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_shuffle_params((128, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_shuffle_params((128, 256, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_shuffle_params((256, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                # *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f32,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
                 # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
                 # *gen_gemm_params((64, 64, 32),
                 #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
