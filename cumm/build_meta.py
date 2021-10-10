@@ -1,1 +1,1 @@
-ENABLE_JIT = False
+ENABLE_JIT = True
