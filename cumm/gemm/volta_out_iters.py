@@ -428,7 +428,7 @@ class OutWarpTileIteratorVolta(bases.GemmOutWarpIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_pointer_offset(self):
         code = pccm.FunctionCode(f"""
-        pointer_ += pointer_offset // {self.element_per_acc};
+        pointer_ += pointer_offset / {self.element_per_acc};
         """)
         code.arg("pointer_offset", f"int")
         return code

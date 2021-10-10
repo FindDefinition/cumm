@@ -42,8 +42,8 @@ jobs:
           $Env:CUMM_ENABLE_JIT = "0"
           nvcc -V
           ninja --version
-          pip install pccm pybind11
-          python setup.py bdist_wheel
+          pip install pccm pybind11 setuptools
+          python setup.py install 
           python -m build --wheel --outdir dist/ .
         shell: powershell
 
