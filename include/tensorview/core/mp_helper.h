@@ -1,5 +1,5 @@
 // disable weird warning when use alignas(0)
-#pragma GCC diagnostic ignored "-Wattributes"
+
 #ifndef MP_HELPER_H_
 #define MP_HELPER_H_
 #include "defs.h"

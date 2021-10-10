@@ -894,7 +894,7 @@ class MaskTileIteratorParams(pccm.ParameterizedClass):
         code = pccm.FunctionCode(f"""
         inc_strided_ = stride * {self.iteration_delta[strided]} * sizeof({self.dtype});
         """)
-        if self.advance_axis != 1:
+        if self.advance_axis == 0:
             code.raw(f"""
             inc_advance_ = {self.tile_shape[strided] * self.dtype.itemsize()} * stride;
 
@@ -1280,7 +1280,7 @@ class MaskTileIterator(bases.GemmInputIterator):
             else:
                 if self.shuffle_in_stride:
                     code.raw(f"""
-                    thread_offset_[0] += {self.tile_shape[0]};
+                    thread_offset_[0] += {self.tile_shape[0]} * num_tile;
                     """)
                 else:
                     code.raw(f"""

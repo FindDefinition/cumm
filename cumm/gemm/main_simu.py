@@ -573,7 +573,6 @@ def _asdv_test_volta_python(coord_input: bool):
                                         vis_res["Output"],
                                         "O", [0, B_bound[3] + 10])
 
-            vis_in_relay(list(fig_per_group.values()))
 
             # print(TestCase().assertAllClose(c_tv, c))
             # print(c_tv.reshape(-1)[:10] -  c.reshape(-1)[:10])
@@ -581,6 +580,7 @@ def _asdv_test_volta_python(coord_input: bool):
 
             print(params.get_algo_name(), a.mean(), np.linalg.norm(c_tv - c),
                 "Time=", duration)
+            # vis_in_relay(list(fig_per_group.values()))
 
 def unittest_python():
     np.random.seed(12315)
@@ -769,6 +769,6 @@ if __name__ == "__main__":
 
     # vis_in_relay([fig])
     # unittest_python()
-    _asdv_test_simt_python(True)
+    # _asdv_test_simt_python(True)
     # _asdv_test_turing_python(True)
-    # _asdv_test_volta_python(True)
+    _asdv_test_volta_python(True)

@@ -280,6 +280,7 @@ class VoltaSmemTileIteratorCongruous(bases.GemmSmemIterator):
         for (int i = 0; i < {self.pointer_count}; ++i) {{
             pointers_[i] += {self.tile_shape_km.prod()} / {self.element_per_acc};
         }}
+        return *this;
         """)
         return code.ret(f"{self.class_name} &")
 

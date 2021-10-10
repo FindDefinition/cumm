@@ -267,7 +267,7 @@ TV_HOST_DEVICE_INLINE unsigned rowArrayIdx(std::vector<TV_GLOBAL_INDEX> &shape,
   return offset;
 }
 
-TV_HOST_DEVICE_INLINE TV_GLOBAL_INDEX
+inline TV_GLOBAL_INDEX
 rowArrayIdx(std::vector<TV_GLOBAL_INDEX> &shape,
             std::vector<TV_GLOBAL_INDEX> &indexes_vec) {
   TV_GLOBAL_INDEX offset = 0;

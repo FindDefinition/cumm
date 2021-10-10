@@ -145,8 +145,8 @@ def _asdv_test_simt_shuffle():
         k = 128
         a_inds = np.arange(m, dtype=np.int32)
         c_inds = np.arange(m, dtype=np.int32)
-        np.random.shuffle(a_inds)
-        np.random.shuffle(c_inds)
+        # np.random.shuffle(a_inds)
+        # np.random.shuffle(c_inds)
 
         if params.dtype_a == dtypes.int8:
             a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
@@ -171,7 +171,7 @@ def _asdv_test_simt_shuffle():
             else:
                 b = np.random.uniform(-1, 1, size=[m, n]).astype(
                     dtypes.get_npdtype(params.dtype_b))
-                c = (a[a_inds].T.astype(np.float32) @ c[c_inds].astype(np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
+                c = (a[a_inds].T.astype(np.float32) @ b[c_inds].astype(np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
         if params.trans_b:
             b = np.ascontiguousarray(b.T)
 
@@ -196,6 +196,8 @@ def _asdv_test_simt_shuffle():
         algo.trans_a =  params.trans_a 
         algo.trans_b =  params.trans_b 
         algo.trans_c =  params.trans_c
+        if params.tensorop is not None:
+            algo.tensorop = params.tensorop.shape
         params_cpp = params_cls()
         params_cpp.algo_desp = algo
         params_cpp.split_k_slices = ksplit
@@ -213,7 +215,7 @@ def _asdv_test_simt_shuffle():
             if params.shuffle_stride == ShuffleStrideType.ShuffleAB:
                 params_cpp.a_inds =  a_inds_tv
                 params_cpp.b_inds =  c_inds_tv
-                b_tv.zero_()
+                c_tv.zero_()
                 lib_object.matmul2(params_cpp)
             else:
                 c_tv.zero_()
@@ -235,12 +237,18 @@ def count_set_bits(v):
     return COUNTBIT_LOOKUP_TABLE[np.reshape(v.view(np.uint8), v.shape + (-1, ))].sum(axis=-1)
 
 
-def _asdv_test_volta():
+def _asdv_test_regular_gemm():
     np.random.seed(12315)
     main_cu = GemmMainUnitTest()
     lib = build_gemm_lib([main_cu])
     lib_object = lib.cumm.gemm.main.GemmMainUnitTest( )
+    params_cls = lib.cumm.gemm.main.GemmParams
+    algo_cls =  lib.cumm.gemm.main.GemmAlgoDesp
+
     for params in main_cu.volta_params:
+        if params.shuffle_stride != ShuffleStrideType.NoShuffle:
+            continue 
+
         m = 256 + 32
         n = 256 + 40
         k = 136
@@ -253,7 +261,7 @@ def _asdv_test_volta():
         a = np.random.uniform(-1, 1, size=[m, k]).astype(dtypes.get_npdtype(params.dtype_a))
         b = np.random.uniform(-1, 1, size=[k, n]).astype(dtypes.get_npdtype(params.dtype_b))
         # print("DATA GEN FINISH")
-        c = (a @ b).astype(dtypes.get_npdtype(params.dtype_c))
+        c = (a.astype(np.float32) @ b.astype(np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
         if params.trans_a:
             a = np.ascontiguousarray(a.transpose(1, 0))
         if params.trans_b:
@@ -261,14 +269,36 @@ def _asdv_test_volta():
         if params.trans_c:
             c = np.ascontiguousarray(c.transpose(1, 0))
         # print("WTF PREPARED")
-
+        if params.splitk_serial:
+            ksplit = 16
+        else:
+            ksplit = 1
+        # print("CUDA PREPARED")
+        algo = algo_cls()
+        algo.tile_shape = params.ts 
+        algo.warp_tile_shape = params.wts 
+        algo.num_stage = params.num_stage 
+        algo.dacc = params.dtype_acc.tv_dtype 
+        algo.dcomp = params.dtype_comp.tv_dtype 
+        algo.algo = params.algo.value 
+        algo.trans_a =  params.trans_a 
+        algo.trans_b =  params.trans_b 
+        algo.trans_c =  params.trans_c
+        if params.tensorop is not None:
+            algo.tensorop = params.tensorop.shape
+        params_cpp = params_cls()
+        params_cpp.algo_desp = algo
+        params_cpp.split_k_slices = ksplit
         a_tv = tv.from_numpy(a).cuda()
         b_tv = tv.from_numpy(b).cuda()
         c_tv = tv.zeros(c.shape, params.dtype_c.tv_dtype, 0)
+
+        params_cpp.a = a_tv 
+        params_cpp.b = b_tv 
+        params_cpp.c = c_tv 
+
         # print("CUDA PREPARED")
-        lib_object.matmul(a_tv, b_tv, c_tv, params.trans_a, params.trans_b, params.trans_c,
-            ts=params.ts, wts=params.wts, num_stage=params.num_stage, dacc=params.dtype_acc.tv_dtype,
-            dcomp=params.dtype_comp.tv_dtype, algo=params.algo.value, tensorop=[0, 0, 0])  # type: tv.Tensor
+        lib_object.matmul2(params_cpp)
         c_cpu = c_tv.cpu().numpy()
         print(params.get_algo_name(), a.mean(), np.linalg.norm(c_cpu - c))
 
@@ -324,4 +354,4 @@ def _asdv_test_turing():
         print(params.get_algo_name(), np.linalg.norm(c_cpu - c))
 
 if __name__ == "__main__":
-    _asdv_test_simt_shuffle()
+    _asdv_test_regular_gemm()

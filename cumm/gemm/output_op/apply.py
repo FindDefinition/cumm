@@ -32,7 +32,6 @@ class ApplyOutputOp(bases.GemmApply):
 
         code.raw(f"""
         constexpr int kOutFragCount = tv::array_size_v<{self.out_frag_t}>;
-        constexpr int kInputFragCount = tv::array_size_v<{self.inp_frag_t}>;
         using OutAccessType = {out_acc_type};
         using InputAccessType = {inp_acc_type};
         OutAccessType *output_frag_ptr =
@@ -73,7 +72,6 @@ class ApplyOutputOp(bases.GemmApply):
 
         code.raw(f"""
         constexpr int kOutFragCount = tv::array_size_v<{self.out_frag_t}>;
-        constexpr int kInputFragCount = tv::array_size_v<{self.inp_frag_t}>;
         using OutAccessType = {out_acc_type};
         using InputAccessType = {inp_acc_type};
         OutAccessType *output_frag_ptr =

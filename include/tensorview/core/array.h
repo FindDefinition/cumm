@@ -1,4 +1,7 @@
 #pragma once
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wattributes"
+#endif
 #include <tensorview/core/defs.h>
 #include <tensorview/core/mp_helper.h>
 #ifdef TV_DEBUG
@@ -45,7 +48,7 @@ constexpr TV_HOST_DEVICE_INLINE InitPair<K, V> make_init_pair(K k, V v) {
 
 } // namespace detail
 
-template <typename T, size_t N, size_t Align = 0> struct alignas(Align) array {
+template <typename T, size_t N, size_t Align = 0> struct array {
   // TODO constexpr slice
   typedef T value_type;
   typedef value_type *pointer;
@@ -214,11 +217,11 @@ TV_HOST_DEVICE_INLINE constexpr bool operator!=(const array<T, N, Align> &lfs, c
 
 
 // TODO sub-byte type
-// template <typename T, size_t N, size_t Align = sizeof_v<T> * N>
-// struct alignas(Align) alignedarray : public array<T, N> {};
-
 template <typename T, size_t N, size_t Align = sizeof_v<T> * N>
-using alignedarray = array<T, N, Align>;
+struct alignas(Align) alignedarray : public array<T, N> {};
+
+// template <typename T, size_t N, size_t Align = sizeof_v<T> * N>
+// using alignedarray = array<T, N, Align>;
 
 
 namespace detail {

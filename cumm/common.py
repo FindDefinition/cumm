@@ -82,8 +82,13 @@ def _get_cuda_arch_flags() -> List[str]:
     if _arch_list is not None and _arch_list.lower() == "all":
         assert _cuda_version is not None 
         cuda_ver_tuple = _cuda_version.split(".")
-        major = int(cuda_ver_tuple[0])
-        minor = int(cuda_ver_tuple[1])
+        if len(cuda_ver_tuple) == 2:
+            major = int(cuda_ver_tuple[0])
+            minor = int(cuda_ver_tuple[1])
+        else:
+            num = int(_cuda_version)
+            major = num // 10
+            minor = num % 10
         assert (major, minor) >= (10, 2), "we only support cuda >= 10.2"
         if (major, minor) < (11, 0):
             _arch_list = "5.2;6.0;6.1;7.0;7.5"

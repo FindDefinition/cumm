@@ -134,7 +134,6 @@ class MmaSync(pccm.ParameterizedClass):
         return code
     
     async def __call__(self, d: ArrayPtr, a: ArrayPtr, b: ArrayPtr, c: ArrayPtr):
-        from cumm.gemm.gemm_test_cc.csrc.warpop import MmaSyncTester
 
         lane_id = cudasim.get_lane_id()
         warp_id = cudasim.get_warp_id()

@@ -43,12 +43,22 @@ class DTypeBase(pccm.ParameterizedClass):
             # if we use float16[8] as a 128bit access type,
             # ptx may contains st.shared.u16, u32, etc
             # if use int4/2/1, correct st.shared.v4.u32 is generated.
-            if element_per_acc * dtype.bitsize() == 128:
-                self.access_t = fmt.format("int4", 1, alignment)
-            elif element_per_acc * dtype.bitsize() == 64:
-                self.access_t = fmt.format("int2", 1, alignment)
-            elif element_per_acc * dtype.bitsize() == 32:
-                self.access_t = fmt.format("int", 1, alignment)
+            access_size_bits = element_per_acc * dtype.bitsize()
+            if alignment * 8 < access_size_bits:
+                access_size_bits_refine = min(alignment * 8, access_size_bits)
+                if alignment != 0:
+                    refine_count = access_size_bits // access_size_bits_refine
+                else:
+                    refine_count = 1
+            else:
+                access_size_bits_refine = access_size_bits
+                refine_count = 1
+            if access_size_bits_refine == 128:
+                self.access_t = fmt.format("int4", refine_count, alignment)
+            elif access_size_bits_refine == 64:
+                self.access_t = fmt.format("int2", refine_count, alignment)
+            elif access_size_bits_refine == 32:
+                self.access_t = fmt.format("int", refine_count, alignment)
             else:
                 self.access_t = fmt.format(dtype, element_per_acc, alignment)
             self.access_pointer = f"{self.access_t} *"
