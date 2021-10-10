@@ -793,7 +793,6 @@ class GemmKernel(pccm.ParameterizedClass):
         if cudasim.threadIdx().x == 0:
             acc =  accumulators.data.numpy_view()
             cudasim.debug_print("accumulators",acc.mean(), acc.max(), acc.min(), acc.shape)
-            cudasim.debug_print("accumulators",acc.reshape(8, 8)[:4, :4])
 
         output_op = self.output_spec.output_op.python_ctor(params.alpha, params.beta)
         

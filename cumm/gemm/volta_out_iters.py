@@ -79,8 +79,8 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
             TV_PRAGMA_UNROLL
             for (int tile_n = 0; tile_n < {self.params.mma_tile_iters[1]}; ++tile_n) {{
                 int tile_access_idx =
-                    (tile_n * {self.params.mma_tile_iters[1]} + (index_ & 2) / 2) *
-                    {self.params.mma_tile_iters[0]} * {self.params.mma_tile_iters[1]} * kAccessesPerMma;
+                    (tile_n * {self.params.mma_tile_iters[0]} + (index_ & 2) / 2) *
+                    {self.params.mma_iters[0]} * {self.params.mma_iters[1]} * kAccessesPerMma;
 
                 TV_PRAGMA_UNROLL
                 for (int mma_n = 0; mma_n < {self.params.mma_iters[1]} * kAccessesPerMma;
@@ -88,7 +88,7 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
                     int mma_access_idx =
                         ((mma_n & 1) * 2 + (index_ & 1)) * kAccessesPerMma +
                         (mma_n & 2) / 2;
-                    frag_ptr[tile_n * {self.params.mma_tile_iters[1]} * kAccessesPerMma + mma_n] =
+                    frag_ptr[tile_n * {self.params.mma_iters[1]} * kAccessesPerMma + mma_n] =
                         src_ptr_[tile_access_idx + mma_access_idx];
                 }}
             }}
@@ -110,9 +110,9 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
                         // (mma_n & 2) * 2: 00220022
 
                         int mma_idx = (index_ & 1) +
-                                    (index_ & 2) * {self.params.mma_iters.prod()} / 2 +
+                                    (index_ & 2) * {self.params.mma_iters[:2].prod()} / 2 +
                                     (tile_n * {self.params.mma_tile_iters[0]}) *
-                                        {self.params.mma_iters.prod()} +
+                                        {self.params.mma_iters[:2].prod()} +
                                     (mma_n & 1) * 2;
 
                         int reg_offset = reg_row * kRegsPerMmaRow + (mma_n & 2) * 2;
@@ -132,17 +132,17 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
         if not self.params.is_float_acc:
             kAccessesPerMma = self.params.element_per_mma // self.element_per_acc
             for tile_n in range(self.params.mma_tile_iters[1]):
-                tile_access_idx = ((tile_n * self.params.mma_tile_iters[1] +
+                tile_access_idx = ((tile_n * self.params.mma_tile_iters[0] +
                                     (self.index_ & 2) // 2) *
-                                   self.params.mma_tile_iters[0] *
-                                   self.params.mma_tile_iters[1] *
+                                   self.params.mma_iters[0] *
+                                   self.params.mma_iters[1] *
                                    kAccessesPerMma)
 
                 for mma_n in range(self.params.mma_iters[1] * kAccessesPerMma):
                     mma_access_idx = (((mma_n & 1) * 2 +
                                        (self.index_ & 1)) * kAccessesPerMma +
                                       (mma_n & 2) // 2)
-                    frag_ptr[tile_n * self.params.mma_tile_iters[1] *
+                    frag_ptr[tile_n * self.params.mma_iters[1] *
                              kAccessesPerMma +
                              mma_n] = self.src_ptr_[tile_access_idx +
                                                     mma_access_idx]
@@ -161,9 +161,9 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
                         # (mma_n & 2) * 2: 00220022
 
                         mma_idx = ((self.index_ & 1) + (self.index_ & 2) *
-                                   self.params.mma_iters.prod() // 2 +
+                                   self.params.mma_iters[:2].prod() // 2 +
                                    (tile_n * self.params.mma_tile_iters[0]) *
-                                   self.params.mma_iters.prod() +
+                                   self.params.mma_iters[:2].prod() +
                                    (mma_n & 1) * 2)
 
                         reg_offset = reg_row * kRegsPerMmaRow + (mma_n & 2) * 2
@@ -173,6 +173,7 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
 
                         # frag_ptr += 1
                         idx += 1
+
 
     @pccm.cuda.member_function(name="operator++",
                                device=True,

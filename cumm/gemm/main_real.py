@@ -354,4 +354,4 @@ def _asdv_test_turing():
         print(params.get_algo_name(), np.linalg.norm(c_cpu - c))
 
 if __name__ == "__main__":
-    _asdv_test_regular_gemm()
+    _asdv_test_simt_shuffle()

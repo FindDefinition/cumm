@@ -489,6 +489,10 @@ def _asdv_test_volta_python(coord_input: bool):
             m = 64
             n = 64
             k = 32
+            m = max(params.ts[0], m)
+            n = max(params.ts[1], n)
+            k = max(params.ts[2], k)
+
             a = np.random.uniform(-1, 1, size=[m, k]).astype(
                 dtypes.get_npdtype(params.dtype_a))
             b = np.random.uniform(-1, 1, size=[k, n]).astype(
@@ -580,7 +584,7 @@ def _asdv_test_volta_python(coord_input: bool):
 
             print(params.get_algo_name(), a.mean(), np.linalg.norm(c_tv - c),
                 "Time=", duration)
-            # vis_in_relay(list(fig_per_group.values()))
+            vis_in_relay(list(fig_per_group.values()))
 
 def unittest_python():
     np.random.seed(12315)
