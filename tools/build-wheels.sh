@@ -12,7 +12,7 @@ function repair_wheel {
 }
 
 export CUMM_ENABLE_JIT=0
-export TORCH_CUDA_ARCH_LIST="5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+export CUMM_CUDA_ARCH_LIST="all"
 # Compile wheels, we only support 3.6-3.10.
 "/opt/python/cp36-cp36m/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp
 "/opt/python/cp37-cp37m/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp

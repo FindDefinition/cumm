@@ -40,10 +40,8 @@ jobs:
         run: |
           $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
           $Env:CUMM_ENABLE_JIT = "0"
-          nvcc -V
-          ninja --version
+          $Env:CUMM_CUDA_ARCH_LIST = "all"
           pip install pccm pybind11 setuptools
-          python setup.py install 
           python -m build --wheel --outdir dist/ .
         shell: powershell
 

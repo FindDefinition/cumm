@@ -77,7 +77,18 @@ def _get_cuda_arch_flags() -> List[str]:
     # First check for an env var (same as used by the main setup.py)
     # Can be one or more architectures, e.g. "6.1" or "3.5;5.2;6.0;6.1;7.0+PTX"
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
-    _arch_list = os.environ.get('TORCH_CUDA_ARCH_LIST', None)
+    _arch_list = os.environ.get('CUMM_CUDA_ARCH_LIST', None)
+    _cuda_version = os.environ.get('CUMM_CUDA_VERSION', None)
+    if _arch_list is not None and _arch_list.lower() == "all":
+        assert _cuda_version is not None 
+        cuda_ver_tuple = _cuda_version.split(".")
+        major = int(cuda_ver_tuple[0])
+        minor = int(cuda_ver_tuple[1])
+        assert (major, minor) >= (10, 2), "we only support cuda >= 10.2"
+        if (major, minor) < (11, 0):
+            _arch_list = "5.2;6.0;6.1;7.0;7.5"
+        else:
+            _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     for named_arch, archval in named_arches.items():
         _all_arch = _all_arch.replace(named_arch, archval)
@@ -144,7 +155,6 @@ class CUDALibs(pccm.Class):
         super().__init__()
         gpu_arch_flags = _get_cuda_arch_flags()
         if compat.InWindows:
-            print("DEBUG1")
             nvcc_version = subprocess.check_output(["nvcc", "--version"
                                                     ]).decode("utf-8").strip()
             nvcc_version_str = nvcc_version.split("\n")[3]
