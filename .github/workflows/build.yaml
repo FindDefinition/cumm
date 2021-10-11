@@ -39,7 +39,6 @@ jobs:
         if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags') || ${{ matrix.cuda-version }} == '11.1')
         run: |
           $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
-          $Env:CUMM_ENABLE_JIT = "0"
           $Env:CUMM_CUDA_ARCH_LIST = "all"
           pip install pccm pybind11 setuptools
           python -m build --wheel --outdir dist/ .

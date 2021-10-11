@@ -33,7 +33,7 @@ REQUIRES_PYTHON = '>=3.6'
 VERSION = None
 
 # What packages are required for this module to be executed?
-REQUIRED = ["pccm>=0.2.3", "pybind11>=2.6.0", "fire", "numpy"]
+REQUIRED = ["pccm>=0.2.5", "pybind11>=2.6.0", "fire", "numpy"]
 
 # What packages are optional?
 EXTRAS = {
@@ -84,15 +84,6 @@ about['__version__'] = version
 
 with open(version_path, 'w') as f:
     f.write("__version__ = '{}'\n".format(version))
-
-enable_jit = os.environ.get("CUMM_ENABLE_JIT", "1") == "1"
-enable_jit_str = "True"
-if not enable_jit:
-    enable_jit_str = "False"
-meta_path = os.path.join(cwd, NAME, 'build_meta.py')
-with open(meta_path, 'w') as f:
-    f.write("ENABLE_JIT = {}\n".format(enable_jit_str))
-
 
 class UploadCommand(Command):
     """Support setup.py upload."""

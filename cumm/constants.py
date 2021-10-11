@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from typing import List
 
+PACKAGE_NAME = "cumm"
 PACKAGE_ROOT = Path(__file__).parent.resolve()
 
 _TENSORVIEW_INCLUDE_PATHS: List[Path] = [

@@ -11,7 +11,6 @@ function repair_wheel {
     fi
 }
 
-export CUMM_ENABLE_JIT=0
 export CUMM_CUDA_ARCH_LIST="all"
 # Compile wheels, we only support 3.6-3.10.
 "/opt/python/cp36-cp36m/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp
