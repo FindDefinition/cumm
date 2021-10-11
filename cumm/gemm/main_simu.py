@@ -646,8 +646,10 @@ def unittest_python():
 
 def _asdv_test_turing_python(coord_input: bool = False):
     np.random.seed(12315)
-    with cudasim.enter_debug_context(True):
+    with cudasim.enter_debug_context(True, 127):
         main_cu = GemmMainUnitTest()
+        print(len(main_cu.turing_params))
+
         for params in main_cu.turing_params[:1]:
             print(params.get_algo_name())
             ker = gen_gemm_kernels(params)
@@ -658,7 +660,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
 
             m = 64
             n = 64
-            k = 64
+            k = 32
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
@@ -753,15 +755,15 @@ def _asdv_test_turing_python(coord_input: bool = False):
                                         fig_per_group,
                                         vis_res["Output"],
                                         "O", [0, B_bound[3] + 10])
-            vis_in_relay(list(fig_per_group.values()))
 
             # print(TestCase().assertAllClose(c_tv, c))
             # print(c_tv.reshape(-1)[:10], c.reshape(-1)[:10])
             # print(c_tv.reshape(-1)[-10:] -  c.reshape(-1)[-10:])
 
-            print(params.get_algo_name(), a.mean(), np.linalg.norm(c_tv - c),
+            print(params.get_algo_name(), a.mean(), b.mean(), c.mean(), np.linalg.norm(c_tv - c),
                 "Time=", duration)
 
+            # vis_in_relay(list(fig_per_group.values()))
 
 if __name__ == "__main__":
     # fig = vis.figure.PointCloudFigure(0, np.zeros((1, 3)))
@@ -774,5 +776,5 @@ if __name__ == "__main__":
     # vis_in_relay([fig])
     # unittest_python()
     # _asdv_test_simt_python(True)
-    # _asdv_test_turing_python(True)
-    _asdv_test_volta_python(True)
+    _asdv_test_turing_python(True)
+    # _asdv_test_volta_python(True)

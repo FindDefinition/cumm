@@ -130,13 +130,13 @@ TV_HOST_DEVICE_INLINE void printf2(Ts... args) {
   printf(fmt.c_str(), args...);
 }
 
-template <char Sep = ' ', class... Ts>
+template <char Sep = ' ', int Tx = 0, class... Ts>
 TV_HOST_DEVICE_INLINE void printf2_once(Ts... args) {
   // this function should only be used for cuda code. host code
   // should use tv::ssprint.
   static constexpr auto fmt = detail::types_to_format<Sep, Ts...>::value;
 #if defined(__CUDA_ARCH__)
-  if ((threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0))
+  if ((threadIdx.x == Tx && threadIdx.y == 0 && threadIdx.z == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0))
     printf(fmt.c_str(), args...);
 #else 
   printf(fmt.c_str(), args...);
@@ -208,10 +208,10 @@ TV_HOST_DEVICE_INLINE void printf2_array(T const (&arg)[ N ], Ts&&... args) {
 }
 
 
-template <char Sep = ' ', class... Ts>
+template <char Sep = ' ', int Tx = 0, class... Ts>
 TV_HOST_DEVICE_INLINE void printf2_array_once(Ts&&... args) {
 #if defined(__CUDA_ARCH__)
-  if ((threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0))
+  if ((threadIdx.x == Tx && threadIdx.y == 0 && threadIdx.z == 0 && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0))
     printf2_array(args...);
 #else 
   printf2_array(std::forward<Ts>(args)...);

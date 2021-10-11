@@ -291,13 +291,14 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
         self.stride_in_access = (tile_shape[1] +
                                  self.padding[1]) // self.element_per_acc
         # print(tile_shape, padding, self.stride_in_access, self.element_per_acc)
-        # raise NotImplementedError
-        self.add_member("pointer_", self.access_pointer)
-        # self.add_member("pointer_bkp_", self.access_pointer)
+        self.add_member("pointers_", self.access_pointer, array=f"[{self.pointer_count}]")
+        if cudasim.enable_debug():
+            self.add_member("smem_pointer_", self.const_pointer)
 
         self.add_member("layout_", "RowMajor")
         self.add_member("warp_column_", "int")
-
+        if self.spec_s32_168:
+            self.add_member("uniform_offset_", "int", array=f"[{self.offset_count}]")
         # cudasim members
         self.pointers_: List[Union[ArrayPtr,
                                    None]] = [None] * self.pointer_count
@@ -314,18 +315,34 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
         code = pccm.FunctionCode()
         code.arg("ptr", self.pointer)
         code.arg("warp_offset_m,warp_offset_n,lane_idx", "int")
-        code.ctor_init("pointer_",
-                       f"reinterpret_cast<{self.access_pointer}>(ptr)")
         code.ctor_init("layout_", f"{self.stride_in_access}")
-        code.raw(f"""
-        // pointer_bkp_ = reinterpret_cast<{self.access_pointer}>(ptr);
-        int quad_id = (lane_idx / {self.lanes_in_quad}); 
-        int lane_in_quad = (lane_idx % {self.lanes_in_quad});
-        pointer_ += layout_(quad_id, lane_in_quad);
-        add_warp_offset(warp_offset_m, warp_offset_n);
-        // tv::printf2_block_once(threadIdx.x, pointer_ - reinterpret_cast<{self.access_pointer}>(ptr));
+        code.ctor_init("warp_column_", f"0")
+        if cudasim.enable_debug():
+            code.ctor_init("smem_pointer_", f"ptr")
 
+        code.raw(f"""
+        int tensorop_row = lane_idx / {self.lanes_in_quad};
+        int tensorop_col = lane_idx % {self.lanes_in_quad};
+        auto pointer = reinterpret_cast<{self.access_pointer}>(ptr) + tensorop_row * {self.stride_in_access};
         """)
+        with code.range_("i", self.pointer_count, "TV_PRAGMA_UNROLL"):
+            if not self.spec_s32_168 and not self.spec_s32_88:
+                code.raw(f"""
+                // int swizzled_tensorop_col = (tensorop_col % 2) + ((
+                //     (tensorop_col / 2) + i) % {self.pointer_count}) * 2
+                int swizzled_tensorop_col = tensorop_col ^ (i * 2);
+                """)
+            else:
+                code.raw(f"""
+                int swizzled_tensorop_col = tensorop_col ^ (i * 2);
+                """)
+            code.raw(f"""
+            pointers_[i] = pointer + swizzled_tensorop_col;
+            """)
+        if self.spec_s32_168:
+            for i in range(self.offset_count):
+                code.raw(f"uniform_offset_[{i}] = {i * 4};")
+        code.raw(f"add_warp_offset(warp_offset_m, warp_offset_n);")
         return code
 
     def python_ctor(self, ptr: ArrayPtr, warp_offset_m: int,
@@ -352,6 +369,8 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
                 # row2/row3 we need to swap tensorop part.
                 swizzled_tensorop_col = tensorop_col ^ (i * 2)
             new_obj.pointers_[i] = pointer + swizzled_tensorop_col
+            if cudasim.threadIdx().x == 1:
+                print(i, "swizzled_tensorop_col", swizzled_tensorop_col)
         if self.spec_s32_168:
             for i in range(self.offset_count):
                 new_obj.uniform_offset_[i] = i * 4
@@ -361,17 +380,45 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_warp_offset(self):
-        code = pccm.FunctionCode(f"""
-        pointer_ += layout_(warp_m * {self.params.rows_per_iteration}, warp_n * 
-            {self.warp_tile_shape[1]} / {self.element_per_acc});
+        code = pccm.FunctionCode()
+        for i in range(self.pointer_count):
+            code.raw(f"""
+            auto offset_{i} = layout_(
+                warp_m * {self.params.rows_per_iteration},
+                warp_n * {self.warp_tile_shape[1]} / {self.element_per_acc});
+            pointers_[{i}] += offset_{i};
+            // tv::printf2_once<' ', 234>("OFFSET", {i}, offset_{i});
+            """)
+        if self.spec_s32_88:
+            # TODO why swap ptr here?
+            code.raw(f"""
+            if (warp_n % 2 == 1){{
+                auto tmp = pointers_[0];
+                pointers_[0] = pointers_[1];
+                pointers_[1] = tmp;
+            }}
+            """)
+        code.raw(f"""
+        warp_column_ += warp_n * {self.warp_tile_shape[1]};
         """)
+        if self.spec_s32_168:
+            for i in range(self.offset_count):
+                # 1032 if warp_n == 1
+                # why swizzle here?
+                # because warp_n handle smem line 1357
+                code.raw(f"""
+                uniform_offset_[{i}] = ({i} ^ warp_n) * 4;
+                """)
         return code.arg("warp_m, warp_n", "int")
 
     def add_warp_offset_python(self, warp_m: int, warp_n: int):
-        for i in range(self.pointer_count):
-            self.pointers_[i] += self.layout_(
+        offset = self.layout_(
                 warp_m * self.params.rows_per_iteration,
                 warp_n * self.warp_tile_shape[1] // self.element_per_acc)
+        # if cudasim.threadIdx().x == 234:
+        #     print("PFFSET", offset)
+        for i in range(self.pointer_count):
+            self.pointers_[i] += offset
         if self.spec_s32_88:
             # TODO why swap ptr here?
             if warp_n % 2 == 1:
@@ -392,15 +439,35 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
         code = pccm.FunctionCode(
             f"{self.const_access_pointer} frag_ptr = reinterpret_cast<{self.const_access_pointer}>(&frag);"
         )
-        # print(self.params.mma_count[1], self.lanes_in_quad, self.element_per_acc)
-        # raise NotImplementedError
-        code.raw(f"""
-        // tv::printf2_block_once(threadIdx.x, pointer_ - pointer_bkp_);
-        TV_PRAGMA_UNROLL
-        for (int n = 0; n < {self.params.mma_count[1]}; ++n) {{
-            pointer_[n * {self.lanes_in_quad} + pointer_offset / {self.element_per_acc}] = frag_ptr[n];
-        }}
-        """)
+        with code.range_("n", self.params.mma_count[1], "TV_PRAGMA_UNROLL"):
+            if not self.spec_s32_168 and not self.spec_s32_88:
+                code.raw(f"""
+                int column_idx = warp_column_ + n * {self.lanes_in_quad * self.element_per_acc};
+                int smem_line_offset = column_idx * {self.dtype.itemsize()} / 128;
+                int ptr_idx = smem_line_offset % {self.pointer_count};
+                auto ptr = pointers_[ptr_idx];
+                int offset = n * {self.lanes_in_quad} + pointer_offset / {self.element_per_acc};
+                ptr[offset] = frag_ptr[n];
+                """)
+            elif self.spec_s32_168:
+                code.raw(f"""
+                int ptr_idx = n / 4;
+                int offset_idx = n % 4;
+                auto ptr = pointers_[ptr_idx];
+                int offset = ( n / 4) * 16 + 
+                    pointer_offset / {self.element_per_acc} + 
+                    uniform_offset_[offset_idx];
+                ptr[offset] = frag_ptr[n];
+                """)
+            else:
+                code.raw(f"""
+                int ptr_idx = n / 4;
+                auto ptr = pointers_[ptr_idx];
+                int offset = (n /
+                          4) * 16 + pointer_offset / {self.element_per_acc} + (
+                              n % 4) * 4;
+                ptr[offset] = frag_ptr[n];
+                """)
         code.arg("frag", f"{self.fragment_t} const &")
         code.arg("pointer_offset", str(self.index_t))
         return code
@@ -467,10 +534,10 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_pointer_offset(self):
-        code = pccm.FunctionCode(f"""
-        pointer_ += pointer_offset / {self.element_per_acc};
-        """)
+        code = pccm.FunctionCode()
         code.arg("pointer_offset", f"int")
+        for i in range(self.pointer_count):
+            code.raw(f"pointers_[{i}] += pointer_offset / {self.element_per_acc};")
         return code
 
 class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
@@ -490,10 +557,8 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
         self.tile_shape = tile_shape
         self.spec_s32_168 = dtype == dtypes.int32 and access_length == 16 and tile_shape[1] == 128
         self.spec_s32_88 = dtype == dtypes.int32 and access_length == 8 and tile_shape[1] == 64
-
         self.stride = stride
         self.contig_lanes = contig_lanes
-
         self.tmap = tmap
         self.iterations = tmap.iterations  # type: MetaArray[int]
         self.delta = tmap.delta  # type: MetaArray[int]
@@ -502,24 +567,51 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
 
         self.loads_per_access = self.element_per_acc_output // num_sub_access
         self.num_sub_access = num_sub_access
-
         self.add_member("pointers_",
-                        self.pointer,
+                        self.const_access_pointer,
                         array=f"[{self.loads_per_access}]")
+        if cudasim.enable_debug():
+            self.add_member("smem_pointer_", self.const_access_pointer)
+
         if self.spec_s32_168 or self.spec_s32_88:
             assert self.iterations[4] == 1
         # cudasim members
         self.pointers_: List[Optional[ArrayPtr]] = [None
                                                     ] * self.loads_per_access
+        self.smem_pointer_: Optional[ArrayPtr] = None
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode(f"""
         auto thread_offset = ThreadMap::initial_offset(thread_idx);
-        pointer_ = ptr + thread_offset[0] * {self.stride} + thread_offset[1];
+        auto pointer = reinterpret_cast<{self.const_access_pointer}>(ptr);
         """)
         code.arg("ptr", self.pointer)
         code.arg("thread_idx", "int")
+        if cudasim.enable_debug():
+            code.ctor_init("smem_pointer_", f"reinterpret_cast<{self.const_access_pointer}>(ptr)")
+
+        with code.range_("i", self.loads_per_access, "TV_PRAGMA_UNROLL"):
+            if self.spec_s32_168:
+                code.raw(f"""
+                int lane_col_idx = thread_offset[1] / {self.element_per_acc_output};
+                int lane_offset = (lane_col_idx << 2) | ((lane_col_idx / 2) ^ i);
+                pointers_[i] = pointer + thread_offset[0] * {self.stride_vec} + lane_offset;
+                """)
+            elif self.spec_s32_88:
+                code.raw(f"""
+                int lane_col_idx = thread_offset[1] / {self.element_per_acc_output};
+                int lane_offset = ((lane_col_idx % 8) * 2) | ((lane_col_idx / 4) ^ i);
+                pointers_[i] = pointer + thread_offset[0] * {self.stride_vec} + lane_offset;
+                """)
+            else:
+                code.raw(f"""
+                int col_idx_in_subacc = (thread_offset[1] / {self.element_per_acc_output}) * {self.loads_per_access};
+                int smem_line_offset = (col_idx_in_subacc * {self.num_sub_access} * {self.dtype.itemsize()} / 128) % {self.loads_per_access};
+                col_idx_in_subacc += (smem_line_offset + i) % {self.loads_per_access};
+                // tv::printf2_once<' ', {cudasim.debug_tx()}>(i, threadIdx.x, "col_idx_in_subacc", thread_offset[0], thread_offset[1], col_idx_in_subacc, thread_offset[0] * {self.stride_vec} + col_idx_in_subacc);
+                pointers_[i] = pointer + thread_offset[0] * {self.stride_vec} + col_idx_in_subacc;
+                """)
         return code
 
     def python_ctor(self, ptr: ArrayPtr, thread_idx: int):
@@ -554,14 +646,18 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
                                       i) % self.loads_per_access
                 new_obj.pointers_[i] = pointer + thread_offset[
                     0] * new_obj.stride_vec + col_idx_in_subacc
-
+                # if cudasim.threadIdx().x == cudasim.debug_tx():
+                #     cudasim.debug_print("col_idx_in_subacc", cudasim.threadIdx().x, thread_offset[0], thread_offset[1], thread_offset[0] * new_obj.stride_vec + col_idx_in_subacc, col_idx_in_subacc)
             assert new_obj.pointers_[i].length > 0
         # print(new_obj.pointer_)
+        new_obj.smem_pointer_ = ptr.change_access_size(self.num_sub_access)
         return new_obj
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
         code = pccm.FunctionCode(f"""
+        {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
+
         TV_PRAGMA_UNROLL
         for (int cluster = 0; cluster < {self.iterations[1]}; ++cluster) {{
 
@@ -570,28 +666,27 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
 
                 TV_PRAGMA_UNROLL
                 for (int row = 0; row < {self.iterations[3]}; ++row) {{
-
-                    {self.const_pointer} cur_pointer =
-                        pointer_ + row * {self.delta[3]} * {self.stride_vec} + group * {self.delta[2]} * {self.stride_vec} +
-                        cluster * {self.delta[1]} * {self.stride_vec} + pointer_offset;
-                    int frag_row_idx =
-                        (row + {self.iterations[3]} * (group + {self.iterations[2]} * cluster));
-
-                    {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
-                    {self.access_t} const *memory_pointer =
-                        reinterpret_cast<{self.access_t} const *>(cur_pointer);
-
+                    int row_ptr_offset = (
+                        row * {self.delta[3] * self.stride_vec} +
+                        group * {self.delta[2] * self.stride_vec} +
+                        cluster * {self.delta[1] * self.stride_vec} +
+                        pointer_offset / {self.num_sub_access});
+                    int frag_row_idx = (row + {self.iterations[3]} *
+                                    (group + {self.iterations[2]} * cluster));
                     TV_PRAGMA_UNROLL
                     for (int column = 0; column < {self.iterations[4]}; ++column) {{
-
                         int frag_idx = frag_row_idx * {self.iterations[4]} + column;
-
+                        int vector_idx = ((column * {self.delta[4]} /
+                                        {self.element_per_acc_output}) *
+                                        {self.loads_per_access});
                         TV_PRAGMA_UNROLL
                         for (int v = 0; v < {self.loads_per_access}; ++v) {{
-                            frag_ptr[frag_idx * {self.loads_per_access} + v] =
-                                memory_pointer[(column * {self.delta[4]} / {self.element_per_acc_output}) *
-                                                    {self.loads_per_access} +
-                                                v];
+                            auto mem_ptr = pointers_[v] + row_ptr_offset;
+                            // tv::printf2_once<' ', {cudasim.debug_tx()}>(cluster, group, row, column, v, frag_idx * {self.loads_per_access} + v, vector_idx, mem_ptr - smem_pointer_);
+
+                            frag_ptr[frag_idx * {self.loads_per_access} +
+                                     v] = (mem_ptr[vector_idx]);
+                            // tv::print_ptr_once<int, 0, {self.num_sub_access}, {cudasim.debug_tx()}>(reinterpret_cast<const int*>(mem_ptr));
                         }}
                     }}
                 }}
@@ -613,22 +708,25 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
                         row * self.delta[3] * self.stride_vec +
                         group * self.delta[2] * self.stride_vec +
                         cluster * self.delta[1] * self.stride_vec +
-                        pointer_offset)
+                        pointer_offset // self.num_sub_access)
                     frag_row_idx = (row + self.iterations[3] *
                                     (group + self.iterations[2] * cluster))
 
                     for column in range(self.iterations[4]):
 
                         frag_idx = frag_row_idx * self.iterations[4] + column
-
+                        vector_idx = ((column * self.delta[4] //
+                                        self.element_per_acc_output) *
+                                        self.loads_per_access)
                         for v in range(self.loads_per_access):
-                            vector_idx = ((column * self.delta[4] //
-                                           self.element_per_acc_output) *
-                                          self.loads_per_access)
                             mem_ptr = self.pointers_[v] + row_ptr_offset
-
+                            
                             frag_ptr[frag_idx * self.loads_per_access +
                                      v] = (mem_ptr[vector_idx])
+                            # if cudasim.threadIdx().x == cudasim.debug_tx():
+                            #     print(cluster, group, row, column, v, frag_idx * self.loads_per_access + v, vector_idx, mem_ptr.access_offset - self.smem_pointer_.access_offset)
+                            #     data = mem_ptr[vector_idx]
+                            #     print(data.data.numpy_view(), frag.data.numpy_view())
                             dst_offset = frag_idx * self.loads_per_access + v
 
                             # await checkers.smem_bank_conflicit_check(
@@ -661,10 +759,10 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_pointer_offset(self):
-        code = pccm.FunctionCode(f"""
-        pointer_ += pointer_offset;
-        """)
+        code = pccm.FunctionCode()
         code.arg("pointer_offset", f"int")
+        for i in range(self.loads_per_access):
+            code.raw(f"pointers_[{i}] += pointer_offset / {self.num_sub_access};")
         return code
 
 

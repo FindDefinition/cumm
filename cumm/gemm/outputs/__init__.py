@@ -68,6 +68,7 @@ class Output(pccm.ParameterizedClass):
         # cudasim
         self.warp_iter : Optional[GemmOutWarpIterator] = None 
         self.smem_loader : Optional[GemmOutSmemLoader] = None 
+        self.smem_ptr: Optional[ArrayPtr] = None 
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
@@ -82,6 +83,7 @@ class Output(pccm.ParameterizedClass):
         new_obj = Output(self.dtype_acc, self.warp_count_shape, self.partk, self.spec, self.smem_storage)
         new_obj.warp_iter = self.spec.warp_store_iter.python_ctor(smem_ptr, warp_idx_k * self.warp_count_shape[0] + warp_m, warp_n, lane_idx)
         new_obj.smem_loader = self.spec.smem_loader.python_ctor(smem_ptr, thread_idx)
+        new_obj.smem_ptr = smem_ptr
         return new_obj 
 
     def call_template(self, have_source: bool, self_reduce: bool):
@@ -110,7 +112,6 @@ class Output(pccm.ParameterizedClass):
             source_frag.clear();
             """)
         code.raw(f"FragIter out_acc_iter(accumulators.data());")
-
         with code.range_("iter", str(self.spec.num_out_iters), "TV_PRAGMA_UNROLL"):
             if have_source:
                 code.raw(f"""
@@ -121,11 +122,9 @@ class Output(pccm.ParameterizedClass):
                 code.raw(f"""
                 out_iter.load(source_frag);
                 """)
-            code.raw(f"""
-        
-            __syncthreads();
-            TV_PRAGMA_UNROLL
-            for (int p = 0; p < {self.spec.frag_per_iter}; ++p){{
+            code.raw(f"__syncthreads();")
+            with code.range_("p", self.spec.frag_per_iter, "TV_PRAGMA_UNROLL"):
+                code.raw(f"""
                 {self.spec.frag_iter.fragment_t} acc_frag;
                 out_acc_iter.load(acc_frag);
                 ++out_acc_iter;
@@ -133,7 +132,10 @@ class Output(pccm.ParameterizedClass):
                 if (p < {self.spec.frag_per_iter} - 1){{
                     warp_iter.add_pointer_offset({self.out_tile_size});
                 }}
-            }}
+                """)
+                if cudasim.enable_debug():
+                    code.raw(f"tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(acc_frag, iter, \"AccFrag\");")
+            code.raw(f"""
             if ({self.spec.frag_per_iter} > 1){{
                 warp_iter.add_pointer_offset({self.out_tile_size * (1 - self.spec.frag_per_iter)});
             }}
@@ -160,6 +162,11 @@ class Output(pccm.ParameterizedClass):
                 }}
                 {self.spec.out_iter.fragment_t} out_frag;
                 """)
+                if cudasim.enable_debug():
+                    code.raw(f"tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(smem_frags[0], iter, \"SmemFrag\");")
+                    # code.raw(f"tv::print_ptr_once<int, 137, 151, {cudasim.debug_tx()}>(warp_iter.smem_pointer_);")
+
+                    # code.raw(f"tv::print_fragment_once<int, 0, 8, {cudasim.debug_tx()}>(smem_frags[0]);")
                 if have_source or self_reduce:
                     code.raw(f"""
                     ApplyOp::apply_output_operator(out_frag, output_op, smem_frags[0], source_frag);
@@ -168,6 +175,9 @@ class Output(pccm.ParameterizedClass):
                     code.raw(f"""
                     ApplyOp::apply_output_operator_no_source(out_frag, output_op, smem_frags[0]);
                     """)
+                # if cudasim.enable_debug():
+                #     code.raw(f"tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(out_frag, iter, \"OutFrag\");")
+
                 code.raw(f"""
                 out_iter.store(out_frag);
                 ++out_iter;
@@ -214,6 +224,11 @@ class Output(pccm.ParameterizedClass):
                 acc_frag = ArrayPtr(self.dtype_acc.tv_dtype,
                                     self.spec.frag_iter.element_count)
                 out_acc_iter.load_python(acc_frag)
+                if cudasim.enable_debug():
+                    if cudasim.threadIdx().x == cudasim.debug_tx():
+                        acc =  acc_frag.data.numpy_view()
+                        cudasim.debug_print(f"{out_idx} AccFrag main: {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+
                 out_acc_iter.increment_python()
                 ptrs = await out_warp_iter.store_python(acc_frag)
                 if out_idx == 0:
@@ -232,6 +247,17 @@ class Output(pccm.ParameterizedClass):
                 smem_frags = [ArrayPtr(self.dtype_acc.tv_dtype,
                                     out_smem_loader.element_count) for _ in range(self.partk)]
                 ptrs = await out_smem_loader.load_python(smem_frags[0])
+                if cudasim.enable_debug():
+                    if cudasim.threadIdx().x == cudasim.debug_tx():
+                        acc =  smem_frags[0].data.numpy_view()
+                        cudasim.debug_print(f"{out_idx} SmemFrag main: {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+                        # smem_data = self.smem_ptr.data.numpy_view()[137:151]
+                        # print(self.smem_storage.shape)
+
+                        # cudasim.debug_print(smem_data)
+                        # cudasim.debug_print(acc)
+                await cudasim.syncthreads()
+
                 if out_idx == 0:
 
                     smem_load_list.append(ptrs)
@@ -249,9 +275,15 @@ class Output(pccm.ParameterizedClass):
                         data_i = smem_frags[partk_idx].data.numpy_view()
                         smem_frags[0].data.numpy_view()[:] += data_i
                     out_smem_loader.add_pointer_offset_python(self.out_tile_size * (1 - self.partk))
+
                 out_frag = ArrayPtr(out_iter.dtype.tv_dtype,
                                     out_iter.element_count)
                 self.spec.apply_op.apply_output_operator_no_source_python(out_frag, output_op, smem_frags[0])
+                # if cudasim.enable_debug():
+                #     if cudasim.threadIdx().x == cudasim.debug_tx():
+                #         acc =  out_frag.data.numpy_view()
+                #         cudasim.debug_print(f"{out_idx} OutFrag main: {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+
                 out_iter.store_python(out_frag)
                 out_iter.increment_python()
             if self.spec.frag_per_iter > 1:

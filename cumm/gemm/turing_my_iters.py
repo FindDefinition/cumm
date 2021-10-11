@@ -1177,7 +1177,6 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             self.byte_offset_ ^= layout_tensorop.swizzle_increment(
                 self.wmma_k_index_ & mask, self.k_inc_byte_width)
         self.wmma_k_index_ += 1
-        print("num_k_inc", num_k_inc)
         if (self.wmma_k_index_ == num_k_inc):
             self.wmma_k_index_ = 0
             # increase sw part

@@ -6,7 +6,7 @@ from typing import Any, List, Optional
 
 import numpy as np
 
-from .debug import debug_print, enable_debug, enter_debug_context
+from .debug import debug_print, enable_debug, enter_debug_context, debug_tx
 
 CUDA_SIMULATION_VARS = contextvars.ContextVar("CUDA")
 

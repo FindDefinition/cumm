@@ -27,56 +27,54 @@ tv::array<T, 3> TV_DEVICE_INLINE get_ptr_meta(const TPtr* ptr){
     return res;
 }
 
-template <typename T, typename Fragment>
-void TV_DEVICE_INLINE print_fragment_meta(Fragment const& frag){
+template <typename T, typename Fragment, class... Ts>
+void TV_DEVICE_INLINE print_fragment_meta(Fragment const& frag, Ts... args){
     auto res = get_fragment_meta<T>(frag);
     tv::printf2("mean:", res[0], ", max:", res[1], ", min:", res[2]);
 }
 
-template <typename T, typename Fragment>
-void TV_DEVICE_INLINE print_fragment_meta_once(Fragment const& frag){
+template <typename T, int Tx = 0, typename Fragment, class... Ts>
+void TV_DEVICE_INLINE print_fragment_meta_once(Fragment const& frag, Ts... args){
     auto res = get_fragment_meta<T>(frag);
-    tv::printf2_once("mean:", res[0], ", max:", res[1], ", min:", res[2]);
+    tv::printf2_once<' ', Tx>(args..., "mean:", res[0], ", max:", res[1], ", min:", res[2]);
 }
 
-template <typename T, typename Fragment>
-void TV_DEVICE_INLINE print_fragment_meta_block_once(Fragment const& frag){
+template <typename T, typename Fragment, class... Ts>
+void TV_DEVICE_INLINE print_fragment_meta_block_once(Fragment const& frag, Ts... args){
     auto res = get_fragment_meta<T>(frag);
-    tv::printf2_block_once(threadIdx.x, "mean:", res[0], ", max:", res[1], ", min:", res[2]);
+    tv::printf2_block_once(threadIdx.x, args..., "mean:", res[0], ", max:", res[1], ", min:", res[2]);
 }
 
-template <typename T, int Size, typename TPtr>
-void TV_DEVICE_INLINE print_ptr_meta_once(const TPtr* ptr){
+template <typename T, int Size, int Tx = 0, typename TPtr, class... Ts>
+void TV_DEVICE_INLINE print_ptr_meta_once(const TPtr* ptr, Ts... args){
     auto res = get_ptr_meta<T, TPtr, Size>(ptr);
-    tv::printf2_once("ptr mean:", res[0], ", max:", res[1], ", min:", res[2]);
+    tv::printf2_once<' ', Tx>(args..., "ptr mean:", res[0], ", max:", res[1], ", min:", res[2]);
 }
 
-template <typename T, int Size, typename TPtr>
-void TV_DEVICE_INLINE print_ptr_meta_block_once(const TPtr* ptr){
+template <typename T, int Size, typename TPtr, class... Ts>
+void TV_DEVICE_INLINE print_ptr_meta_block_once(const TPtr* ptr, Ts... args){
     auto res = get_ptr_meta<T, TPtr, Size>(ptr);
-    tv::printf2_block_once(threadIdx.x, "ptr mean:", res[0], ", max:", res[1], ", min:", res[2]);
+    tv::printf2_block_once(threadIdx.x, args..., "ptr mean:", res[0], ", max:", res[1], ", min:", res[2]);
 }
 
+// template <typename T, typename Fragment>
+// void TV_DEVICE_INLINE print_fragment_meta_once(Fragment const& frag, const char* msg){
+//     auto res = get_fragment_meta<T>(frag);
+//     tv::printf2_once(msg, "mean:", res[0], ", max:", res[1], ", min:", res[2]);
+// }
 
-
-template <typename T, typename Fragment>
-void TV_DEVICE_INLINE print_fragment_meta_once(Fragment const& frag, const char* msg){
-    auto res = get_fragment_meta<T>(frag);
-    tv::printf2_once(msg, "mean:", res[0], ", max:", res[1], ", min:", res[2]);
-}
-
-template <typename T, typename Fragment>
-void TV_DEVICE_INLINE print_fragment_meta_block_once(Fragment const& frag, const char* msg){
-    auto res = get_fragment_meta<T>(frag);
-    tv::printf2_block_once(msg, threadIdx.x, "mean:", res[0], ", max:", res[1], ", min:", res[2]);
-}
+// template <typename T, typename Fragment>
+// void TV_DEVICE_INLINE print_fragment_meta_block_once(Fragment const& frag, const char* msg){
+//     auto res = get_fragment_meta<T>(frag);
+//     tv::printf2_block_once(msg, threadIdx.x, "mean:", res[0], ", max:", res[1], ", min:", res[2]);
+// }
 
 
 namespace detail {
 
-template <typename T, typename Fragment, int... Inds>
+template <typename T, int Tx, typename Fragment, int... Inds>
 void TV_DEVICE_INLINE print_fragment_once_impl(Fragment const& frag, mp_list_int<Inds...>){
-    tv::printf2_once(T(frag[Inds])...);
+    tv::printf2_once<' ', Tx>(T(frag[Inds])...);
 }
 
 template <typename T, typename Fragment, int... Inds>
@@ -84,9 +82,9 @@ void TV_DEVICE_INLINE print_fragment_block_once_impl(Fragment const& frag, mp_li
     tv::printf2_block_once(threadIdx.x, T(frag[Inds])...);
 }
 
-template <typename T, typename TPtr, int... Inds>
+template <typename T, int Tx, typename TPtr, int... Inds>
 void TV_DEVICE_INLINE print_ptr_once_impl(const TPtr* ptr, mp_list_int<Inds...>){
-    tv::printf2_once(T(ptr[Inds])...);
+    tv::printf2_once<' ', Tx>(T(ptr[Inds])...);
 }
 
 template <typename T, typename TPtr, int... Inds>
@@ -97,9 +95,9 @@ void TV_DEVICE_INLINE print_ptr_block_once_impl(const TPtr* ptr, mp_list_int<Ind
 
 }
 
-template <typename T, int Start, int End, typename Fragment>
+template <typename T, int Start, int End, int Tx = 0, typename Fragment>
 void TV_DEVICE_INLINE print_fragment_once(Fragment const& frag){
-    return detail::print_fragment_once_impl<T>(frag, mp_list_int_range<Start, End>{});
+    return detail::print_fragment_once_impl<T, Tx>(frag, mp_list_int_range<Start, End>{});
 }
 
 
@@ -108,9 +106,9 @@ void TV_DEVICE_INLINE print_fragment_block_once(Fragment const& frag){
     return detail::print_fragment_block_once_impl<T>(frag, mp_list_int_range<Start, End>{});
 }
 
-template <typename T, int Start, int End, typename TPtr>
+template <typename T, int Start, int End, int Tx = 0, typename TPtr>
 void TV_DEVICE_INLINE print_ptr_once(const TPtr* ptr){
-    return detail::print_ptr_once_impl<T>(ptr, mp_list_int_range<Start, End>{});
+    return detail::print_ptr_once_impl<T, Tx>(ptr, mp_list_int_range<Start, End>{});
 }
 
 

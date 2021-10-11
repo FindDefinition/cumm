@@ -239,13 +239,14 @@ def count_set_bits(v):
 
 def _asdv_test_regular_gemm():
     np.random.seed(12315)
-    main_cu = GemmMainUnitTest()
-    lib = build_gemm_lib([main_cu])
+    with cudasim.enter_debug_context(False, 127):
+        main_cu = GemmMainUnitTest()
+        lib = build_gemm_lib([main_cu])
     lib_object = lib.cumm.gemm.main.GemmMainUnitTest( )
     params_cls = lib.cumm.gemm.main.GemmParams
     algo_cls =  lib.cumm.gemm.main.GemmAlgoDesp
 
-    for params in main_cu.volta_params:
+    for params in main_cu.all_params:
         if params.shuffle_stride != ShuffleStrideType.NoShuffle:
             continue 
 
@@ -255,13 +256,26 @@ def _asdv_test_regular_gemm():
         m *= 2
         n *= 2
         k *= 2
-        m = 128
-        n = 128
+        m = 64
+        n = 64
         k = 32
-        a = np.random.uniform(-1, 1, size=[m, k]).astype(dtypes.get_npdtype(params.dtype_a))
-        b = np.random.uniform(-1, 1, size=[k, n]).astype(dtypes.get_npdtype(params.dtype_b))
+        m = max(params.ts[0], m)
+        n = max(params.ts[1], n)
+        k = max(params.ts[2], k)
+
+        if params.dtype_a == dtypes.int8:
+            a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
+            b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
+            dtype_c = params.dtype_c.npdtype()
+            c = (a.astype(np.float32) @ b.astype(np.float32)).astype(
+                dtypes.get_npdtype(params.dtype_c))
+        else:
+            a = np.random.uniform(-1, 1, size=[m, k]).astype(
+                dtypes.get_npdtype(params.dtype_a))
+            b = np.random.uniform(-1, 1, size=[k, n]).astype(
+                dtypes.get_npdtype(params.dtype_b))
+            c = (a.astype(np.float32) @ b.astype(np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
         # print("DATA GEN FINISH")
-        c = (a.astype(np.float32) @ b.astype(np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
         if params.trans_a:
             a = np.ascontiguousarray(a.transpose(1, 0))
         if params.trans_b:
@@ -300,7 +314,9 @@ def _asdv_test_regular_gemm():
         # print("CUDA PREPARED")
         lib_object.matmul2(params_cpp)
         c_cpu = c_tv.cpu().numpy()
-        print(params.get_algo_name(), a.mean(), np.linalg.norm(c_cpu - c))
+        # print(c_cpu.reshape(-1)[:16])
+        # print(c.reshape(-1)[:16])
+        print(params.get_algo_name(), a.mean(), b.mean(), c.mean(), np.linalg.norm(c_cpu - c))
 
 
 def _asdv_test_turing():
@@ -354,4 +370,5 @@ def _asdv_test_turing():
         print(params.get_algo_name(), np.linalg.norm(c_cpu - c))
 
 if __name__ == "__main__":
-    _asdv_test_simt_shuffle()
+    # _asdv_test_simt_shuffle()
+    _asdv_test_regular_gemm()

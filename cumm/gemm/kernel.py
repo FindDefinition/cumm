@@ -576,10 +576,12 @@ class GemmKernel(pccm.ParameterizedClass):
                 code.raw(f"""
                 mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
                 """)
-        code.raw(f"""
-        // if (threadIdx.x == 3)
-        // tv::print_fragment_meta_once<float>(accumulators, "accumulator");
-        """)
+        if cudasim.enable_debug():
+            code.raw(f"""
+            tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(accumulators, "accumulator");
+            // tv::print_fragment_once<int, 0, 16, {cudasim.debug_tx()}>(accumulators);
+
+            """)
         if CUTLASS_OUTPUT_ITER:
             code.raw(f"""
 
@@ -790,9 +792,12 @@ class GemmKernel(pccm.ParameterizedClass):
         res_inputs = await mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators)
 
         await cudasim.syncthreads()
-        if cudasim.threadIdx().x == 0:
-            acc =  accumulators.data.numpy_view()
-            cudasim.debug_print("accumulators",acc.mean(), acc.max(), acc.min(), acc.shape)
+        if cudasim.enable_debug():
+            if cudasim.threadIdx().x == cudasim.debug_tx():
+                acc =  accumulators.data.numpy_view()
+                cudasim.debug_print(f"accumulator main: {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+                # cudasim.debug_print(acc[:16])
+
 
         output_op = self.output_spec.output_op.python_ctor(params.alpha, params.beta)
         
