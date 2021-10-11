@@ -132,26 +132,26 @@ class CopyHeaderCallback(ExtCallback):
         code_path = Path(__file__).parent / "include"
         shutil.copytree(code_path, include_path)
 
+disable_jit = os.getenv("CUMM_DISABLE_JIT", None)
 
-if enable_jit:
-    cmdclass = {
-        'upload': UploadCommand,
-    }
-    ext_modules = []
-else:
+if disable_jit is not None and disable_jit == "1":
     cmdclass = {
         'upload': UploadCommand,
         'build_ext': PCCMBuild,
     }
     from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind
-    print("DEBUG0")
     ext_modules: List[Extension] = [
         PCCMExtension([ArrayPtr(), TensorViewBind()],
                       "cumm/core_cc",
                       Path(__file__).resolve().parent / "cumm",
                       extcallback=CopyHeaderCallback())
     ]
+else:
+    cmdclass = {
+        'upload': UploadCommand,
+    }
+    ext_modules = []
 
 # Where the magic happens:
 setup(
