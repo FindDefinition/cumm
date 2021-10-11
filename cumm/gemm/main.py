@@ -138,7 +138,7 @@ def gen_shuffle_params(ts,
             if not p.skipped():
                 res.append(p)
         p = GemmAlgoParams(ts, wts, stage, ds, True, False, False,
-                            algo, tensorop, True, False,
+                            algo, tensorop, False, False,
                             ShuffleStrideType.ShuffleAB)
         if not p.skipped():
             res.append(p)
@@ -375,6 +375,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_pybind_member("a_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("b_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("c_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_member("alpha,beta", "float")
 
     @pccm.pybind.mark 
     @pccm.constructor
@@ -388,6 +389,8 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("a_inds", "tv::Tensor()")
         code.ctor_init("b_inds", "tv::Tensor()")
         code.ctor_init("c_inds", "tv::Tensor()")
+        code.ctor_init("alpha", "1.0")
+        code.ctor_init("beta", "0.0")
 
         return code 
 
@@ -567,6 +570,7 @@ class GemmMainUnitTest(pccm.Class):
                 # *gen_shuffle_params((32, 64, 16), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
                 # *gen_shuffle_params((64, 32, 16), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
                 # *gen_shuffle_params((32, 32, 32), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+                *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None, splitk_serial=True),
 
                 # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
             ]  # type: List[GemmAlgoParams]
@@ -605,7 +609,8 @@ class GemmMainUnitTest(pccm.Class):
                 # *gen_shuffle_params((256, 128, 32), (64, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
                 # *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
                 # *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+                # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+                # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8)), splitk_serial=True),
 
                 # *gen_gemm_params(
                 #     (64, 64, 32),
@@ -937,31 +942,31 @@ class GemmMainUnitTest(pccm.Class):
                 if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "error");
-                    {param_type_str} params(
+                    {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
                         a_inds.data_ptr<const int>(), c_inds.data_ptr<const int>(),
-                        {ker.dtype_a}(1.0), {ker.dtype_b}(1.0), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
                 elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
-                    {param_type_str} params(
+                    {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
                         a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(),
-                        {ker.dtype_comp}(1.0), {ker.dtype_comp}(1.0), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
                 else:
                     code.raw(f"""
-                    {param_type_str} params(
+                    {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                        {ker.dtype_comp}(1.0), {ker.dtype_comp}(1.0), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
 
                 code.raw(f"""
-                tv::cuda::Launch launcher(params.grid_dims, dim3({ker.num_threads}),
+                tv::cuda::Launch launcher(kernel_params.grid_dims, dim3({ker.num_threads}),
                                             {ker.smem_size});
                 cudaError_t result;
                 if ({ker.smem_size} >= (48 << 10)) {{
@@ -975,7 +980,7 @@ class GemmMainUnitTest(pccm.Class):
                     TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
                 }}
                 auto timer = tv::CudaContextTimer<>();
-                launcher({ker.get_algo_name()}::gemm_kernel, params);
+                launcher({ker.get_algo_name()}::gemm_kernel, kernel_params);
                 cudaFuncAttributes attr;
                 checkCudaErrors(
                     cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::gemm_kernel));
@@ -1078,7 +1083,7 @@ class GemmMainUnitTest(pccm.Class):
                       a_meta: np.ndarray, b_meta: np.ndarray, ta: bool,
                       tb: bool, tc: bool, ts: np.ndarray, wts: np.ndarray,
                       num_stage: int, dacc: dtypes.DType, dcomp: dtypes.DType,
-                      algo: str, tensorop: np.ndarray):
+                      algo: str, tensorop: np.ndarray, split_k_slice: int = 1):
         found = False
         for p, ker in zip(self.all_params, self.all_kernels):
             if_tests = [
@@ -1145,7 +1150,7 @@ class GemmMainUnitTest(pccm.Class):
                                  c_ten.size,
                                  external_data=tv.from_numpy(c_ten))
                 params = ker.gemm_params.python_ctor(m, n, k, a_ptr, b_ptr,
-                                                     c_ptr, c_ptr, 1.0, 0.0)
+                                                     c_ptr, c_ptr, 1.0, 0.0, split_k_slice=split_k_slice)
                 func = partial(ker.gemm_kernel_python, params=params)
                 blocks = params.grid_dims
                 threads = cudasim.Dim3(ker.num_threads, 1, 1)

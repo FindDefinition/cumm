@@ -646,7 +646,7 @@ def unittest_python():
 
 def _asdv_test_turing_python(coord_input: bool = False):
     np.random.seed(12315)
-    with cudasim.enter_debug_context(True, 127):
+    with cudasim.enter_debug_context(True, 125):
         main_cu = GemmMainUnitTest()
         print(len(main_cu.turing_params))
 
@@ -660,7 +660,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
 
             m = 64
             n = 64
-            k = 32
+            k = 64
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
@@ -726,7 +726,8 @@ def _asdv_test_turing_python(coord_input: bool = False):
                 dacc=params.dtype_acc,
                 dcomp=params.dtype_comp,
                 algo=params.algo.value,
-                tensorop=[0, 0, 0])
+                tensorop=[0, 0, 0],
+                split_k_slice=2)
             duration = time.time() - t
             vis_res = {}
             for k, v in vis_res_per_thread.items():

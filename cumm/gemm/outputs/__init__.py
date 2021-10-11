@@ -112,7 +112,7 @@ class Output(pccm.ParameterizedClass):
             source_frag.clear();
             """)
         code.raw(f"FragIter out_acc_iter(accumulators.data());")
-        with code.range_("iter", str(self.spec.num_out_iters), "TV_PRAGMA_UNROLL"):
+        with code.for_(f"int iter = 0; iter < {self.spec.num_out_iters}; iter += {self.spec.frag_per_iter}", "TV_PRAGMA_UNROLL"):
             if have_source:
                 code.raw(f"""
                 source_iter.load(source_frag);
@@ -166,7 +166,7 @@ class Output(pccm.ParameterizedClass):
                     code.raw(f"tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(smem_frags[0], iter, \"SmemFrag\");")
                     # code.raw(f"tv::print_ptr_once<int, 137, 151, {cudasim.debug_tx()}>(warp_iter.smem_pointer_);")
 
-                    # code.raw(f"tv::print_fragment_once<int, 0, 8, {cudasim.debug_tx()}>(smem_frags[0]);")
+                    # code.raw(f"tv::print_fragment_once<float, 0, 8, {cudasim.debug_tx()}>(smem_frags[0]);")
                 if have_source or self_reduce:
                     code.raw(f"""
                     ApplyOp::apply_output_operator(out_frag, output_op, smem_frags[0], source_frag);
@@ -176,8 +176,11 @@ class Output(pccm.ParameterizedClass):
                     ApplyOp::apply_output_operator_no_source(out_frag, output_op, smem_frags[0]);
                     """)
                 # if cudasim.enable_debug():
-                #     code.raw(f"tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(out_frag, iter, \"OutFrag\");")
 
+                #     # code.raw(f"tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(out_frag, iter, \"OutFrag\");")
+                #     code.raw(f"tv::print_fragment_once<float, 0, 8, {cudasim.debug_tx()}>(smem_frags[0]);")
+
+                #     code.raw(f"tv::print_fragment_once<float, 0, 8, {cudasim.debug_tx()}>(out_frag);")
                 code.raw(f"""
                 out_iter.store(out_frag);
                 ++out_iter;
@@ -233,7 +236,7 @@ class Output(pccm.ParameterizedClass):
                 ptrs = await out_warp_iter.store_python(acc_frag)
                 if out_idx == 0:
                     smem_save_list.append(ptrs)
-                if p != self.spec.frag_per_iter - 1:
+                if p < self.spec.frag_per_iter - 1:
                     out_warp_iter.add_pointer_offset_python(self.out_tile_size)
             if self.spec.frag_per_iter > 1:
                 out_warp_iter.add_pointer_offset_python(self.out_tile_size * (1 - self.spec.frag_per_iter))
@@ -282,7 +285,12 @@ class Output(pccm.ParameterizedClass):
                 # if cudasim.enable_debug():
                 #     if cudasim.threadIdx().x == cudasim.debug_tx():
                 #         acc =  out_frag.data.numpy_view()
-                #         cudasim.debug_print(f"{out_idx} OutFrag main: {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+                #         acc2 =  smem_frags[0].data.numpy_view()
+
+                #         cudasim.debug_print(acc)
+
+                #         # cudasim.debug_print(f"{out_idx} OutFrag main: {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+                #         cudasim.debug_print(acc)
 
                 out_iter.store_python(out_frag)
                 out_iter.increment_python()

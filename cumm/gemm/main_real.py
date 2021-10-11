@@ -45,7 +45,7 @@ def build_gemm_lib(cus: List[pccm.Class]):
                                     Path(__file__).parent / "mygemm_test",
                                     build_dir=Path(__file__).parent / "build" / "build_unittest",
                                     pybind_file_suffix=".cc",
-                                    verbose=True)
+                                    verbose=False)
     
     return lib
 
@@ -140,13 +140,13 @@ def _asdv_test_simt_shuffle():
         if params.shuffle_stride == ShuffleStrideType.NoShuffle:
             continue 
         print("RTX", params.shuffle_stride, params.trans_a, params.trans_b, params.trans_c)
-        m = 64000
+        m = 64
         n = 128
         k = 128
         a_inds = np.arange(m, dtype=np.int32)
         c_inds = np.arange(m, dtype=np.int32)
-        # np.random.shuffle(a_inds)
-        # np.random.shuffle(c_inds)
+        np.random.shuffle(a_inds)
+        np.random.shuffle(c_inds)
 
         if params.dtype_a == dtypes.int8:
             a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
@@ -181,7 +181,7 @@ def _asdv_test_simt_shuffle():
         a_inds_tv = tv.from_numpy(a_inds).cuda()
         c_inds_tv = tv.from_numpy(c_inds).cuda()
         if params.splitk_serial:
-            ksplit = 16
+            ksplit = 1
         else:
             ksplit = 1
         # print("CUDA PREPARED")
@@ -239,7 +239,7 @@ def count_set_bits(v):
 
 def _asdv_test_regular_gemm():
     np.random.seed(12315)
-    with cudasim.enter_debug_context(False, 127):
+    with cudasim.enter_debug_context(True, 125):
         main_cu = GemmMainUnitTest()
         lib = build_gemm_lib([main_cu])
     lib_object = lib.cumm.gemm.main.GemmMainUnitTest( )
@@ -256,9 +256,9 @@ def _asdv_test_regular_gemm():
         m *= 2
         n *= 2
         k *= 2
-        m = 64
-        n = 64
-        k = 32
+        # m = 64
+        # n = 64
+        # k = 64
         m = max(params.ts[0], m)
         n = max(params.ts[1], n)
         k = max(params.ts[2], k)
@@ -284,7 +284,7 @@ def _asdv_test_regular_gemm():
             c = np.ascontiguousarray(c.transpose(1, 0))
         # print("WTF PREPARED")
         if params.splitk_serial:
-            ksplit = 16
+            ksplit = 2
         else:
             ksplit = 1
         # print("CUDA PREPARED")
@@ -314,8 +314,8 @@ def _asdv_test_regular_gemm():
         # print("CUDA PREPARED")
         lib_object.matmul2(params_cpp)
         c_cpu = c_tv.cpu().numpy()
-        # print(c_cpu.reshape(-1)[:16])
-        # print(c.reshape(-1)[:16])
+        print(c_cpu.reshape(-1)[-16:])
+        print(c.reshape(-1)[-16:])
         print(params.get_algo_name(), a.mean(), b.mean(), c.mean(), np.linalg.norm(c_cpu - c))
 
 

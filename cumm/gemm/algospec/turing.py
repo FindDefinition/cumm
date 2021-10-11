@@ -314,6 +314,14 @@ class OutputTuring(bases.Output):
                  shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         self._mma_spec = mma_spec
         output_op_count = constants.OPTIM_ACCESS_BITS // dtype_c.bitsize()
+        # TODO support more mixed tile shape for int8
+        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 128) and warp_tile_shape[:2] == seq(64, 64):
+            output_op_count = 8
+        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 64) and warp_tile_shape[:2] == seq(64, 32):
+            output_op_count = 8
+        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(64, 64) and warp_tile_shape[:2] == seq(32, 32):
+            output_op_count = 8
+
         # 32 * 16 * (128 * 4096 + 256 * 4096) * 2
         self.warp_count_shape = tile_shape // warp_tile_shape
         self.warp_count = self.warp_count_shape.prod()
@@ -332,8 +340,12 @@ class OutputTuring(bases.Output):
         self.output_op_count = output_op_count
         self.acc_frag_iter = turing_out_iters.OutFragIterTensorOp(
             dtype_acc, warp_tile_shape, seq(*tensorop.shape))
-
-        if dtype_c.itemsize() < dtype_acc.itemsize():
+        mixed_enable = dtype_c.itemsize() < dtype_acc.itemsize()
+        mixed_enable_dtypes = (dtype_c == dtypes.float16 and dtype_acc == dtypes.float32)
+        mixed_enable_dtypes |= (dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 128) and warp_tile_shape[:2] == seq(64, 64))
+        mixed_enable_dtypes |= (dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 64) and warp_tile_shape[:2] == seq(64, 32))
+        mixed_enable &= mixed_enable_dtypes
+        if mixed_enable:
             self.out_warp_tile_iter = turing_out_iters.OutWarpTileIteratorTensorOpMixed(
                 dtype_acc, tile_shape, warp_tile_shape, seq(*tensorop.shape),
                 output_op_count, 8)
@@ -361,7 +373,7 @@ class OutputTuring(bases.Output):
 
         self.shared_mem_alignment = dtype_acc.bitsize(
         ) * self.out_tmap.element_per_acc // 8
-        if dtype_c.itemsize() < dtype_acc.itemsize():
+        if mixed_enable:
             self.out_smem_loader = turing_out_iters.OutSmemLoaderMixed(
                 dtype_acc, tile_shape, self.out_smem_tmap, output_op_count,
                 tile_shape[1] + self._out_smem_padding[1],
@@ -371,7 +383,6 @@ class OutputTuring(bases.Output):
                 dtype_acc, self.out_smem_tmap, output_op_count,
                 tile_shape[1] + self._out_smem_padding[1],
                 self.shared_mem_alignment)
-        print("output_op_count", output_op_count)
         # do = f32, dacc = f32, epa=4
         # do = f16, dacc = f32, epa=8
         # do = s8, dacc = s32, epa=16

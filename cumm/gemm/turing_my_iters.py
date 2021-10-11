@@ -226,7 +226,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
         int interleaved_s = s / {self.interleave};
         int idx_in_interleave_s = s % {self.interleave};
         // shape_before_interleave = {self.sw_shape[1]} // {self.interleave}
-        int sw_idx_s = interleaved_s / {self.sw_shape[0]};
+        // int sw_idx_s = interleaved_s / {self.sw_shape[0]};
         int sw_idx_c = vc / {shape_before_interleave};
         int idx_in_sw_c = vc % {shape_before_interleave} + idx_in_interleave_s * {shape_before_interleave};
         int idx_in_sw_s = interleaved_s % {self.sw_shape[0]};

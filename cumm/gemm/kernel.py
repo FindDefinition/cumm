@@ -682,6 +682,7 @@ class GemmKernel(pccm.ParameterizedClass):
             if self.splitk_serial:
                 code.raw(f"""
                 if (params.grid_dims.z > 1){{
+                    tv::printf2_once(params.grid_dims.z, "ERROR");
                     int lock = 0;
                     if (params.grid_dims.z == tile_offset_k + 1) {{
                         // The final threadblock resets the semaphore for subsequent grids.
