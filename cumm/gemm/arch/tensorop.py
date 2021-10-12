@@ -541,28 +541,3 @@ class MmaSync(pccm.ParameterizedClass):
         await resource.wait()
         return
 
-
-
-
-
-from pathlib import Path 
-_SPCONV_ROOT = Path(__file__).parent.parent.parent.parent
-if __name__ == "__main__":
-    cg = pccm.core.CodeGenerator()
-    mma884 = MmaSync([8, 8, 4], 8, dtypes.float16, dtypes.float16, dtypes.float32, False, False, False)
-    mma884.namespace = "MMA"
-    cg.build_graph([mma884])
-    he, _ = cg.code_generation([mma884])
-    
-    for k, v in he.items():
-        print(v.to_string())
-
-    lib = pccm.builder.build_pybind(
-        [mma884],
-        Path(__file__).parent / "mmadebug",
-        includes=[
-            _SPCONV_ROOT / "include",
-        ],
-        namespace_root=_SPCONV_ROOT / "spconv",
-        verbose=False,
-        pybind_file_suffix=".cu")
