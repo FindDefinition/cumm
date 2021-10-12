@@ -90,7 +90,7 @@ jobs:
       - name: Build a source tarball
         env:
           CUDA_VERSION: ${{ matrix.cuda-version }}
-        if: env.CUDA_VERSION == '')
+        if: env.CUDA_VERSION == ''
         run: >-
           python -m
           build
