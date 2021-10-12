@@ -9,7 +9,7 @@ from cumm.common import TensorView, TensorViewCPU
 class ArrayPtr(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewCPU)
         self.add_include("unordered_map")
         self.add_pybind_member("dtype_", "tv::DType", readwrite=False)
         self.add_pybind_member("length_", "int64_t", readwrite=False)

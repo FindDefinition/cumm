@@ -1,8 +1,5 @@
-from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, Type,
-                    Union, overload)
-
-from pccm.stubs import EnumClassValue, EnumValue
-
+from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from pccm.stubs import EnumValue, EnumClassValue
 class TensorViewBind:
     @staticmethod
     def hello() -> None: ...

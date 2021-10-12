@@ -1,6 +1,5 @@
-from os import read
 from typing import List, Optional
-
+import os 
 import pccm
 
 from cumm.common import PyBind11, TensorView, TensorViewCPU
@@ -14,7 +13,11 @@ with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorViewCPU, PyBind11)
+        cumm_cuda_ver = os.getenv("CUMM_CUDA_VERSION", "")
+        if cumm_cuda_ver:
+            self.add_dependency(TensorView, PyBind11)
+        else:
+            self.add_dependency(TensorViewCPU, PyBind11)
         self.add_include("tensorview/pybind_utils.h")
 
     @pccm.pybind.mark
