@@ -345,6 +345,7 @@ class OutputTuring(bases.Output):
         mixed_enable_dtypes |= (dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 128) and warp_tile_shape[:2] == seq(64, 64))
         mixed_enable_dtypes |= (dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 64) and warp_tile_shape[:2] == seq(64, 32))
         mixed_enable &= mixed_enable_dtypes
+        # mixed_enable = False
         if mixed_enable:
             self.out_warp_tile_iter = turing_out_iters.OutWarpTileIteratorTensorOpMixed(
                 dtype_acc, tile_shape, warp_tile_shape, seq(*tensorop.shape),
@@ -353,7 +354,6 @@ class OutputTuring(bases.Output):
             self.out_warp_tile_iter = turing_out_iters.OutWarpTileIteratorTensorOp(
                 dtype_acc, tile_shape, warp_tile_shape, seq(*tensorop.shape))
         self._out_smem_padding = self.out_warp_tile_iter.padding
-        print("self._out_smem_padding", self._out_smem_padding)
         # TODO handle constant 16
         self.part_dilation = seq(warp_tile_shape[0] // tensorop_rows, 1, 1,
                                  warp_tile_shape[0] // tensorop_rows, 1)
@@ -389,7 +389,7 @@ class OutputTuring(bases.Output):
         # do = s8, dacc = s32, epa=8
 
         self._frag_per_iter = 1
-        if dtype_acc == dtypes.float32 and dtype_c == dtypes.float16:
+        if dtype_acc == dtypes.float32 and dtype_c == dtypes.float16 and mixed_enable:
             self._frag_per_iter = 2
         shuffle = shuffle_stride == ShuffleStrideType.ShuffleAC
         out_iter_params = out_iters.OutIteratorParams(self.out_tmap, shuffle)

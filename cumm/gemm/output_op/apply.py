@@ -57,7 +57,7 @@ class ApplyOutputOp(bases.GemmApply):
         source_frag_ptr = source_fragment.change_access_size(self.element_per_acc)
 
         for i in range(kOutOpIterations):
-            output_frag_ptr[i] = output_op.call_op_nosource_python(compute_frag_ptr[i], source_frag_ptr[i])
+            output_frag_ptr[i] = output_op.call_op_source_python(compute_frag_ptr[i], source_frag_ptr[i])
 
 
     @pccm.cuda.static_function(device=True,

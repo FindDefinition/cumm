@@ -25,7 +25,9 @@ def enable_debug():
 def debug_tx():
     ctx = get_debug_context()
     if ctx is None:
-        return 0
+        return -1
+    if not ctx.enable:
+        return -1
     return ctx.debug_tx
 
 

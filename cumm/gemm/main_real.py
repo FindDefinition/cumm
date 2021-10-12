@@ -140,7 +140,7 @@ def _asdv_test_simt_shuffle():
         if params.shuffle_stride == ShuffleStrideType.NoShuffle:
             continue 
         print("RTX", params.shuffle_stride, params.trans_a, params.trans_b, params.trans_c)
-        m = 64
+        m = 64000
         n = 128
         k = 128
         a_inds = np.arange(m, dtype=np.int32)
@@ -181,7 +181,7 @@ def _asdv_test_simt_shuffle():
         a_inds_tv = tv.from_numpy(a_inds).cuda()
         c_inds_tv = tv.from_numpy(c_inds).cuda()
         if params.splitk_serial:
-            ksplit = 1
+            ksplit = 16
         else:
             ksplit = 1
         # print("CUDA PREPARED")
@@ -239,7 +239,7 @@ def count_set_bits(v):
 
 def _asdv_test_regular_gemm():
     np.random.seed(12315)
-    with cudasim.enter_debug_context(True, 125):
+    with cudasim.enter_debug_context(True, 3):
         main_cu = GemmMainUnitTest()
         lib = build_gemm_lib([main_cu])
     lib_object = lib.cumm.gemm.main.GemmMainUnitTest( )
@@ -256,9 +256,9 @@ def _asdv_test_regular_gemm():
         m *= 2
         n *= 2
         k *= 2
-        # m = 64
-        # n = 64
-        # k = 64
+        m = 64
+        n = 64
+        k = 64
         m = max(params.ts[0], m)
         n = max(params.ts[1], n)
         k = max(params.ts[2], k)
@@ -274,6 +274,8 @@ def _asdv_test_regular_gemm():
                 dtypes.get_npdtype(params.dtype_a))
             b = np.random.uniform(-1, 1, size=[k, n]).astype(
                 dtypes.get_npdtype(params.dtype_b))
+            # a[:, 32:] = 0
+            # b[32:] = 0
             c = (a.astype(np.float32) @ b.astype(np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
         # print("DATA GEN FINISH")
         if params.trans_a:
@@ -305,6 +307,7 @@ def _asdv_test_regular_gemm():
         params_cpp.split_k_slices = ksplit
         a_tv = tv.from_numpy(a).cuda()
         b_tv = tv.from_numpy(b).cuda()
+
         c_tv = tv.zeros(c.shape, params.dtype_c.tv_dtype, 0)
 
         params_cpp.a = a_tv 
@@ -370,5 +373,5 @@ def _asdv_test_turing():
         print(params.get_algo_name(), np.linalg.norm(c_cpu - c))
 
 if __name__ == "__main__":
-    # _asdv_test_simt_shuffle()
-    _asdv_test_regular_gemm()
+    _asdv_test_simt_shuffle()
+    # _asdv_test_regular_gemm()

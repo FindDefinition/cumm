@@ -1,6 +1,6 @@
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 import pccm
-from cumm import dtypes
+from cumm import cudasim, dtypes
 from cumm.common import TensorView
 from cumm.dtypes import DType
 from cumm.gemm import core, bases
@@ -77,6 +77,10 @@ class LinearCombination(bases.GemmOutputOp):
         """)
         return code
 
+    def set_k_partition_python(self, k_part: int, k_part_count: int):
+        if k_part:
+            self.beta = 1.0
+
     @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True,
@@ -122,6 +126,8 @@ class LinearCombination(bases.GemmOutputOp):
         res = accumulator.copy()
         converted_source = source.astype(self.dtype_comp.tv_dtype)
         converted_acc = accumulator.astype(self.dtype_comp.tv_dtype)
+        # if cudasim.debug_once():
+        #     print("converted_source", converted_source.data.numpy_view())
         res.data.numpy_view()[:] = self.alpha * converted_acc.data.numpy_view() + self.beta * converted_source.data.numpy_view()
         res = self.unary_op(res)
         return res.astype(self.dtype_out.tv_dtype)

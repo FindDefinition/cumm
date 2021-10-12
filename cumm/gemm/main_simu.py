@@ -646,11 +646,11 @@ def unittest_python():
 
 def _asdv_test_turing_python(coord_input: bool = False):
     np.random.seed(12315)
-    with cudasim.enter_debug_context(True, 125):
+    with cudasim.enter_debug_context(True, 3):
         main_cu = GemmMainUnitTest()
         print(len(main_cu.turing_params))
 
-        for params in main_cu.turing_params[:1]:
+        for params in main_cu.all_params[:1]:
             print(params.get_algo_name())
             ker = gen_gemm_kernels(params)
             # print("START", params.get_algo_name())
@@ -664,7 +664,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
-
+            print(m, n, k)
             if params.dtype_a == dtypes.int8:
                 a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
                 b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
@@ -677,6 +677,9 @@ def _asdv_test_turing_python(coord_input: bool = False):
                     dtypes.get_npdtype(params.dtype_a))
                 b = np.random.uniform(-1, 1, size=[k, n]).astype(
                     dtypes.get_npdtype(params.dtype_b))
+                # a[:, 32:] = 0
+                # b[32:] = 0
+
                 c = (a @ b).astype(dtypes.get_npdtype(params.dtype_c))
             if params.trans_a:
                 a = np.ascontiguousarray(a.transpose(1, 0))
@@ -708,6 +711,8 @@ def _asdv_test_turing_python(coord_input: bool = False):
 
             a_tv = a.copy()
             b_tv = b.copy()
+            cc_tv = np.zeros_like(c)
+
             c_tv = np.zeros_like(c)
             # asyncio.run(cudasim.kernel_launch)
             t = time.time()

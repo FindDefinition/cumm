@@ -116,6 +116,8 @@ class GemmParams(pccm.ParameterizedClass):
         gemm_k_iterations = mask_iters.div_up(total_gemm_k_iterations,
                                               new_obj.grid_dims.z)
         new_obj.gemm_k_size = gemm_k_iterations * new_obj.tile_shape[2]
+        print("gemm_k_iterations", k, new_obj.tile_shape[2], new_obj.grid_dims.z, gemm_k_iterations, new_obj.gemm_k_size)
+
         new_obj.ptr_A = A
         new_obj.ptr_B = B
         new_obj.ptr_C = C
@@ -469,7 +471,6 @@ class GemmKernel(pccm.ParameterizedClass):
             // refine gemm iteration for split-k
             auto problem_size_k = GemmUtils::get_gemm_k_bound(params.k, params.gemm_k_size_per_split, tile_offset_k);
             auto gemm_k_iterations = GemmUtils::get_gemm_iterations(problem_size_k, params.gemm_k_size_per_split, tile_offset_k);
-
             // int problem_size_k = min(params.k, (tile_offset_k + 1) * params.gemm_k_size_per_split);
             // int gemm_k_iterations =
             //     tv::div_up(problem_size_k - block_offset_A[1], {self.tile_shape[2]});
@@ -494,18 +495,18 @@ class GemmKernel(pccm.ParameterizedClass):
             """)
         else:
             if self.trans_a:
-                a_extent = "{problem_size_k, params.m}"
-                a_offset = "{block_offset_A[1], block_offset_A[0]}"
+                a_extent = "tv::array<int, 2>{problem_size_k, params.m}"
+                a_offset = "tv::array<int, 2>{block_offset_A[1], block_offset_A[0]}"
             else:
-                a_extent = "{params.m, problem_size_k}"
+                a_extent = "tv::array<int, 2>{params.m, problem_size_k}"
                 a_offset = "block_offset_A"
 
             if not self.trans_b:
-                b_extent = "{problem_size_k, params.n}"
+                b_extent = "tv::array<int, 2>{problem_size_k, params.n}"
                 b_offset = "block_offset_B"
             else:
-                b_extent = "{params.n, problem_size_k}"
-                b_offset = "{block_offset_B[1], block_offset_B[0]}"
+                b_extent = "tv::array<int, 2>{params.n, problem_size_k}"
+                b_offset = "tv::array<int, 2>{block_offset_B[1], block_offset_B[0]}"
 
             code.raw(f"""
             InputIteratorA input_iter_A(
@@ -682,7 +683,6 @@ class GemmKernel(pccm.ParameterizedClass):
             if self.splitk_serial:
                 code.raw(f"""
                 if (params.grid_dims.z > 1){{
-                    tv::printf2_once(params.grid_dims.z, "ERROR");
                     int lock = 0;
                     if (params.grid_dims.z == tile_offset_k + 1) {{
                         // The final threadblock resets the semaphore for subsequent grids.
@@ -776,6 +776,10 @@ class GemmKernel(pccm.ParameterizedClass):
         input_iter_B = self.input_spec.input_iter_b.python_ctor(params.iterb_params_, params.ptr_B,
                                                    extent_B, thread_idx,
                                                    tb_offset_B, is_left=False)
+        if cudasim.threadIdx().x == 0:
+            print(cudasim.blockIdx(), gemm_k_iterations, block_offset_A, block_offset_B)
+            print(extent_A, tb_offset_A, extent_B, tb_offset_B)
+
         warp_idx = cudasim.get_warp_id()
         lane_idx = thread_idx % 32
         await cudasim.syncthreads()
@@ -793,20 +797,41 @@ class GemmKernel(pccm.ParameterizedClass):
         res_inputs = await mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators)
 
         await cudasim.syncthreads()
-        if cudasim.enable_debug():
-            if cudasim.threadIdx().x == cudasim.debug_tx():
-                acc =  accumulators.data.numpy_view()
-                cudasim.debug_print(f"accumulator main: {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
                 # cudasim.debug_print(acc[:16])
 
 
         output_op = self.output_spec.output_op.python_ctor(params.alpha, params.beta)
-        
+        if self.splitk_serial:
+            if cudasim.gridDim().z > 1:
+                output_op.set_k_partition_python(tile_offset_k, cudasim.gridDim().z)
         out_iter_C = self.output_spec.out_iter.python_ctor(params.out_params_, params.ptr_C, 
             seq(params.m, params.n), seq(block_offset_C[0], block_offset_C[1]),
             thread_idx)
+        out_iter_D = self.output_spec.out_iter.python_ctor(params.out_params_, params.ptr_D, 
+            seq(params.m, params.n), seq(block_offset_C[0], block_offset_C[1]),
+            thread_idx)
+        if self.splitk_serial and cudasim.gridDim().z > 1:
+            if tile_offset_k > 0:
+                out_iter_C = out_iter_D
         output = self.output.python_ctor(smem_out_ptr, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx)
-        res_output = await output(output_op, accumulators, out_iter_C)
+        need_self_reduce = False
+        if self.splitk_serial:
+            if cudasim.gridDim().z > 1:
+                if tile_offset_k > 0:
+                    need_self_reduce = True 
+        if self.splitk_serial:
+            if need_self_reduce:
+                res_output = await output(output_op, accumulators, out_iter_C, self_reduce=True)
+            else:
+                if self.need_source:
+                    res_output = await output(output_op, accumulators, out_iter_C, out_iter_D)
+                else:
+                    res_output = await output(output_op, accumulators, out_iter_C)
+        else:
+            if self.need_source:
+                res_output = await output(output_op, accumulators, out_iter_C, out_iter_D)
+            else:
+                res_output = await output(output_op, accumulators, out_iter_C)
         if not cudasim.enable_debug():
             return
         

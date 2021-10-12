@@ -45,6 +45,8 @@ class DTypeBase(pccm.ParameterizedClass):
             # if use int4/2/1, correct st.shared.v4.u32 is generated.
             access_size_bits = element_per_acc * dtype.bitsize()
             if alignment * 8 < access_size_bits:
+                # c++ don't support alignment smaller than size of a type.
+                # so we reduce type size and increment count.
                 access_size_bits_refine = min(alignment * 8, access_size_bits)
                 if alignment != 0:
                     refine_count = access_size_bits // access_size_bits_refine
@@ -247,6 +249,8 @@ class GemmOutputOp(pccm.ParameterizedClass):
     def call_op_nosource_python(self, accumulator: ArrayPtr):
         raise NotImplementedError
 
+    def set_k_partition_python(self, k_part: int, k_part_count: int):
+        raise NotImplementedError
 
 @pccm.skip_inherit
 class GemmApply(pccm.ParameterizedClass):

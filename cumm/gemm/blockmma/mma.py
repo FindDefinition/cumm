@@ -791,7 +791,8 @@ class Mma(pccm.ParameterizedClass):
         input_iter_B.load(input_frag_B);
         ++input_iter_A;
         ++input_iter_B;
-
+        // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_A, "FirstInputA", blockIdx.z, gemm_k_iterations);
+        // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_B, "FirstInputB", blockIdx.z);
         smem_iter_A.store(input_frag_A);
         smem_iter_B.store(input_frag_B);
         __syncthreads();
@@ -806,6 +807,12 @@ class Mma(pccm.ParameterizedClass):
 
         warp_iter_A.load(warp_frag_A[0]);
         warp_iter_B.load(warp_frag_B[0]);
+
+        // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(warp_frag_A[0], "FirstWarpA", blockIdx.z, warp_frag_A[0].size());
+        // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(warp_frag_B[0], "FirstWarpB", blockIdx.z);
+        // if (blockIdx.z == 0){{
+        //     tv::print_fragment_once<float, 0, 8, {cudasim.debug_tx()}>(warp_frag_A[0]);
+        // }}
 
         ++warp_iter_A;
         ++warp_iter_B;
@@ -857,6 +864,8 @@ class Mma(pccm.ParameterizedClass):
                     code.raw(f"""
                     input_iter_A.load(input_frag_A);
                     input_iter_B.load(input_frag_B);
+                    // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_A, "InputA", blockIdx.z);
+                    // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_B, "InputB", blockIdx.z);
 
                     ++input_iter_A;
                     ++input_iter_B;
@@ -915,15 +924,15 @@ class Mma(pccm.ParameterizedClass):
         inp_coords_A_list.append(inp_coors_A)
         # if cudasim.threadIdx().x < 32:
         #     print(cudasim.threadIdx().x, inp_coors_A)
-        # if cudasim.threadIdx().x == 0:
-        #     print(input_frag_A.data.numpy_view().mean(), "INPUT_A_FIRST")
-        #     print(input_frag_A.data.numpy_view())
-        #     bs = []
-        #     for b in input_iter_A.predicates_.tolist():
-        #         bs.append("{:08x}".format(b))
-        #     print(bs)
         inp_coors_B = input_iter_B.load_python(input_frag_B)
         inp_coords_B_list.append(inp_coors_B)
+        if cudasim.debug_once():
+            print("GEMM ITERATIONS", gemm_k_iterations)
+            inpd = input_frag_A.data.numpy_view()
+            print("FirstInputA", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+            inpd = input_frag_B.data.numpy_view()
+            print("FirstInputB", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+
 
         input_iter_A.increment_python()
         input_iter_B.increment_python()
@@ -964,6 +973,12 @@ class Mma(pccm.ParameterizedClass):
         # print(input_frag_B.data.mean(), "input_frag_B FIRST")
         warp_iter_A.increment_python()
         warp_iter_B.increment_python()
+        if cudasim.debug_once():
+            inpd = warp_frag_A[0].data.numpy_view()
+            print("FirstWarpA", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+            print(inpd)
+            inpd = warp_frag_B[0].data.numpy_view()
+            print("FirstWarpB", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
 
         warp_mma = self.spec.warp_mma.python_ctor()
         smem_write_stage_idx = 1
@@ -971,7 +986,7 @@ class Mma(pccm.ParameterizedClass):
         if gemm_k_iterations <= 1:
             input_iter_A.clear_mask_python()
             input_iter_B.clear_mask_python()
-        if cudasim.threadIdx().x == 0:
+        if cudasim.debug_once():
             print("gemm_k_iterations", gemm_k_iterations)
         while gemm_k_iterations > 0:
             for warp_mma_k in range(self.spec.num_warp_mma_iters):
@@ -1030,6 +1045,11 @@ class Mma(pccm.ParameterizedClass):
                     inp_coors_B = input_iter_B.load_python(input_frag_B)
                     inp_coords_A_list.append(inp_coors_A)
                     inp_coords_B_list.append(inp_coors_B)
+                    if cudasim.debug_once():
+                        inpd = input_frag_A.data.numpy_view()
+                        print("InputA", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+                        inpd = input_frag_B.data.numpy_view()
+                        print("InputB", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
 
                     # if cudasim.threadIdx().x == 200:
                     #     print(input_frag_A.data.mean(), "INPUT A")
@@ -1038,9 +1058,19 @@ class Mma(pccm.ParameterizedClass):
                     if (gemm_k_iterations <= 2):
                         input_iter_A.clear_mask_python()
                         input_iter_B.clear_mask_python()
+                if cudasim.debug_once():
+                    inpd = warp_frag_A[warp_mma_k % 2].data.numpy_view()
+                    print(f"WarpA", warp_mma_k, cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+                    inpd = warp_frag_B[warp_mma_k % 2].data.numpy_view()
+                    print(f"WarpB", warp_mma_k, cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
                 await warp_mma(accumulators, warp_frag_A[warp_mma_k % 2],
                                warp_frag_B[warp_mma_k % 2], accumulators)
+
             gemm_k_iterations -= 1
+        if cudasim.debug_once():
+            acc =  accumulators.data.numpy_view()
+            cudasim.debug_print(f"accumulator {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+
         res = {
             "InputA": {
                 "input_coords": inp_coords_A_list,

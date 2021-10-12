@@ -867,6 +867,7 @@ class MaskTileIteratorParams(pccm.ParameterizedClass):
         self.shuffle_in_stride = shuffle_in_stride
 
        #  self.add_member("stride_", str(self.index_t))
+        self.add_member("stride_", str(self.index_t))
         self.add_member("inc_strided_", str(self.long_index_t))
         self.inc_advance_static = -1
         if self.advance_axis == 1:
@@ -911,6 +912,7 @@ class MaskTileIteratorParams(pccm.ParameterizedClass):
             """)
 
         code.arg("stride", "int")
+        code.ctor_init("stride_", "stride")
         if self.shuffle_in_stride:
             code.arg("indice_ptr", f"{self.index_t} const *")
             code.ctor_init("indice_ptr_", "indice_ptr")
@@ -1001,9 +1003,9 @@ class MaskTileIterator(bases.GemmInputIterator):
         self.add_member("pointer_", self.const_byte_pointer if read_only else self.byte_pointer) # 2 registers
         # self.add_member("pointer_bkp_", self.const_byte_pointer)
 
-        self.add_member("params_", "Params const &") # 2-3 registers
+        self.add_member("params_", "Params const &") 
 
-        self.add_member("extent_", "tv::array<int, 2>") # 2 registers
+        self.add_member("extent_", "tv::array<int, 2>")
         self.add_member("thread_offset_", "tv::array<int, 2>")
         self.add_member("residue_offset_", "int")
         self.add_member("is_residue_tile_", "bool")
@@ -1035,7 +1037,8 @@ class MaskTileIterator(bases.GemmInputIterator):
     def ctor(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode(f"""
+        code = pccm.FunctionCode()
+        code.raw(f"""
         int residue_size = (extent[{self.advance_axis}] - threadblock_offset[{self.advance_axis}]) %
                         {self.tile_shape[self.advance_axis]};
         if (!residue_size) {{
@@ -1095,7 +1098,6 @@ class MaskTileIterator(bases.GemmInputIterator):
         }} else {{
             compute_predicates_(residue_extent, false);
         }}
-
         """)
         if self.shuffle_in_stride:
             code.raw(f"""
@@ -1108,7 +1110,8 @@ class MaskTileIterator(bases.GemmInputIterator):
             #     """)
         else:
             code.raw(f"""
-            add_pointer_offset(thread_offset_[0] * extent_[1] + thread_offset_[1]);
+            // here we can't use extent_[1] because splitk may split stride.
+            add_pointer_offset(thread_offset_[0] * params.stride_ + thread_offset_[1]);
             """)
         code.arg("params", f"Params const &")
         code.arg("ptr", f"{self.const_pointer if self.read_only else self.pointer}")
@@ -1177,6 +1180,8 @@ class MaskTileIterator(bases.GemmInputIterator):
             thread_id)
         if (not new_obj.last_residual):
             new_obj.thread_offset_ += new_obj.residue_offset_
+        if cudasim.debug_once():
+            print(residue_size, new_obj.params_.stride_, new_obj.thread_offset_, residue_extent)
         # print(ptr, thread_id, new_obj.params_.stride_, new_obj.thread_offset_)
         new_obj.add_pointer_offset_python(new_obj.thread_offset_[0] *
                                           new_obj.params_.stride_ +

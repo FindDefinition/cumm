@@ -134,16 +134,40 @@ def inside_cuda() -> bool:
 
 
 def threadIdx():
-    return get_cuda_context().threadIdx
+    ctx = get_cuda_context()
+    if ctx is None:
+        return Dim3(-1, -1, -1)
+    return ctx.threadIdx
 
+def blockDim():
+    ctx = get_cuda_context()
+    if ctx is None:
+        return Dim3(-1, -1, -1)
+    return ctx.blockDim
+
+def gridDim():
+    ctx = get_cuda_context()
+    if ctx is None:
+        return Dim3(-1, -1, -1)
+    return ctx.gridDim
 
 def get_smem() -> np.ndarray:
     return get_cuda_context().smem
 
 
 def blockIdx():
-    return get_cuda_context().blockIdx
+    ctx = get_cuda_context()
+    if ctx is None:
+        return  Dim3(-1, -1, -1)
+    return ctx.blockIdx
 
+def debug_once(tx: int = -1):
+    tid = threadIdx()
+    bidx = blockIdx()
+    exp_tx = tx
+    if exp_tx == -1:
+        exp_tx = debug_tx()
+    return tid.x == exp_tx and tid.y == 0 and tid.z == 0 and bidx.x == 0 and bidx.y == 0 
 
 def get_thread_id():
     return get_cuda_context().get_thread_id()

@@ -369,8 +369,6 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
                 # row2/row3 we need to swap tensorop part.
                 swizzled_tensorop_col = tensorop_col ^ (i * 2)
             new_obj.pointers_[i] = pointer + swizzled_tensorop_col
-            if cudasim.threadIdx().x == 1:
-                print(i, "swizzled_tensorop_col", swizzled_tensorop_col)
         if self.spec_s32_168:
             for i in range(self.offset_count):
                 new_obj.uniform_offset_[i] = i * 4
