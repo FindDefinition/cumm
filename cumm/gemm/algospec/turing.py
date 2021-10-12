@@ -4,17 +4,18 @@ from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import pccm
+
 from cumm import dtypes
+from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
+                         TensorViewKernel)
 from cumm.gemm import (constants, gemmmath, layout, layout_tensorop,
-                         mask_iters, out_iters, output_op, thread_map,
-                         turing_iters, turing_my_iters, turing_out_iters, wmma)
+                       mask_iters, out_iters, output_op, thread_map,
+                       turing_iters, turing_my_iters, turing_out_iters, wmma)
 from cumm.gemm.algospec import bases
 from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
-                               GemmOutFragIterator, GemmOutputIterator,
-                               GemmOutputOp, GemmOutSmemLoader,
-                               GemmOutWarpIterator)
-from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                                TensorViewKernel)
+                             GemmOutFragIterator, GemmOutputIterator,
+                             GemmOutputOp, GemmOutSmemLoader,
+                             GemmOutWarpIterator)
 from cumm.gemm.core import MetaArray, metaseq, seq
 from cumm.gemm.wmma.simt import WarpMmaSimt
 
@@ -22,15 +23,16 @@ from .core import GemmAlgo, ShuffleStrideType, TensorOpParams
 
 
 class InputTuring(bases.Input):
-    def __init__(self,
-                 tile_shape: MetaArray[int],
-                 warp_tile_shape: MetaArray[int],
-                 dtype_a: dtypes.DType,
-                 dtype_b: dtypes.DType,
-                 trans_a: bool,
-                 trans_b: bool,
-                 algo: GemmAlgo = GemmAlgo.Turing,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            tile_shape: MetaArray[int],
+            warp_tile_shape: MetaArray[int],
+            dtype_a: dtypes.DType,
+            dtype_b: dtypes.DType,
+            trans_a: bool,
+            trans_b: bool,
+            algo: GemmAlgo = GemmAlgo.Turing,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         m = tile_shape[0]
         n = tile_shape[1]
         k = tile_shape[2]
@@ -122,6 +124,7 @@ class InputTuring(bases.Input):
     @property
     def tile_shape(self) -> MetaArray[int]:
         return self._tile_shape
+
 
 class MmaTuring(bases.Mma):
     def __init__(self,
@@ -300,26 +303,30 @@ class MmaTuring(bases.Mma):
 
 
 class OutputTuring(bases.Output):
-    def __init__(self,
-                 mma_spec: bases.Mma,
-                 tile_shape: MetaArray[int],
-                 warp_tile_shape: MetaArray[int],
-                 num_stage: int,
-                 dtype_c: dtypes.DType,
-                 dtype_acc: dtypes.DType,
-                 dtype_comp: dtypes.DType,
-                 trans_c: bool,
-                 tensorop: Optional[TensorOpParams] = None,
-                 algo: GemmAlgo = GemmAlgo.Simt,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            mma_spec: bases.Mma,
+            tile_shape: MetaArray[int],
+            warp_tile_shape: MetaArray[int],
+            num_stage: int,
+            dtype_c: dtypes.DType,
+            dtype_acc: dtypes.DType,
+            dtype_comp: dtypes.DType,
+            trans_c: bool,
+            tensorop: Optional[TensorOpParams] = None,
+            algo: GemmAlgo = GemmAlgo.Simt,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         self._mma_spec = mma_spec
         output_op_count = constants.OPTIM_ACCESS_BITS // dtype_c.bitsize()
         # TODO support more mixed tile shape for int8
-        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 128) and warp_tile_shape[:2] == seq(64, 64):
+        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(
+                128, 128) and warp_tile_shape[:2] == seq(64, 64):
             output_op_count = 8
-        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 64) and warp_tile_shape[:2] == seq(64, 32):
+        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(
+                128, 64) and warp_tile_shape[:2] == seq(64, 32):
             output_op_count = 8
-        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(64, 64) and warp_tile_shape[:2] == seq(32, 32):
+        if dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(
+                64, 64) and warp_tile_shape[:2] == seq(32, 32):
             output_op_count = 8
 
         # 32 * 16 * (128 * 4096 + 256 * 4096) * 2
@@ -341,9 +348,16 @@ class OutputTuring(bases.Output):
         self.acc_frag_iter = turing_out_iters.OutFragIterTensorOp(
             dtype_acc, warp_tile_shape, seq(*tensorop.shape))
         mixed_enable = dtype_c.itemsize() < dtype_acc.itemsize()
-        mixed_enable_dtypes = (dtype_c == dtypes.float16 and dtype_acc == dtypes.float32)
-        mixed_enable_dtypes |= (dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 128) and warp_tile_shape[:2] == seq(64, 64))
-        mixed_enable_dtypes |= (dtype_c == dtypes.int8 and dtype_acc == dtypes.int32 and tile_shape[:2] == seq(128, 64) and warp_tile_shape[:2] == seq(64, 32))
+        mixed_enable_dtypes = (dtype_c == dtypes.float16
+                               and dtype_acc == dtypes.float32)
+        mixed_enable_dtypes |= (dtype_c == dtypes.int8
+                                and dtype_acc == dtypes.int32
+                                and tile_shape[:2] == seq(128, 128)
+                                and warp_tile_shape[:2] == seq(64, 64))
+        mixed_enable_dtypes |= (dtype_c == dtypes.int8
+                                and dtype_acc == dtypes.int32
+                                and tile_shape[:2] == seq(128, 64)
+                                and warp_tile_shape[:2] == seq(64, 32))
         mixed_enable &= mixed_enable_dtypes
         # mixed_enable = False
         if mixed_enable:
@@ -394,13 +408,21 @@ class OutputTuring(bases.Output):
         shuffle = shuffle_stride == ShuffleStrideType.ShuffleAC
         out_iter_params = out_iters.OutIteratorParams(self.out_tmap, shuffle)
 
-        self._out_iter = out_iters.OutIterator(dtype_c, self.out_tmap, out_iter_params,
+        self._out_iter = out_iters.OutIterator(dtype_c,
+                                               self.out_tmap,
+                                               out_iter_params,
                                                self.part_shape,
                                                self.part_dilation,
-                                               output_op_count, shuffle_in_stride=shuffle)
-        self._const_out_iter = out_iters.OutIterator(dtype_c, self.out_tmap, out_iter_params,
-                                              self.part_shape, self.part_dilation,
-                                              output_op_count, read_only=True, shuffle_in_stride=shuffle)
+                                               output_op_count,
+                                               shuffle_in_stride=shuffle)
+        self._const_out_iter = out_iters.OutIterator(dtype_c,
+                                                     self.out_tmap,
+                                                     out_iter_params,
+                                                     self.part_shape,
+                                                     self.part_dilation,
+                                                     output_op_count,
+                                                     read_only=True,
+                                                     shuffle_in_stride=shuffle)
 
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"
@@ -444,7 +466,7 @@ class OutputTuring(bases.Output):
     def out_iter(self) -> GemmOutputIterator:
         return self._out_iter
 
-    @property 
+    @property
     def const_out_iter(self) -> GemmOutputIterator:
         return self._const_out_iter
 
@@ -466,24 +488,26 @@ class OutputTuring(bases.Output):
 
 
 class AlgoSpecificTuring(object):
-    def __init__(self,
-                 tile_shape: MetaArray[int],
-                 warp_tile_shape: MetaArray[int],
-                 num_stage: int,
-                 dtype_a: dtypes.DType,
-                 dtype_b: dtypes.DType,
-                 dtype_c: dtypes.DType,
-                 dtype_acc: dtypes.DType,
-                 dtype_comp: dtypes.DType,
-                 trans_a: bool,
-                 trans_b: bool,
-                 trans_c: bool,
-                 tensorop: TensorOpParams,
-                 algo: GemmAlgo = GemmAlgo.Turing,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            tile_shape: MetaArray[int],
+            warp_tile_shape: MetaArray[int],
+            num_stage: int,
+            dtype_a: dtypes.DType,
+            dtype_b: dtypes.DType,
+            dtype_c: dtypes.DType,
+            dtype_acc: dtypes.DType,
+            dtype_comp: dtypes.DType,
+            trans_a: bool,
+            trans_b: bool,
+            trans_c: bool,
+            tensorop: TensorOpParams,
+            algo: GemmAlgo = GemmAlgo.Turing,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         assert algo == GemmAlgo.Turing
         self.input_spec = InputTuring(tile_shape, warp_tile_shape, dtype_a,
-                                      dtype_b, trans_a, trans_b, algo, shuffle_stride)
+                                      dtype_b, trans_a, trans_b, algo,
+                                      shuffle_stride)
         self.mma_spec = MmaTuring(self.input_spec, tile_shape, warp_tile_shape,
                                   num_stage, dtype_a, dtype_b, dtype_acc,
                                   trans_a, trans_b, tensorop, algo)

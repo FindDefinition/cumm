@@ -1,18 +1,17 @@
-import pccm
-import numpy as np
-from cumm import tensorview as tv 
 from typing import List
-from cumm.cudasim import checkers
 
-from cumm.gemm import constants, thread_map, layout_tensorop
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel
-from cumm.gemm.thread_map import PitchLinearWarpRaked
-from cumm.gemm import layout_tensorop
-from cumm.gemm import arch
-from cumm.core_cc.csrc.arrayref import ArrayPtr
+import numpy as np
+import pccm
+
 from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray
-from cumm.gemm import bases
+from cumm import tensorview as tv
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.cudasim import checkers
+from cumm.gemm import arch, bases, constants, layout_tensorop, thread_map
+from cumm.gemm.core import MetaArray, metaseq, seq
+from cumm.gemm.thread_map import PitchLinearWarpRaked
+
 # def seq(*vals) -> np.ndarray:
 #     return np.array([*vals], dtype=np.int64)
 
@@ -530,7 +529,9 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                                               permute_m_pointer_idx)
         if res != ref:
             print(self.sw_shape, self.subsw_shape)
-            print(f"{lane_idx, ldm_count, transpose, permute_m_pointer_idx, self.interleave, self.is_spec_32}, {res, ref}")
+            print(
+                f"{lane_idx, ldm_count, transpose, permute_m_pointer_idx, self.interleave, self.is_spec_32}, {res, ref}"
+            )
             assert res == ref
         return res
 
@@ -679,7 +680,9 @@ class SmemTileIterator(bases.GemmSmemIterator):
                  alignment: int = -1,
                  crosswise: int = 0,
                  num_stage: int = 2):
-        super().__init__(dtype, tmap.iterations.prod() * my_layout.element_per_acc, my_layout.element_per_acc)
+        super().__init__(dtype,
+                         tmap.iterations.prod() * my_layout.element_per_acc,
+                         my_layout.element_per_acc)
         # cultass shape: mk
         # our shape: km
         # A crosswise: [64, 32], congruous: [32, 64]
@@ -735,7 +738,7 @@ class SmemTileIterator(bases.GemmSmemIterator):
         # cudasim members
         self.pointer_: List[ArrayPtr] = [None] * self.pointer_count
         self.byte_offset_ = 0
-        
+
     def get_smem_vis_shape(self) -> MetaArray[int]:
         return seq(self.smem_vis_shape[0], self.smem_vis_shape[1])
 
@@ -969,8 +972,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
         tile_shape_mk = tile_shape_km[::-1]
         inst_shape_mk = inst_shape_km[::-1]
         warp_tile_shape_mk = warp_tile_shape_km[::-1]
-        element_count = warp_tile_shape_mk[0] * inst_shape_mk[
-            1] // self.threads
+        element_count = warp_tile_shape_mk[0] * inst_shape_mk[1] // self.threads
 
         super().__init__(dtype, element_count, my_layout.element_per_acc)
         self.tile_shape_km = tile_shape_km
@@ -1274,8 +1276,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         self.threads = 32
 
         self.is_spec_32 = dtype.bitsize() == 32
-        element_count = warp_tile_shape_km[1] * inst_shape_km[
-            0] // self.threads
+        element_count = warp_tile_shape_km[1] * inst_shape_km[0] // self.threads
 
         if self.is_spec_32:
             super().__init__(dtype, element_count, 1)

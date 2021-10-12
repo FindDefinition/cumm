@@ -1,11 +1,13 @@
-import pccm
 import abc
+from typing import Optional, Union
+
+import pccm
+
 from cumm import dtypes
 from cumm.constants import CUTLASS_MODE
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
-from cumm.gemm.thread_map import PitchLinear, PitchLinearWarpRaked
-from typing import Optional, Union
 from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.thread_map import PitchLinear, PitchLinearWarpRaked
 
 
 @pccm.skip_inherit
@@ -251,6 +253,7 @@ class GemmOutputOp(pccm.ParameterizedClass):
 
     def set_k_partition_python(self, k_part: int, k_part_count: int):
         raise NotImplementedError
+
 
 @pccm.skip_inherit
 class GemmApply(pccm.ParameterizedClass):

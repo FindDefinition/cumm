@@ -1,12 +1,14 @@
-from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
-from pccm.stubs import EnumValue, EnumClassValue
+from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, Type,
+                    Union, overload)
+
+from pccm.stubs import EnumClassValue, EnumValue
+
 class TensorViewBind:
     @staticmethod
     def hello() -> None: ...
 from typing import List, Tuple, Union, overload
 
 import numpy as np
-
 
 class Tensor:
     @overload

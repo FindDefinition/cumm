@@ -2,14 +2,16 @@ import abc
 
 import numpy as np
 import pccm
+
 from cumm import dtypes
-from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
-                               GemmOutFragIterator, GemmOutputIterator,
-                               GemmOutputOp, GemmOutSmemLoader,
-                               GemmOutWarpIterator, GemmSmemIterator,
-                               GemmWarpIterator, WarpMma)
-from cumm.gemm.core import MetaArray, metaseq, seq
 from cumm.gemm import layout
+from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
+                             GemmOutFragIterator, GemmOutputIterator,
+                             GemmOutputOp, GemmOutSmemLoader,
+                             GemmOutWarpIterator, GemmSmemIterator,
+                             GemmWarpIterator, WarpMma)
+from cumm.gemm.core import MetaArray, metaseq, seq
+
 
 class Input(abc.ABC):
     """

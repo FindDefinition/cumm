@@ -80,10 +80,9 @@ def zeros(shape: List[int],
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
     return tensorview_bind.zeros(shape, tv_dtype, device, pinned, managed)
 
-def from_blob(ptr: int,
-            shape: List[int],
-          dtype: Union[np.dtype, int],
-          device: int) -> Tensor:
+
+def from_blob(ptr: int, shape: List[int], dtype: Union[np.dtype, int],
+              device: int) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
@@ -91,16 +90,16 @@ def from_blob(ptr: int,
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
     return tensorview_bind.from_blob(ptr, shape, tv_dtype, device)
 
-def from_const_blob(ptr: int,
-            shape: List[int],
-          dtype: Union[np.dtype, int],
-          device: int) -> Tensor:
+
+def from_const_blob(ptr: int, shape: List[int], dtype: Union[np.dtype, int],
+                    device: int) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
     return tensorview_bind.from_const_blob(ptr, shape, tv_dtype, device)
+
 
 def empty(shape: List[int],
           dtype: Union[np.dtype, int] = np.float32,

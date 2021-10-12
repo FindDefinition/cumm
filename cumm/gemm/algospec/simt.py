@@ -4,17 +4,18 @@ from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import pccm
+
 from cumm import dtypes
+from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
+                         TensorViewKernel)
 from cumm.gemm import (constants, gemmmath, layout, mask_iters, out_iters,
-                         output_op, thread_map, volta_iters, volta_out_iters,
-                         wmma)
+                       output_op, thread_map, volta_iters, volta_out_iters,
+                       wmma)
 from cumm.gemm.algospec import bases
 from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
-                               GemmOutFragIterator, GemmOutputIterator,
-                               GemmOutputOp, GemmOutSmemLoader,
-                               GemmOutWarpIterator)
-from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                                TensorViewKernel)
+                             GemmOutFragIterator, GemmOutputIterator,
+                             GemmOutputOp, GemmOutSmemLoader,
+                             GemmOutWarpIterator)
 from cumm.gemm.core import MetaArray, metaseq, seq
 from cumm.gemm.wmma.simt import WarpMmaSimt
 
@@ -133,6 +134,7 @@ class InputSimt(bases.Input):
     def tile_shape(self) -> MetaArray[int]:
         return self._tile_shape
 
+
 class MmaSimt(bases.Mma):
     def __init__(self,
                  input_spec: bases.Input,
@@ -231,18 +233,28 @@ class MmaSimt(bases.Mma):
             seq(tile_shape[2] * num_stage, tile_shape[1]),
             transposed_input=trans_b)
         self._warp_iter_a = mask_iters.WarpTileIterator(
-            dtype_a, seq(tile_shape[2], tile_shape[0] + padding_m),
-            seq(warp_tile_shape[2], warp_tile_shape[0]), warp_shape,
+            dtype_a,
+            seq(tile_shape[2], tile_shape[0] + padding_m),
+            seq(warp_tile_shape[2], warp_tile_shape[0]),
+            warp_shape,
             seq(lane_mma_shape[2], lane_mma_shape[0]),
             layout.RowMajorInterleaved(self.input_sub_tile_shape_a[0]),
-            self.lane_layout, padding_m, True, partk=self.partk)
+            self.lane_layout,
+            padding_m,
+            True,
+            partk=self.partk)
 
         self._warp_iter_b = mask_iters.WarpTileIterator(
-            dtype_b, seq(tile_shape[2], tile_shape[1] + padding_n),
-            seq(warp_tile_shape[2], warp_tile_shape[1]), warp_shape,
+            dtype_b,
+            seq(tile_shape[2], tile_shape[1] + padding_n),
+            seq(warp_tile_shape[2], warp_tile_shape[1]),
+            warp_shape,
             seq(lane_mma_shape[2], lane_mma_shape[1]),
             layout.RowMajorInterleaved(self.input_sub_tile_shape_b[0]),
-            self.lane_layout, padding_n, False, partk=self.partk)
+            self.lane_layout,
+            padding_n,
+            False,
+            partk=self.partk)
         # if dtype_a == dtypes.float16 and dtype_b == dtypes.float16:
         #     self._warp_mma = WarpMmaSimt(
         #         (thread_mma_shape[0], thread_mma_shape[1], lane_mma_shape[2]),
@@ -446,7 +458,8 @@ class AlgoSpecificSimt(object):
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A
         self.input_spec = InputSimt(tile_shape, warp_tile_shape, dtype_a,
-                                    dtype_b, trans_a, trans_b, algo, shuffle_stride)
+                                    dtype_b, trans_a, trans_b, algo,
+                                    shuffle_stride)
         self.mma_spec = MmaSimt(self.input_spec, tile_shape, warp_tile_shape,
                                 num_stage, dtype_a, dtype_b, dtype_acc,
                                 trans_a, trans_b, tensorop, algo)

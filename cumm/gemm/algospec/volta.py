@@ -4,17 +4,18 @@ from typing import Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import pccm
+
 from cumm import dtypes
+from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
+                         TensorViewKernel)
 from cumm.gemm import (constants, gemmmath, layout, mask_iters, out_iters,
-                         output_op, thread_map, volta_iters, volta_out_iters,
-                         wmma)
+                       output_op, thread_map, volta_iters, volta_out_iters,
+                       wmma)
 from cumm.gemm.algospec import bases
 from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
-                               GemmOutFragIterator, GemmOutputIterator,
-                               GemmOutputOp, GemmOutSmemLoader,
-                               GemmOutWarpIterator)
-from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                                TensorViewKernel)
+                             GemmOutFragIterator, GemmOutputIterator,
+                             GemmOutputOp, GemmOutSmemLoader,
+                             GemmOutWarpIterator)
 from cumm.gemm.core import MetaArray, metaseq, seq
 from cumm.gemm.wmma.simt import WarpMmaSimt
 
@@ -22,15 +23,16 @@ from .core import GemmAlgo, ShuffleStrideType, TensorOpParams
 
 
 class InputVolta(bases.Input):
-    def __init__(self,
-                 tile_shape: MetaArray[int],
-                 warp_tile_shape: MetaArray[int],
-                 dtype_a: dtypes.DType,
-                 dtype_b: dtypes.DType,
-                 trans_a: bool,
-                 trans_b: bool,
-                 algo: GemmAlgo = GemmAlgo.Volta,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            tile_shape: MetaArray[int],
+            warp_tile_shape: MetaArray[int],
+            dtype_a: dtypes.DType,
+            dtype_b: dtypes.DType,
+            trans_a: bool,
+            trans_b: bool,
+            algo: GemmAlgo = GemmAlgo.Volta,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         self._trans_a = trans_a
         self._trans_b = trans_b
 
@@ -115,6 +117,7 @@ class InputVolta(bases.Input):
     @property
     def tile_shape(self) -> MetaArray[int]:
         return self._tile_shape
+
 
 class MmaVolta(bases.Mma):
     def __init__(self,
@@ -211,18 +214,19 @@ class MmaVolta(bases.Mma):
 
 
 class OutputVolta(bases.Output):
-    def __init__(self,
-                 mma_spec: MmaVolta,
-                 tile_shape: MetaArray[int],
-                 warp_tile_shape: MetaArray[int],
-                 num_stage: int,
-                 dtype_c: dtypes.DType,
-                 dtype_acc: dtypes.DType,
-                 dtype_comp: dtypes.DType,
-                 trans_c: bool,
-                 tensorop: Optional[TensorOpParams] = None,
-                 algo: GemmAlgo = GemmAlgo.Simt,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            mma_spec: MmaVolta,
+            tile_shape: MetaArray[int],
+            warp_tile_shape: MetaArray[int],
+            num_stage: int,
+            dtype_c: dtypes.DType,
+            dtype_acc: dtypes.DType,
+            dtype_comp: dtypes.DType,
+            trans_c: bool,
+            tensorop: Optional[TensorOpParams] = None,
+            algo: GemmAlgo = GemmAlgo.Simt,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         self._mma_spec = mma_spec
         output_op_count = constants.OPTIM_ACCESS_BITS // dtype_c.bitsize()
         # 32 * 16 * (128 * 4096 + 256 * 4096) * 2
@@ -267,13 +271,21 @@ class OutputVolta(bases.Output):
         shuffle = shuffle_stride == ShuffleStrideType.ShuffleAC
         out_iter_params = out_iters.OutIteratorParams(self.out_tmap, shuffle)
 
-        self._out_iter = out_iters.OutIterator(dtype_c, self.out_tmap, out_iter_params,
+        self._out_iter = out_iters.OutIterator(dtype_c,
+                                               self.out_tmap,
+                                               out_iter_params,
                                                self.part_shape,
                                                self.part_dilation,
-                                               output_op_count, shuffle_in_stride=shuffle)
-        self._const_out_iter = out_iters.OutIterator(dtype_c, self.out_tmap, out_iter_params,
-                                              self.part_shape, self.part_dilation,
-                                              output_op_count, read_only=True, shuffle_in_stride=shuffle)
+                                               output_op_count,
+                                               shuffle_in_stride=shuffle)
+        self._const_out_iter = out_iters.OutIterator(dtype_c,
+                                                     self.out_tmap,
+                                                     out_iter_params,
+                                                     self.part_shape,
+                                                     self.part_dilation,
+                                                     output_op_count,
+                                                     read_only=True,
+                                                     shuffle_in_stride=shuffle)
 
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"
@@ -316,8 +328,8 @@ class OutputVolta(bases.Output):
     @property
     def out_iter(self) -> GemmOutputIterator:
         return self._out_iter
-        
-    @property 
+
+    @property
     def const_out_iter(self) -> GemmOutputIterator:
         return self._const_out_iter
 
@@ -339,24 +351,26 @@ class OutputVolta(bases.Output):
 
 
 class AlgoSpecificVolta(object):
-    def __init__(self,
-                 tile_shape: MetaArray[int],
-                 warp_tile_shape: MetaArray[int],
-                 num_stage: int,
-                 dtype_a: dtypes.DType,
-                 dtype_b: dtypes.DType,
-                 dtype_c: dtypes.DType,
-                 dtype_acc: dtypes.DType,
-                 dtype_comp: dtypes.DType,
-                 trans_a: bool,
-                 trans_b: bool,
-                 trans_c: bool,
-                 tensorop: Optional[TensorOpParams] = None,
-                 algo: GemmAlgo = GemmAlgo.Volta,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            tile_shape: MetaArray[int],
+            warp_tile_shape: MetaArray[int],
+            num_stage: int,
+            dtype_a: dtypes.DType,
+            dtype_b: dtypes.DType,
+            dtype_c: dtypes.DType,
+            dtype_acc: dtypes.DType,
+            dtype_comp: dtypes.DType,
+            trans_a: bool,
+            trans_b: bool,
+            trans_c: bool,
+            tensorop: Optional[TensorOpParams] = None,
+            algo: GemmAlgo = GemmAlgo.Volta,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         assert algo == GemmAlgo.Volta
         self.input_spec = InputVolta(tile_shape, warp_tile_shape, dtype_a,
-                                     dtype_b, trans_a, trans_b, algo, shuffle_stride)
+                                     dtype_b, trans_a, trans_b, algo,
+                                     shuffle_stride)
         self.mma_spec = MmaVolta(self.input_spec, tile_shape, warp_tile_shape,
                                  num_stage, dtype_a, dtype_b, dtype_acc,
                                  trans_a, trans_b, tensorop, algo)

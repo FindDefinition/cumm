@@ -1,27 +1,30 @@
-from cumm import cudasim
-from cumm.core_cc.csrc.arrayref import ArrayPtr
-import pccm
-import numpy as np
-
 from typing import List, Tuple, Union
-from cumm.gemm import constants, layout, thread_map, core
-from cumm.common import TensorView, GemmBasic
-from cumm.gemm.arch import instmma 
-from cumm import dtypes
-from cumm.gemm import bases 
+
+import numpy as np
+import pccm
+
+from cumm import cudasim, dtypes
+from cumm.common import GemmBasic, TensorView
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm import bases, constants, core, layout, thread_map
+from cumm.gemm.arch import instmma
+
 
 class WarpMmaSimt(bases.WarpMma):
-    def __init__(self, thread_mma_shape: Tuple[int, int, int], dtype_a: dtypes.DType, dtype_b: dtypes.DType,
-                 dtype_c: dtypes.DType, trans_a: bool, trans_b: bool, trans_c: bool):
+    def __init__(self, thread_mma_shape: Tuple[int, int,
+                                               int], dtype_a: dtypes.DType,
+                 dtype_b: dtypes.DType, dtype_c: dtypes.DType, trans_a: bool,
+                 trans_b: bool, trans_c: bool):
         # TODO merge mma sync
-        super().__init__() 
+        super().__init__()
         self.add_dependency(TensorView, layout.RowMajor, layout.ColumnMajor)
-        self.thread_mma_shape = (thread_mma_shape[0], thread_mma_shape[1], thread_mma_shape[2]) 
-        self.dtype_a = dtype_a 
-        self.dtype_b = dtype_b 
-        self.dtype_c = dtype_c 
-        self.trans_a = trans_a 
-        self.trans_b = trans_b 
+        self.thread_mma_shape = (thread_mma_shape[0], thread_mma_shape[1],
+                                 thread_mma_shape[2])
+        self.dtype_a = dtype_a
+        self.dtype_b = dtype_b
+        self.dtype_c = dtype_c
+        self.trans_a = trans_a
+        self.trans_b = trans_b
         self.trans_c = trans_c
         self.mn = thread_mma_shape[0] * thread_mma_shape[1]
         self.km = thread_mma_shape[2] * thread_mma_shape[0]
@@ -31,20 +34,24 @@ class WarpMmaSimt(bases.WarpMma):
         self.fragment_b_t = self.array_type(str(dtype_b), self.kn)
         self.fragment_c_t = self.array_type(str(dtype_c), self.mn)
         dabc = (dtype_a, dtype_b, dtype_c)
-        use_dp4a = (thread_mma_shape[2] % 4 == 0 and dabc == (dtypes.int8, dtypes.int8, dtypes.int32))
+        use_dp4a = (thread_mma_shape[2] % 4 == 0
+                    and dabc == (dtypes.int8, dtypes.int8, dtypes.int32))
         use_dp4a &= (trans_a and not trans_b) or (trans_b and not trans_a)
         use_hfma2 = (not trans_c and thread_mma_shape[1] % 4 == 0)
-        use_hfma2 |= ( trans_c and thread_mma_shape[0] % 4 == 0)
+        use_hfma2 |= (trans_c and thread_mma_shape[0] % 4 == 0)
         use_hfma2 &= dabc == (dtypes.float16, dtypes.float16, dtypes.float16)
-        # use_hfma2 = False 
+        # use_hfma2 = False
         if use_dp4a:
-            self.mma = instmma.InstMma((1, 1, 4), 1, dtype_a, dtype_b, dtype_c, trans_a, trans_b, trans_c)
+            self.mma = instmma.InstMma((1, 1, 4), 1, dtype_a, dtype_b, dtype_c,
+                                       trans_a, trans_b, trans_c)
         elif use_hfma2:
             inst_shape = (2, 1, 1) if trans_c else (1, 2, 1)
-            self.mma = instmma.InstMma(inst_shape, 1, dtype_a, dtype_b, dtype_c, trans_a, trans_b, trans_c)
+            self.mma = instmma.InstMma(inst_shape, 1, dtype_a, dtype_b,
+                                       dtype_c, trans_a, trans_b, trans_c)
         else:
-            self.mma = instmma.InstMma((1, 1, 1), 1, dtype_a, dtype_b, dtype_c, trans_a, trans_b, trans_c)
-        self.use_hfma2 = use_hfma2 
+            self.mma = instmma.InstMma((1, 1, 1), 1, dtype_a, dtype_b, dtype_c,
+                                       trans_a, trans_b, trans_c)
+        self.use_hfma2 = use_hfma2
         self.use_dp4a = use_dp4a
         self.add_param_class("instmma", self.mma, "InstMma")
 
@@ -54,7 +61,9 @@ class WarpMmaSimt(bases.WarpMma):
     def python_ctor(self):
         return self
 
-    @pccm.cuda.member_function(name="operator()", device=True, forceinline=True)
+    @pccm.cuda.member_function(name="operator()",
+                               device=True,
+                               forceinline=True)
     def call_operator(self):
         la = "ColumnMajor" if self.trans_a else "RowMajor"
         lb = "ColumnMajor" if self.trans_b else "RowMajor"
@@ -97,7 +106,7 @@ class WarpMmaSimt(bases.WarpMma):
                         """)
         elif self.use_hfma2:
             ccount = self.mma.shape[0] * self.mma.shape[1]
-            
+
             code.raw(f"""
             InstMma mma;
             {self.array_type(self.dtype_c, ccount)} *ptr_D =
@@ -110,7 +119,8 @@ class WarpMmaSimt(bases.WarpMma):
             if self.trans_c:
                 with code.range_("k", mma_iters[2], "TV_PRAGMA_UNROLL"):
                     with code.range_("m", mma_iters[0], "TV_PRAGMA_UNROLL"):
-                        with code.range_("n", mma_iters[1], "TV_PRAGMA_UNROLL"):
+                        with code.range_("n", mma_iters[1],
+                                         "TV_PRAGMA_UNROLL"):
                             code.raw(f"""
                             {self.array_type(dtypes.float16, 2)} tmp;
                             {self.array_type(dtypes.float16, 2)} *ptr_tmp = &tmp;
@@ -124,9 +134,13 @@ class WarpMmaSimt(bases.WarpMma):
                                 tmp_A[1] = (*ptr_A)[(2 * m + 1) * {self.thread_mma_shape[2]} + k];
                                 """)
                                 if not self.trans_b:
-                                    code.raw(f"mma(tmp, tmp_A, ptr_B[k * {self.thread_mma_shape[1]} + n], tmp);")
+                                    code.raw(
+                                        f"mma(tmp, tmp_A, ptr_B[k * {self.thread_mma_shape[1]} + n], tmp);"
+                                    )
                                 else:
-                                    code.raw(f"mma(tmp, tmp_A, ptr_B[n * {self.thread_mma_shape[2]} + k], tmp);")
+                                    code.raw(
+                                        f"mma(tmp, tmp_A, ptr_B[n * {self.thread_mma_shape[2]} + k], tmp);"
+                                    )
                             else:
                                 code.raw(f"""
                                 ptr_tmp[0] = ptr_D[n * {self.thread_mma_shape[0]} / 2 + m];
@@ -148,7 +162,8 @@ class WarpMmaSimt(bases.WarpMma):
             else:
                 with code.range_("k", mma_iters[2], "TV_PRAGMA_UNROLL"):
                     with code.range_("n", mma_iters[1], "TV_PRAGMA_UNROLL"):
-                        with code.range_("m", mma_iters[0], "TV_PRAGMA_UNROLL"):
+                        with code.range_("m", mma_iters[0],
+                                         "TV_PRAGMA_UNROLL"):
                             code.raw(f"""
                             {self.array_type(dtypes.float16, 2)} tmp;
                             {self.array_type(dtypes.float16, 2)} *ptr_tmp = &tmp;
@@ -177,9 +192,13 @@ class WarpMmaSimt(bases.WarpMma):
                                 tmp_B[1] = (*ptr_B)[(2 * n + 1) * {self.thread_mma_shape[2]} + k];
                                 """)
                                 if not self.trans_a:
-                                    code.raw(f"mma(tmp, ptr_A[m * {self.thread_mma_shape[2]} + k], tmp_B, tmp);")
+                                    code.raw(
+                                        f"mma(tmp, ptr_A[m * {self.thread_mma_shape[2]} + k], tmp_B, tmp);"
+                                    )
                                 else:
-                                    code.raw(f"mma(tmp, ptr_A[k * {self.thread_mma_shape[0]} + m], tmp_B, tmp);")
+                                    code.raw(
+                                        f"mma(tmp, ptr_A[k * {self.thread_mma_shape[0]} + m], tmp_B, tmp);"
+                                    )
                             code.raw(f"""
                             ptr_D[m * {self.thread_mma_shape[1]} / 2 + n] = ptr_tmp[0];
                             """)
@@ -214,10 +233,10 @@ class WarpMmaSimt(bases.WarpMma):
             }}
 
             """)
-        return code 
+        return code
 
-    
-    async def __call__(self, D: ArrayPtr, A: ArrayPtr, B: ArrayPtr, C: ArrayPtr):
+    async def __call__(self, D: ArrayPtr, A: ArrayPtr, B: ArrayPtr,
+                       C: ArrayPtr):
         mma_iters = np.array(self.thread_mma_shape) // np.array(self.mma.shape)
         la = layout.ColumnMajor() if self.trans_a else layout.RowMajor()
         lb = layout.ColumnMajor() if self.trans_b else layout.RowMajor()
@@ -237,11 +256,16 @@ class WarpMmaSimt(bases.WarpMma):
                         tmp = D[layoutC(m, n)].copy()
 
                         if self.trans_b and not self.trans_a:
-                            inst_mma(tmp, ptr_A[m + k * self.thread_mma_shape[0]], 
-                            ptr_B[n + k * self.thread_mma_shape[0]], tmp)
+                            inst_mma(tmp,
+                                     ptr_A[m + k * self.thread_mma_shape[0]],
+                                     ptr_B[n + k * self.thread_mma_shape[0]],
+                                     tmp)
                         else:
-                            inst_mma(tmp, ptr_A[m * self.thread_mma_shape[2] // self.mma.shape[2] + k], 
-                                    ptr_B[n * self.thread_mma_shape[2] // self.mma.shape[2] + k], tmp)
+                            inst_mma(
+                                tmp, ptr_A[m * self.thread_mma_shape[2] //
+                                           self.mma.shape[2] + k],
+                                ptr_B[n * self.thread_mma_shape[2] //
+                                      self.mma.shape[2] + k], tmp)
                         D[layoutC(m, n)] = tmp
         elif self.use_hfma2:
             ccount = self.mma.shape[0] * self.mma.shape[1]
@@ -255,50 +279,81 @@ class WarpMmaSimt(bases.WarpMma):
                 for k in range(mma_iters[2]):
                     for m in range(mma_iters[0]):
                         for n in range(mma_iters[1]):
-                            tmp = ptr_D[n * self.thread_mma_shape[0] // 2 + m].copy()
+                            tmp = ptr_D[n * self.thread_mma_shape[0] // 2 +
+                                        m].copy()
                             if not self.trans_a:
                                 tmp_A = ArrayPtr(dtypes.float16.tv_dtype, 2)
-                                tmp_A[0] = ptr_A[2 * m * self.thread_mma_shape[2] + k]
-                                tmp_A[1] = ptr_A[(2 * m + 1) * self.thread_mma_shape[2] + k]
+                                tmp_A[0] = ptr_A[2 * m *
+                                                 self.thread_mma_shape[2] + k]
+                                tmp_A[1] = ptr_A[(2 * m + 1) *
+                                                 self.thread_mma_shape[2] + k]
                                 if not self.trans_b:
-                                    self.mma(tmp, tmp_A, ptr_B[k * self.thread_mma_shape[1] + n], tmp)
+                                    self.mma(
+                                        tmp, tmp_A,
+                                        ptr_B[k * self.thread_mma_shape[1] +
+                                              n], tmp)
                                 else:
-                                    self.mma(tmp, tmp_A, ptr_B[n * self.thread_mma_shape[2] + k], tmp)
+                                    self.mma(
+                                        tmp, tmp_A,
+                                        ptr_B[n * self.thread_mma_shape[2] +
+                                              k], tmp)
                             else:
                                 if not self.trans_b:
-                                    self.mma(tmp, ptr_A[k * self.thread_mma_shape[0] // 2 + m], 
-                                        ptr_B[k * self.thread_mma_shape[1] + n],
-                                        tmp)
+                                    self.mma(
+                                        tmp,
+                                        ptr_A[k * self.thread_mma_shape[0] // 2
+                                              + m],
+                                        ptr_B[k * self.thread_mma_shape[1] +
+                                              n], tmp)
                                 else:
-                                    self.mma(tmp, ptr_A[k * self.thread_mma_shape[0] // 2 + m], 
-                                        ptr_B[n * self.thread_mma_shape[2] + k],
-                                        tmp)
+                                    self.mma(
+                                        tmp,
+                                        ptr_A[k * self.thread_mma_shape[0] // 2
+                                              + m],
+                                        ptr_B[n * self.thread_mma_shape[2] +
+                                              k], tmp)
                             ptr_D[m + n * self.thread_mma_shape[0] // 2] = tmp
             else:
                 for k in range(mma_iters[2]):
                     for n in range(mma_iters[1]):
                         for m in range(mma_iters[0]):
-                            tmp = ptr_D[m * self.thread_mma_shape[1] // 2 + n].copy()
+                            tmp = ptr_D[m * self.thread_mma_shape[1] // 2 +
+                                        n].copy()
                             if self.trans_b:
                                 tmp_B = ArrayPtr(dtypes.float16.tv_dtype, 2)
-                                tmp_B[0] = ptr_B[2 * n * self.thread_mma_shape[2] + k]
-                                tmp_B[1] = ptr_B[(2 * n + 1) * self.thread_mma_shape[2] + k]
+                                tmp_B[0] = ptr_B[2 * n *
+                                                 self.thread_mma_shape[2] + k]
+                                tmp_B[1] = ptr_B[(2 * n + 1) *
+                                                 self.thread_mma_shape[2] + k]
                                 if not self.trans_a:
-                                    self.mma(tmp, ptr_A[m * self.thread_mma_shape[2] + k], tmp_B, tmp)
+                                    self.mma(
+                                        tmp,
+                                        ptr_A[m * self.thread_mma_shape[2] +
+                                              k], tmp_B, tmp)
                                 else:
-                                    self.mma(tmp, ptr_A[k * self.thread_mma_shape[0] + m], tmp_B, tmp)
+                                    self.mma(
+                                        tmp,
+                                        ptr_A[k * self.thread_mma_shape[0] +
+                                              m], tmp_B, tmp)
                             else:
                                 if not self.trans_a:
-                                    self.mma(tmp, ptr_A[m * self.thread_mma_shape[2] + k], 
-                                        ptr_B[k * self.thread_mma_shape[1] // 2 + n],
-                                        tmp)
+                                    self.mma(
+                                        tmp,
+                                        ptr_A[m * self.thread_mma_shape[2] +
+                                              k],
+                                        ptr_B[k * self.thread_mma_shape[1] // 2
+                                              + n], tmp)
                                 else:
-                                    self.mma(tmp, ptr_A[k * self.thread_mma_shape[0] + m], 
-                                        ptr_B[k * self.thread_mma_shape[1] // 2 + n],
-                                        tmp)
+                                    self.mma(
+                                        tmp,
+                                        ptr_A[k * self.thread_mma_shape[0] +
+                                              m],
+                                        ptr_B[k * self.thread_mma_shape[1] // 2
+                                              + n], tmp)
                             ptr_D[m * self.thread_mma_shape[1] // 2 + n] = tmp
         else:
-            M, N, K = self.thread_mma_shape[0], self.thread_mma_shape[1], self.thread_mma_shape[2]
+            M, N, K = self.thread_mma_shape[0], self.thread_mma_shape[
+                1], self.thread_mma_shape[2]
             # print(M, N, K)
             layoutA = la.from_shape_python([M, K])
             layoutB = lb.from_shape_python([K, N])
@@ -313,9 +368,11 @@ class WarpMmaSimt(bases.WarpMma):
                 B_mat = B.data.numpy_view().reshape(K, N)
             C_mat = A_mat @ B_mat
             if self.trans_c:
-                D.data.numpy_view()[:] = (C.data.numpy_view() + C_mat.T.reshape(-1))
+                D.data.numpy_view()[:] = (C.data.numpy_view() +
+                                          C_mat.T.reshape(-1))
             else:
-                D.data.numpy_view()[:] = (C.data.numpy_view() + C_mat.reshape(-1))
+                D.data.numpy_view()[:] = (C.data.numpy_view() +
+                                          C_mat.reshape(-1))
             # if cudasim.threadIdx().x == 0:
             #     acc = D.data.numpy_view()
             #     print(A.data.numpy_view())
@@ -323,7 +380,7 @@ class WarpMmaSimt(bases.WarpMma):
             #     print(acc.mean(), acc.min(), acc.max())
 
             return
-            
+
             # layoutA = la.from_shape_python([M, K])
             # layoutB = lb.from_shape_python([K, N])
             # layoutC = lc.from_shape_python([M, N])
@@ -340,5 +397,3 @@ class WarpMmaSimt(bases.WarpMma):
             #             b = B[layoutB(k, n)].copy()
             #             inst_mma(d, a, b, d)
             #             D[layoutC(m_serpentine, n)] = d
-
-

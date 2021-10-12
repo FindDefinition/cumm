@@ -22,7 +22,7 @@ NAME = 'cumm'
 RELEASE_NAME = NAME
 cuda_ver = os.environ.get("CUMM_CUDA_VERSION", "")
 if cuda_ver:
-    cuda_ver = cuda_ver.replace(".", "") # 10.2 to 102
+    cuda_ver = cuda_ver.replace(".", "")  # 10.2 to 102
     RELEASE_NAME += "-cu{}".format(cuda_ver)
 
 DESCRIPTION = 'CUda Matrix Multiply library'
@@ -85,6 +85,7 @@ about['__version__'] = version
 with open(version_path, 'w') as f:
     f.write("__version__ = '{}'\n".format(version))
 
+
 class UploadCommand(Command):
     """Support setup.py upload."""
 
@@ -131,6 +132,7 @@ class CopyHeaderCallback(ExtCallback):
             shutil.rmtree(include_path)
         code_path = Path(__file__).parent / "include"
         shutil.copytree(code_path, include_path)
+
 
 disable_jit = os.getenv("CUMM_DISABLE_JIT", None)
 

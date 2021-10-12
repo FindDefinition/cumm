@@ -1,49 +1,65 @@
-import pccm
-import numpy as np
-
 from typing import List, Tuple
-from cumm.gemm import constants, layout, thread_map, core
-from cumm.common import TensorView, GemmBasic
-from cumm.gemm.arch import tensorop 
-from cumm.core_cc.csrc.arrayref import ArrayPtr
+
+import numpy as np
+import pccm
+
 from cumm import dtypes
-from cumm.gemm import bases 
+from cumm.common import GemmBasic, TensorView
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm import bases, constants, core, layout, thread_map
+from cumm.gemm.arch import tensorop
+
 
 def seq(*vals):
     return np.array([*vals], dtype=np.int64)
 
+
 class WarpMmaTuring(bases.WarpMma):
-    def __init__(self, warp_tile_shape: Tuple[int, int, int], inst_shape: Tuple[int, int, int], dtype_a: dtypes.DType, dtype_b: dtypes.DType,
-                 dtype_c: dtypes.DType, trans_a: bool, trans_b: bool, trans_c: bool, acc_is_rowmajor: bool = False):
-        super().__init__() 
+    def __init__(self,
+                 warp_tile_shape: Tuple[int, int, int],
+                 inst_shape: Tuple[int, int, int],
+                 dtype_a: dtypes.DType,
+                 dtype_b: dtypes.DType,
+                 dtype_c: dtypes.DType,
+                 trans_a: bool,
+                 trans_b: bool,
+                 trans_c: bool,
+                 acc_is_rowmajor: bool = False):
+        super().__init__()
         self.add_dependency(TensorView)
-        self.warp_tile_shape = seq(*warp_tile_shape) 
+        self.warp_tile_shape = seq(*warp_tile_shape)
         self.inst_shape = seq(*inst_shape)
 
-        self.mma_iters = self.warp_tile_shape // self.inst_shape # type: np.ndarray
-        self.dtype_a = dtype_a 
-        self.dtype_b = dtype_b 
-        self.dtype_c = dtype_c 
-        self.trans_a = trans_a 
-        self.trans_b = trans_b 
+        self.mma_iters = self.warp_tile_shape // self.inst_shape  # type: np.ndarray
+        self.dtype_a = dtype_a
+        self.dtype_b = dtype_b
+        self.dtype_c = dtype_c
+        self.trans_a = trans_a
+        self.trans_b = trans_b
         self.trans_c = trans_c
         self.mn = warp_tile_shape[0] * warp_tile_shape[1]
         self.km = warp_tile_shape[2] * warp_tile_shape[0]
         self.kn = warp_tile_shape[2] * warp_tile_shape[1]
-        self.fragment_a_t = self.array_type(str(dtype_a), self.inst_shape[2] * warp_tile_shape[0] // 32)
-        self.fragment_b_t = self.array_type(str(dtype_b), self.inst_shape[2] * warp_tile_shape[1] // 32)
-        self.fragment_c_t = self.array_type(str(dtype_c), warp_tile_shape[0] * warp_tile_shape[1] // 32)
-        self.mma = tensorop.MmaSync(inst_shape, 32, dtype_a, dtype_b, dtype_c, trans_a, trans_b, trans_c)
+        self.fragment_a_t = self.array_type(
+            str(dtype_a), self.inst_shape[2] * warp_tile_shape[0] // 32)
+        self.fragment_b_t = self.array_type(
+            str(dtype_b), self.inst_shape[2] * warp_tile_shape[1] // 32)
+        self.fragment_c_t = self.array_type(
+            str(dtype_c), warp_tile_shape[0] * warp_tile_shape[1] // 32)
+        self.mma = tensorop.MmaSync(inst_shape, 32, dtype_a, dtype_b, dtype_c,
+                                    trans_a, trans_b, trans_c)
         self.add_param_class("tensorop", self.mma, "InstMma")
-        self.acc_is_rowmajor = acc_is_rowmajor 
+        self.acc_is_rowmajor = acc_is_rowmajor
 
     def array_type(self, dtype: str, count: int):
         return core.array_type(dtype, count)
 
     def python_ctor(self):
-        return self 
+        return self
 
-    @pccm.cuda.member_function(name="operator()", device=True, forceinline=True)
+    @pccm.cuda.member_function(name="operator()",
+                               device=True,
+                               forceinline=True)
     def call_operator(self):
         code = pccm.FunctionCode()
         code.arg("D", f"{self.fragment_c_t}&")
@@ -61,7 +77,9 @@ class WarpMmaTuring(bases.WarpMma):
         with code.macro_if_("defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)"):
             with code.range_("n", self.mma_iters[1], "TV_PRAGMA_UNROLL"):
                 with code.range_("m", self.mma_iters[0], "TV_PRAGMA_UNROLL"):
-                    code.raw(f"int m_serpentine = ((n % 2) ? ({self.mma_iters[0]} - 1 - m) : m);")
+                    code.raw(
+                        f"int m_serpentine = ((n % 2) ? ({self.mma_iters[0]} - 1 - m) : m);"
+                    )
                     if self.acc_is_rowmajor:
                         code.raw(f"""
                         mma(ptr_D[n + m_serpentine * {self.mma_iters[1]}],
@@ -77,10 +95,13 @@ class WarpMmaTuring(bases.WarpMma):
                             ptr_D[m_serpentine + n * {self.mma_iters[0]}]);
                         """)
 
-        with code.macro_else_if_("defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)"):
+        with code.macro_else_if_(
+                "defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)"):
             with code.range_("m", self.mma_iters[0], "TV_PRAGMA_UNROLL"):
                 with code.range_("n", self.mma_iters[1], "TV_PRAGMA_UNROLL"):
-                    code.raw(f"int n_serpentine = ((m % 2) ? ({self.mma_iters[1]} - 1 - n) : n);")
+                    code.raw(
+                        f"int n_serpentine = ((m % 2) ? ({self.mma_iters[1]} - 1 - n) : n);"
+                    )
                     if self.acc_is_rowmajor:
                         code.raw(f"""
                         mma(ptr_D[n_serpentine + m * {self.mma_iters[1]}],
@@ -97,26 +118,25 @@ class WarpMmaTuring(bases.WarpMma):
                         """)
 
         code.macro_endif_()
-        return code 
+        return code
 
-    async def __call__(self, D: ArrayPtr, A: ArrayPtr, B: ArrayPtr, C: ArrayPtr):
+    async def __call__(self, D: ArrayPtr, A: ArrayPtr, B: ArrayPtr,
+                       C: ArrayPtr):
         D.data.numpy_view()[:] = C.data.numpy_view()
         ptr_A = A.change_access_size(self.mma.fragment_a_count)
         ptr_B = B.change_access_size(self.mma.fragment_b_count)
         ptr_D = D.change_access_size(self.mma.fragment_c_count)
-        for n in range(self.mma_iters[1]): 
+        for n in range(self.mma_iters[1]):
             for m in range(self.mma_iters[0]):
                 if n % 2:
-                    m_serpentine = self.mma_iters[0] - 1 - m 
+                    m_serpentine = self.mma_iters[0] - 1 - m
                 else:
                     m_serpentine = m
                 if self.acc_is_rowmajor:
                     await self.mma(ptr_D[n + m_serpentine * self.mma_iters[1]],
-                            ptr_A[m_serpentine],
-                            ptr_B[n],
-                            ptr_D[n + m_serpentine * self.mma_iters[1]])
+                                   ptr_A[m_serpentine], ptr_B[n],
+                                   ptr_D[n + m_serpentine * self.mma_iters[1]])
                 else:
                     await self.mma(ptr_D[m_serpentine + n * self.mma_iters[0]],
-                            ptr_A[m_serpentine],
-                            ptr_B[n],
-                            ptr_D[m_serpentine + n * self.mma_iters[0]])
+                                   ptr_A[m_serpentine], ptr_B[n],
+                                   ptr_D[m_serpentine + n * self.mma_iters[0]])

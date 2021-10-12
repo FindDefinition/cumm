@@ -80,7 +80,7 @@ def _get_cuda_arch_flags() -> List[str]:
     _arch_list = os.environ.get('CUMM_CUDA_ARCH_LIST', None)
     _cuda_version = os.environ.get('CUMM_CUDA_VERSION', None)
     if _arch_list is not None and _arch_list.lower() == "all":
-        assert _cuda_version is not None 
+        assert _cuda_version is not None
         cuda_ver_tuple = _cuda_version.split(".")
         if len(cuda_ver_tuple) == 2:
             major = int(cuda_ver_tuple[0])
@@ -176,8 +176,7 @@ class CUDALibs(pccm.Class):
             include = linux_cuda_root / f"include"
             lib64 = linux_cuda_root / f"lib64"
         self.build_meta.includes.append(include)
-        self.build_meta.libraries.extend(
-            ["cudart"])
+        self.build_meta.libraries.extend(["cudart"])
         self.build_meta.compiler_to_cflags["nvcc"] = gpu_arch_flags
         # if not compat.InWindows:
         #     self.build_meta.compiler_to_ldflags["g++,clang++"] = ["-Wl,-rpath='/usr/local/cuda/lib64'", f"-Wl,-rpath-link='{lib64}'"]

@@ -1,18 +1,17 @@
 import contextlib
-import pccm
-import numpy as np
-
 from typing import List, Optional, Union
 
+import numpy as np
+import pccm
 from pccm.core import FunctionCode
-from cumm.gemm import constants, layout, codeops, thread_map
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel, TensorViewMath
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
-from cumm import dtypes
-
-from cumm.conv import bases, params
-from cumm.conv.bases import ConvEnum, ConvMode, ConvOpType, LAYOUT_TYPES
 from pccm.targets.cuda_ptx import RegDType
+
+from cumm import dtypes
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView, TensorViewMath
+from cumm.conv import bases, params
+from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
+from cumm.gemm import codeops, constants, layout, thread_map
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 
 
 def div_up(a: int, b: int) -> int:
@@ -20,8 +19,11 @@ def div_up(a: int, b: int) -> int:
 
 
 class AnalyticParams(bases.ConvIterParams):
-    def __init__(self, problem_size: params.ConvProblem,
-                 input_layout: LAYOUT_TYPES, is_output: bool = False, has_rsc: bool = False):
+    def __init__(self,
+                 problem_size: params.ConvProblem,
+                 input_layout: LAYOUT_TYPES,
+                 is_output: bool = False,
+                 has_rsc: bool = False):
         super().__init__()
         self.problem_size = problem_size
         self.is_output = is_output
@@ -45,7 +47,8 @@ class AnalyticParams(bases.ConvIterParams):
 
     def python_ctor(self, conv_psize: params.ConvProblem,
                     layout: LAYOUT_TYPES):
-        new_obj = AnalyticParams(self.problem_size, self.layout, self.is_output)
+        new_obj = AnalyticParams(self.problem_size, self.layout,
+                                 self.is_output)
         new_obj.layout_ = layout
         return new_obj
 
@@ -65,30 +68,34 @@ class AnalyticParams(bases.ConvIterParams):
             pqs = codeops.unpack("problem.input_dims", range(self.ndim))
         rss = codeops.unpack("problem.ksize", range(self.ndim))
 
-        code.ctor_init("layout_npq", f"LayoutNPQ::from_shape({{problem.N, {pqs}}})")
+        code.ctor_init("layout_npq",
+                       f"LayoutNPQ::from_shape({{problem.N, {pqs}}})")
         if self.has_rsc:
-            code.ctor_init("layout_rsc", f"LayoutNPQ::from_shape({{{rss}, problem.C}})")
+            code.ctor_init("layout_rsc",
+                           f"LayoutNPQ::from_shape({{{rss}, problem.C}})")
         # code.ctor_init("filter_c_delta", "")
         return code
 
 
 class IOOptParams(bases.ConvIterParams):
-    def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int],
-                problem: params.ConvProblem,
+    def __init__(self,
+                 dtype: dtypes.DType,
+                 tile_shape: MetaArray[int],
+                 problem: params.ConvProblem,
                  input_layout: Union[layout.TensorGeneric],
                  tmap: Union[thread_map.PitchLinear,
                              thread_map.PitchLinearWarpRaked],
-                is_output: bool = False):
+                 is_output: bool = False):
         super().__init__()
         self.add_dependency(TensorViewMath, ConvEnum)
         if not isinstance(input_layout, layout.TensorGeneric):
             raise NotImplementedError
         self.dtype = dtype
         self.tmap = tmap
-        self.tile_shape = tile_shape 
+        self.tile_shape = tile_shape
         self.problem = problem
         self.ndim = problem.ndim
-        self.is_output = is_output 
+        self.is_output = is_output
         self.add_param_class("input_layout", input_layout, "Layout")
         self.add_param_class("prob", problem, "ConvProblem")
         self.add_member("layout", "Layout")
@@ -105,7 +112,6 @@ class IOOptParams(bases.ConvIterParams):
         self.inc_next_ = [0] * (problem.ndim + 1)
         self.filter_c_delta_ = 0
 
-
     # @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     # def defctor(self):
     #     return pccm.FunctionCode()
@@ -121,7 +127,8 @@ class IOOptParams(bases.ConvIterParams):
         else:
             pqs = codeops.unpack("problem.input_dims", range(self.ndim))
 
-        code.ctor_init("layout_npq", f"LayoutNPQ::from_shape({{problem.N, {pqs}}})")
+        code.ctor_init("layout_npq",
+                       f"LayoutNPQ::from_shape({{problem.N, {pqs}}})")
         if self.is_output:
             code.raw(f"""
             int conv_sign = problem.mode == ConvEnum::Mode::kConvolution ? 1 : -1;
@@ -133,8 +140,11 @@ class IOOptParams(bases.ConvIterParams):
             int prev_back = 0;
             """)
 
-        inc_next_plain = [f"layout.strides[{self.ndim - i}] * problem.dilation[{self.ndim - 1 - i}]" for i in range(self.ndim)]
-        
+        inc_next_plain = [
+            f"layout.strides[{self.ndim - i}] * problem.dilation[{self.ndim - 1 - i}]"
+            for i in range(self.ndim)
+        ]
+
         for i in range(self.ndim):
             code.raw(f"""
             inc_next[{i}] = conv_sign * ({inc_next_plain[i]} - prev_back) * {self.dtype.bitsize()} / 8;
@@ -147,40 +157,49 @@ class IOOptParams(bases.ConvIterParams):
         """)
         return code
 
-    def python_ctor(self, problem: params.ConvProblem,
-                    layout: LAYOUT_TYPES):
-        new_obj = IOOptParams(self.dtype, self.tile_shape, 
-            self.problem, self.layout, self.tmap, self.is_output)
+    def python_ctor(self, problem: params.ConvProblem, layout: LAYOUT_TYPES):
+        new_obj = IOOptParams(self.dtype, self.tile_shape, self.problem,
+                              self.layout, self.tmap, self.is_output)
         new_obj.layout_ = layout
 
         if problem.mode_ == ConvMode.kConvolution:
             conv_sign = -1
         else:
             conv_sign = 1
-        inc_next_plain = [layout.strides[self.ndim - i - 1] * problem.dilation_[self.ndim - i - 1] for i in range(self.ndim)]
+        inc_next_plain = [
+            layout.strides[self.ndim - i - 1] *
+            problem.dilation_[self.ndim - i - 1] for i in range(self.ndim)
+        ]
         prev_back = 0
         for i in range(self.ndim):
             new_obj.inc_next_[i] = conv_sign * (inc_next_plain[i] - prev_back)
-            prev_back += (problem.ksize_[self.ndim - 1 - i] - 1) * inc_next_plain[i]
-        new_obj.inc_next_[self.ndim] = self.tile_shape[2] * problem.split_k_slices_ - conv_sign * prev_back
-        new_obj.inc_next_ = [i * self.dtype.bitsize() // 8 for i in new_obj.inc_next_]
+            prev_back += (problem.ksize_[self.ndim - 1 - i] -
+                          1) * inc_next_plain[i]
+        new_obj.inc_next_[self.ndim] = self.tile_shape[
+            2] * problem.split_k_slices_ - conv_sign * prev_back
+        new_obj.inc_next_ = [
+            i * self.dtype.bitsize() // 8 for i in new_obj.inc_next_
+        ]
         new_obj.filter_c_delta_ = self.tile_shape[2] * problem.split_k_slices_
         return new_obj
 
+
 class WeightOptParams(bases.ConvIterParams):
-    def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int],
-                problem: params.ConvProblem,
+    def __init__(self,
+                 dtype: dtypes.DType,
+                 tile_shape: MetaArray[int],
+                 problem: params.ConvProblem,
                  input_layout: Union[layout.TensorGeneric],
                  tmap: Union[thread_map.PitchLinear,
                              thread_map.PitchLinearWarpRaked],
-                increment_k_first: bool = False):
+                 increment_k_first: bool = False):
         super().__init__()
         self.add_dependency(TensorViewMath, ConvEnum)
         if not isinstance(input_layout, layout.TensorGeneric):
             raise NotImplementedError
         self.dtype = dtype
         self.tmap = tmap
-        self.tile_shape = tile_shape 
+        self.tile_shape = tile_shape
         self.problem = problem
         self.ndim = problem.ndim
         self.op_type = problem.op_type
@@ -221,7 +240,7 @@ class WeightOptParams(bases.ConvIterParams):
         if self.op_type == ConvOpType.kBackwardInput:
             RSC_if_fwd_else_C = f"layout.strides[{self.ndim}]"
             C_if_fwd_else_KRSC = f"layout.strides[0] * problem.K"
-            # for weight opt params, the C is actually K, so we 
+            # for weight opt params, the C is actually K, so we
             # need to multplie stride.
             mul_stride_if_bwd = " * layout.strides[0]"
         if self.increment_k_first:
@@ -263,25 +282,25 @@ class WeightOptParams(bases.ConvIterParams):
         """)
         return code
 
-    def python_ctor(self, problem: params.ConvProblem,
-                    layout: LAYOUT_TYPES):
-        new_obj = WeightOptParams(self.dtype, self.tile_shape, 
-            self.problem, self.layout, self.tmap)
+    def python_ctor(self, problem: params.ConvProblem, layout: LAYOUT_TYPES):
+        new_obj = WeightOptParams(self.dtype, self.tile_shape, self.problem,
+                                  self.layout, self.tmap)
         new_obj.layout_ = layout
 
         new_obj.inc_strided_ = layout.strides[0] * self.tmap.delta[0]
-        new_obj.inc_rs_ = layout.strides[self.ndim] - new_obj.inc_strided_ * (self.tmap.iterations[0] - 1)
-        new_obj.filter_c_delta_ = self.tile_shape[2] * problem.split_k_slices_ 
+        new_obj.inc_rs_ = layout.strides[
+            self.ndim] - new_obj.inc_strided_ * (self.tmap.iterations[0] - 1)
+        new_obj.filter_c_delta_ = self.tile_shape[2] * problem.split_k_slices_
         new_obj.inc_c_ = new_obj.filter_c_delta_
 
-        new_obj.inc_c_ -= (int(np.prod(problem.ksize_)) - 1) * layout.strides[self.ndim]
+        new_obj.inc_c_ -= (int(np.prod(problem.ksize_)) -
+                           1) * layout.strides[self.ndim]
         new_obj.inc_c_ -= new_obj.inc_strided_ * (self.tmap.iterations[0] - 1)
 
         new_obj.inc_c_ = new_obj.inc_c_ * self.dtype.bitsize() // 8
         new_obj.inc_rs_ = new_obj.inc_rs_ * self.dtype.bitsize() // 8
         new_obj.inc_strided_ = new_obj.inc_strided_ * self.dtype.bitsize() // 8
         return new_obj
-
 
 
 class InputNPQIterator(bases.ConvInputIterator):
@@ -312,12 +331,15 @@ class InputNPQIterator(bases.ConvInputIterator):
         self.tile_shape_mnk = tile_shape_mnk
         super().__init__(dtype, element_count, sub_tile_shape[1])
         self.sub_tile_shape = sub_tile_shape
-        self.op_type = op_type 
+        self.op_type = op_type
         self.optimized = optimized
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         self.add_dependency(TensorView, GemmBasicKernel, ConvEnum)
-        self.params = AnalyticParams(problem_size, input_layout, is_output=True, has_rsc=True)
+        self.params = AnalyticParams(problem_size,
+                                     input_layout,
+                                     is_output=True,
+                                     has_rsc=True)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -332,12 +354,12 @@ class InputNPQIterator(bases.ConvInputIterator):
         self.add_member("problem_size_", "ConvProblem const&")
         self.add_member("pointer_", self.const_byte_pointer)
 
-        self.add_member("filter_rsc_offset_", "int", array=f"[{self.tmap.iterations[1]}][{self.ndim + 1}]")
-        # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
-        self.add_member("npq_offset_",
+        self.add_member("filter_rsc_offset_",
                         "int",
-                        array=f"[{tmap.iterations[0]}]")
-    
+                        array=f"[{self.tmap.iterations[1]}][{self.ndim + 1}]")
+        # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
+        self.add_member("npq_offset_", "int", array=f"[{tmap.iterations[0]}]")
+
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
@@ -352,12 +374,13 @@ class InputNPQIterator(bases.ConvInputIterator):
         code.ctor_init("params_", "params")
         code.ctor_init("problem_size_", "problem_size")
         code.ctor_init("pointer_",
-                    f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
+                       f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
 
         code.raw(f"""
         auto thread_offset = threadblock_offset + ThreadMap::initial_offset(thread_id);
         """)
-        with code.range_("c", str(self.tmap.iterations[1]), "TV_PRAGMA_UNROLL"):
+        with code.range_("c", str(self.tmap.iterations[1]),
+                         "TV_PRAGMA_UNROLL"):
             code.raw(f"""
             int rsc_offset = thread_offset[1] + c * {self.tmap.delta[1]};
             params.layout_rsc.inverse(rsc_offset, filter_rsc_offset_[c]);
@@ -390,7 +413,7 @@ class InputNPQIterator(bases.ConvInputIterator):
             code.raw(f"""
             npq_offset_[s] += {self.tile_shape_mnk[2]} * problem_size_.split_k_slices;
             """)
-        return code 
+        return code
 
     @pccm.cuda.member_function(host=True,
                                device=True,
@@ -442,7 +465,10 @@ class InputNPQIterator(bases.ConvInputIterator):
     def valid(self):
         code = FunctionCode()
         code.arg("indexes", f"const tv::array<int, {self.ndim + 2}>&")
-        hw_valid = [f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.input_dims[{i}]" for i in range(self.ndim)]
+        hw_valid = [
+            f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.input_dims[{i}]"
+            for i in range(self.ndim)
+        ]
         code.raw(f"""
         return indexes[0] < problem_size_.N && 
             {' && '.join(hw_valid)} &&
@@ -494,7 +520,7 @@ class InputNPQIterator(bases.ConvInputIterator):
 
 class OutputNPQParams(bases.ConvIterParams):
     def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int],
-                problem: params.ConvProblem,
+                 problem: params.ConvProblem,
                  input_layout: Union[layout.TensorGeneric],
                  tmap: Union[thread_map.PitchLinear,
                              thread_map.PitchLinearWarpRaked]):
@@ -504,7 +530,7 @@ class OutputNPQParams(bases.ConvIterParams):
             raise NotImplementedError
         self.dtype = dtype
         self.tmap = tmap
-        self.tile_shape = tile_shape 
+        self.tile_shape = tile_shape
         self.problem = problem
         self.ndim = problem.ndim
         self.add_param_class("input_layout", input_layout, "Layout")
@@ -523,7 +549,8 @@ class OutputNPQParams(bases.ConvIterParams):
         code.arg("layout", "Layout const&")
         code.ctor_init("layout", "layout")
 
-        pqs_prod = codeops.unpack("problem.output_dims", range(self.ndim), " * ")
+        pqs_prod = codeops.unpack("problem.output_dims", range(self.ndim),
+                                  " * ")
         code.ctor_init("NPQ", f"{pqs_prod} * problem.N")
         code.raw(f"""
         // NPQK NPQ is strided, K is contig
@@ -553,15 +580,19 @@ class OutputNPQIterator(bases.ConvInputIterator):
         self.tile_shape_mnk = tile_shape_mnk
         super().__init__(dtype, element_count, sub_tile_shape[1])
         self.sub_tile_shape = sub_tile_shape
-        self.op_type = op_type 
+        self.op_type = op_type
         self.optimized = optimized
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         self.add_dependency(TensorView, GemmBasicKernel)
         if optimized:
-            self.params = OutputNPQParams(dtype, tile_shape_mnk, problem_size, input_layout, tmap)
+            self.params = OutputNPQParams(dtype, tile_shape_mnk, problem_size,
+                                          input_layout, tmap)
         else:
-            self.params = AnalyticParams(problem_size, input_layout, is_output=True, has_rsc=False)
+            self.params = AnalyticParams(problem_size,
+                                         input_layout,
+                                         is_output=True,
+                                         has_rsc=False)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -575,7 +606,9 @@ class OutputNPQIterator(bases.ConvInputIterator):
         self.add_member("problem_size_", "ConvProblem const&")
         self.add_member("pointer_", self.const_byte_pointer)
         if not optimized:
-            self.add_member("k_offset_", "int", array=f"[{self.tmap.iterations[1]}]")
+            self.add_member("k_offset_",
+                            "int",
+                            array=f"[{self.tmap.iterations[1]}]")
             # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
             self.add_member("npq_offset_",
                             "int",
@@ -586,7 +619,6 @@ class OutputNPQIterator(bases.ConvInputIterator):
             self.add_member("npq_offset_", "int")
 
             self.add_member("mask_", "int")
-
 
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
@@ -602,7 +634,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
         code.ctor_init("params_", "params")
         code.ctor_init("problem_size_", "problem_size")
         code.ctor_init("pointer_",
-                    f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
+                       f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
 
         code.raw(f"""
         auto thread_offset = threadblock_offset + ThreadMap::initial_offset(thread_id);
@@ -624,12 +656,15 @@ class OutputNPQIterator(bases.ConvInputIterator):
             pointer_ += (npq_offset_ * problem_size.K + k_offset_) * {self.dtype.bitsize()} / 8;
             """)
         else:
-            with code.range_("c", str(self.tmap.iterations[1]), "TV_PRAGMA_UNROLL"):
+            with code.range_("c", str(self.tmap.iterations[1]),
+                             "TV_PRAGMA_UNROLL"):
                 code.raw(f"""
                 k_offset_[c] = thread_offset[1] + c * {self.tmap.delta[1]};
                 """)
             with self.tmap.tmap_loop(code, "s"):
-                code.raw(f"npq_offset_[s] = thread_offset[0] + s * {self.tmap.delta[0]};")
+                code.raw(
+                    f"npq_offset_[s] = thread_offset[0] + s * {self.tmap.delta[0]};"
+                )
         return code
 
     @pccm.cuda.member_function(name="operator++",
@@ -655,7 +690,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
                 code.raw(f"""
                 npq_offset_[s] += {self.tile_shape_mnk[2]} * problem_size_.split_k_slices;
                 """)
-        return code 
+        return code
 
     @pccm.cuda.member_function(host=True,
                                device=True,
@@ -670,7 +705,10 @@ class OutputNPQIterator(bases.ConvInputIterator):
             """)
         else:
             code.arg("indexes", f"const tv::array<int, {self.ndim + 2}>&")
-            hw_valid = [f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.output_dims[{i}]" for i in range(self.ndim)]
+            hw_valid = [
+                f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.output_dims[{i}]"
+                for i in range(self.ndim)
+            ]
             code.raw(f"""
             return indexes[0] < problem_size_.N && 
                 {' && '.join(hw_valid)} &&
@@ -707,7 +745,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
     def at(self):
         code = FunctionCode()
         if self.optimized:
-            return code 
+            return code
         code.arg("stride, contig", "int")
         code.ret(f"tv::array<int, {self.ndim + 2}>")
         npqs = codeops.unpack("npq", range(self.ndim + 1))
@@ -752,6 +790,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&")
         return code
 
+
 class WeightIterator(bases.ConvInputIterator):
     """
     fwd: NHWC -> NPQRSC @ KRSC, k = RSC
@@ -780,7 +819,7 @@ class WeightIterator(bases.ConvInputIterator):
         self.tile_shape_mnk = tile_shape_mnk
         super().__init__(dtype, element_count, sub_tile_shape[1])
         self.sub_tile_shape = sub_tile_shape
-        self.op_type = op_type 
+        self.op_type = op_type
         self.optimized = optimized
         self.ndim = problem_size.ndim
         self.increment_k_first = increment_k_first
@@ -792,7 +831,8 @@ class WeightIterator(bases.ConvInputIterator):
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout)
         else:
-            self.params = WeightOptParams(dtype, tile_shape_mnk, problem_size, input_layout, tmap)
+            self.params = WeightOptParams(dtype, tile_shape_mnk, problem_size,
+                                          input_layout, tmap)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -809,14 +849,20 @@ class WeightIterator(bases.ConvInputIterator):
         self.reduce_channel_axis = 0 if self.op_type == ConvOpType.kBackwardInput else 1
         self.noreduce_channel_axis = 1 if self.op_type == ConvOpType.kBackwardInput else 0
 
-
         if optimized:
             self.add_member("filter_kernel_idx_", f"int")
             self.add_member("reduce_channel_offset_", "int")
         else:
-            self.add_member("reduce_channel_offsets_", "int", array=f"[{tmap.iterations[self.reduce_channel_axis]}]")
-            self.add_member("noreduce_channel_offsets_", "int", array=f"[{tmap.iterations[self.noreduce_channel_axis]}]")
-            self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
+            self.add_member(
+                "reduce_channel_offsets_",
+                "int",
+                array=f"[{tmap.iterations[self.reduce_channel_axis]}]")
+            self.add_member(
+                "noreduce_channel_offsets_",
+                "int",
+                array=f"[{tmap.iterations[self.noreduce_channel_axis]}]")
+            self.add_member("filter_kernel_idxes_",
+                            f"tv::array<int, {self.ndim}>")
 
         if optimized:
             self.add_member("masks_", str(self.index_t))
@@ -835,13 +881,14 @@ class WeightIterator(bases.ConvInputIterator):
         code.ctor_init("params_", "params")
         code.ctor_init("problem_size_", "problem_size")
         code.ctor_init("pointer_",
-                    f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
+                       f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
         if self.optimized:
             code.ctor_init("filter_kernel_idx_", "0")
             code.ctor_init("masks_", "0")
 
         else:
-            code.ctor_init("filter_kernel_idxes_", f"{{{', '.join(['0'] * self.ndim)}}}")
+            code.ctor_init("filter_kernel_idxes_",
+                           f"{{{', '.join(['0'] * self.ndim)}}}")
 
         code.raw(f"""
         auto thread_offset = threadblock_offset + ThreadMap::initial_offset(thread_id);
@@ -851,14 +898,16 @@ class WeightIterator(bases.ConvInputIterator):
             reduce_channel_offset_ = thread_offset[{self.reduce_channel_axis}];
             """)
         else:
-            with code.range_("i", str(self.tmap.iterations[self.reduce_channel_axis]),
-                            "TV_PRAGMA_UNROLL"):
+            with code.range_(
+                    "i", str(self.tmap.iterations[self.reduce_channel_axis]),
+                    "TV_PRAGMA_UNROLL"):
                 code.raw(f"""
                 reduce_channel_offsets_[i] = thread_offset[{self.reduce_channel_axis}] +
                      i * {self.tmap.delta[self.reduce_channel_axis]};
                 """)
-            with code.range_("i", str(self.tmap.iterations[self.noreduce_channel_axis]),
-                            "TV_PRAGMA_UNROLL"):
+            with code.range_(
+                    "i", str(self.tmap.iterations[self.noreduce_channel_axis]),
+                    "TV_PRAGMA_UNROLL"):
                 code.raw(f"""
                 noreduce_channel_offsets_[i] = thread_offset[{self.noreduce_channel_axis}] +
                      i * {self.tmap.delta[self.noreduce_channel_axis]};
@@ -884,7 +933,9 @@ class WeightIterator(bases.ConvInputIterator):
                     masks_ = 0;
                 }}
                 """)
-            code.raw(f"pointer_ += (thread_offset[0] * params.layout.strides[0] + thread_offset[1]) * {self.dtype.bitsize()} / 8;")
+            code.raw(
+                f"pointer_ += (thread_offset[0] * params.layout.strides[0] + thread_offset[1]) * {self.dtype.bitsize()} / 8;"
+            )
         return code
 
     @pccm.cuda.member_function(name="operator++",
@@ -902,8 +953,9 @@ class WeightIterator(bases.ConvInputIterator):
                 }}
                 filter_kernel_idxes_[{i}] = 0;
                 """)
-            with code.range_("i", str(self.tmap.iterations[self.reduce_channel_axis]),
-                            "TV_PRAGMA_UNROLL"):
+            with code.range_(
+                    "i", str(self.tmap.iterations[self.reduce_channel_axis]),
+                    "TV_PRAGMA_UNROLL"):
                 code.raw(f"""
                 reduce_channel_offsets_[i] += {self.tile_shape_mnk[2]} * problem_size_.split_k_slices;
                 """)
@@ -936,9 +988,7 @@ class WeightIterator(bases.ConvInputIterator):
                     """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -954,7 +1004,7 @@ class WeightIterator(bases.ConvInputIterator):
     def at(self):
         code = FunctionCode()
         if self.optimized:
-            return code 
+            return code
         code.arg("stride, contig", "int")
         code.ret(f"tv::array<int, {self.ndim + 2}>")
         rs = codeops.unpack("filter_kernel_idxes_", range(self.ndim))
@@ -1004,7 +1054,9 @@ class WeightIterator(bases.ConvInputIterator):
             """)
         else:
             code.arg("stride, contig", "int")
-            code.raw(f"return reinterpret_cast<{self.const_access_pointer}>(pointer_);")
+            code.raw(
+                f"return reinterpret_cast<{self.const_access_pointer}>(pointer_);"
+            )
         return code
 
     @pccm.cuda.member_function(device=True, forceinline=True)
@@ -1041,10 +1093,8 @@ class WeightIterator(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&").arg("pointer_offset",
                                                     str(self.index_t))
         return code
-        
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def load_invalid(self):
         code = pccm.FunctionCode()
         if not self.optimized:
@@ -1100,7 +1150,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         self.tile_shape_mnk = tile_shape_mnk
         super().__init__(dtype, element_count, sub_tile_shape[1])
         self.sub_tile_shape = sub_tile_shape
-        self.op_type = op_type 
+        self.op_type = op_type
         self.optimized = optimized
         self.ndim = problem_size.ndim
         self.increment_k_first = increment_k_first
@@ -1112,7 +1162,9 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout)
         else:
-            self.params = WeightOptParams(dtype, tile_shape_mnk, problem_size, input_layout, tmap, increment_k_first)
+            self.params = WeightOptParams(dtype, tile_shape_mnk, problem_size,
+                                          input_layout, tmap,
+                                          increment_k_first)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -1134,9 +1186,16 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                 self.add_member("filter_kernel_idx_", f"int")
                 self.add_member("reduce_channel_offset_", "int")
         else:
-            self.add_member("reduce_channel_offsets_", "int", array=f"[{tmap.iterations[self.reduce_channel_axis]}]")
-            self.add_member("noreduce_channel_offsets_", "int", array=f"[{tmap.iterations[self.noreduce_channel_axis]}]")
-            self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
+            self.add_member(
+                "reduce_channel_offsets_",
+                "int",
+                array=f"[{tmap.iterations[self.reduce_channel_axis]}]")
+            self.add_member(
+                "noreduce_channel_offsets_",
+                "int",
+                array=f"[{tmap.iterations[self.noreduce_channel_axis]}]")
+            self.add_member("filter_kernel_idxes_",
+                            f"tv::array<int, {self.ndim}>")
         if optimized:
             self.add_member("masks_", str(self.index_t))
 
@@ -1154,33 +1213,36 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         code.ctor_init("params_", "params")
         code.ctor_init("problem_size_", "problem_size")
         code.ctor_init("pointer_",
-                    f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
+                       f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
         if self.optimized:
             if not self.increment_k_first:
                 code.ctor_init("filter_kernel_idx_", "0")
             code.ctor_init("masks_", "0")
 
         else:
-            code.ctor_init("filter_kernel_idxes_", f"{{{', '.join(['0'] * self.ndim)}}}")
+            code.ctor_init("filter_kernel_idxes_",
+                           f"{{{', '.join(['0'] * self.ndim)}}}")
 
         code.raw(f"""
         auto thread_offset = threadblock_offset + ThreadMap::initial_offset(thread_id);
         """)
         if self.optimized:
-            if  not self.increment_k_first:
+            if not self.increment_k_first:
                 code.raw(f"""
                 reduce_channel_offset_ = thread_offset[{self.reduce_channel_axis}];
                 """)
         else:
-            with code.range_("i", str(self.tmap.iterations[self.reduce_channel_axis]),
-                            "TV_PRAGMA_UNROLL"):
+            with code.range_(
+                    "i", str(self.tmap.iterations[self.reduce_channel_axis]),
+                    "TV_PRAGMA_UNROLL"):
 
                 code.raw(f"""
                 reduce_channel_offsets_[i] = thread_offset[{self.reduce_channel_axis}] +
                     i * {self.tmap.delta[self.reduce_channel_axis]};
                 """)
-            with code.range_("i", str(self.tmap.iterations[self.noreduce_channel_axis]),
-                            "TV_PRAGMA_UNROLL"):
+            with code.range_(
+                    "i", str(self.tmap.iterations[self.noreduce_channel_axis]),
+                    "TV_PRAGMA_UNROLL"):
 
                 code.raw(f"""
                 noreduce_channel_offsets_[i] = thread_offset[{self.noreduce_channel_axis}] +
@@ -1189,7 +1251,8 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
         if self.optimized:
             with self.tmap.tmap_loop(code, "s", "c"):
-                with code.range_("ss", self.tmap.sub_tile_shape[0], "TV_PRAGMA_UNROLL"):
+                with code.range_("ss", self.tmap.sub_tile_shape[0],
+                                 "TV_PRAGMA_UNROLL"):
                     if self.tmap.iterations[1] == 1:
                         code.raw(f"""
                         uint32_t pred = thread_offset[0] + s * {self.tmap.delta[0]} + ss < problem_size.K;
@@ -1208,7 +1271,9 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                     masks_ = 0;
                 }}
                 """)
-            code.raw(f"pointer_ += (thread_offset[0] * params.layout.strides[0] + thread_offset[1]) * {self.dtype.bitsize()} / 8;")
+            code.raw(
+                f"pointer_ += (thread_offset[0] * params.layout.strides[0] + thread_offset[1]) * {self.dtype.bitsize()} / 8;"
+            )
         return code
 
     @pccm.cuda.member_function(name="operator++",
@@ -1218,7 +1283,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
     def increment(self):
         code = FunctionCode()
         if self.increment_k_first:
-            return code 
+            return code
         C_or_K = "C" if self.op_type == ConvOpType.kForward else "K"
         if not self.optimized:
             for i in range(self.ndim - 1, -1, -1):
@@ -1228,8 +1293,9 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                 }}
                 filter_kernel_idxes_[{i}] = 0;
                 """)
-            with code.range_("i", str(self.tmap.iterations[self.reduce_channel_axis]),
-                            "TV_PRAGMA_UNROLL"):
+            with code.range_(
+                    "i", str(self.tmap.iterations[self.reduce_channel_axis]),
+                    "TV_PRAGMA_UNROLL"):
                 code.raw(f"""
                 reduce_channel_offsets_[i] += {self.tile_shape_mnk[2]} * problem_size_.split_k_slices;
                 """)
@@ -1254,7 +1320,8 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             else:
                 # reduce_channel_offset_ is K, is stride
                 with self.tmap.tmap_loop(code, "s"):
-                    with code.range_("ss", self.tmap.sub_tile_shape[0], "TV_PRAGMA_UNROLL"):
+                    with code.range_("ss", self.tmap.sub_tile_shape[0],
+                                     "TV_PRAGMA_UNROLL"):
                         code.raw(f"""
                         if (reduce_channel_offset_ + s * {self.tmap.delta[0]} + ss >= problem_size_.K){{
                             uint32_t mask = ((1u << {self.tmap.iterations[1]}) - 1) << (s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + ss);
@@ -1264,55 +1331,50 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def increment_k(self):
         code = FunctionCode()
         if not self.increment_k_first:
-            return code 
+            return code
         code.raw(f"""
         pointer_ += params_.inc_c;
         """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def increment_filter(self):
         code = FunctionCode()
         if not self.increment_k_first:
-            return code 
+            return code
         code.raw(f"""
         pointer_ += params_.inc_rs;
         """)
         return code
 
     @pccm.cuda.member_function(name="increment_filter",
-                                device=True,
+                               device=True,
                                forceinline=True)
     def increment_filter_with_num(self):
         code = FunctionCode()
         code.arg("num", "int")
         if not self.increment_k_first:
-            return code 
+            return code
         code.raw(f"""
         pointer_ += params_.inc_rs * num;
         """)
         return code
 
-
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def reset_k(self):
         code = FunctionCode()
         if not self.increment_k_first:
-            return code 
+            return code
         code.raw(f"""
         pointer_ += params_.inc_c_reset;
         """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask_if_not_pred(self):
         code = pccm.cuda.PTXCode()
         code.arg("pred", "uint32_t")
@@ -1324,8 +1386,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask_if_pred(self):
         code = pccm.cuda.PTXCode()
         code.arg("pred", "uint32_t")
@@ -1337,9 +1398,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -1355,7 +1414,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
     def at(self):
         code = FunctionCode()
         if self.optimized:
-            return code 
+            return code
         code.arg("stride, contig, ss", "int")
         code.ret(f"tv::array<int, {self.ndim + 2}>")
         rs = codeops.unpack("filter_kernel_idxes_", range(self.ndim))
@@ -1406,9 +1465,13 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         else:
             code.arg("stride, contig, ss", "int")
             if self.sub_tile_shape[0] == 1:
-                code.raw(f"return reinterpret_cast<{self.const_access_pointer}>(pointer_);")
+                code.raw(
+                    f"return reinterpret_cast<{self.const_access_pointer}>(pointer_);"
+                )
             else:
-                code.raw(f"return reinterpret_cast<{self.const_access_pointer}>(pointer_ + ss * params_.stride_rsc_bytes);")
+                code.raw(
+                    f"return reinterpret_cast<{self.const_access_pointer}>(pointer_ + ss * params_.stride_rsc_bytes);"
+                )
         return code
 
     @pccm.cuda.member_function(device=True, forceinline=True)
@@ -1420,9 +1483,9 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         """)
         with self.tmap.tmap_loop(code, "s"):
             with code.range_("c", str(self.tmap.iterations[1]),
-                            "TV_PRAGMA_UNROLL"):
+                             "TV_PRAGMA_UNROLL"):
                 with code.range_("ss", str(self.sub_tile_shape[0]),
-                                "TV_PRAGMA_UNROLL"):
+                                 "TV_PRAGMA_UNROLL"):
                     if not self.optimized:
                         code.raw(f"""
                         int idx = s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + c * {self.sub_tile_shape[0]} + ss; 
@@ -1450,9 +1513,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                                                     str(self.index_t))
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def load_invalid(self):
         code = pccm.FunctionCode()
         if not self.optimized:
@@ -1506,7 +1567,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         self.tile_shape_mnk = tile_shape_mnk
         super().__init__(dtype, element_count, sub_tile_shape[1])
         self.sub_tile_shape = sub_tile_shape
-        self.op_type = op_type 
+        self.op_type = op_type
         self.optimized = optimized
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
@@ -1514,11 +1575,13 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         self.add_dependency(TensorView, GemmBasicKernel)
         is_output = op_type == ConvOpType.kBackwardInput
         if op_type != ConvOpType.kForward:
-            assert sub_tile_shape[0] == 1, "only forward support sub tile shape (DP4A)"
+            assert sub_tile_shape[
+                0] == 1, "only forward support sub tile shape (DP4A)"
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout, is_output)
         else:
-            self.params = IOOptParams(dtype, tile_shape_mnk, problem_size, input_layout, tmap, is_output)
+            self.params = IOOptParams(dtype, tile_shape_mnk, problem_size,
+                                      input_layout, tmap, is_output)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -1531,8 +1594,11 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
 
         self.add_member("params_", "Params const&")
         self.add_member("problem_size_", "ConvProblem const&")
-        if optimized :
-            self.add_member("pointers_", self.const_byte_pointer, array=f"[{tmap.iterations[0] * sub_tile_shape[0]}]")
+        if optimized:
+            self.add_member(
+                "pointers_",
+                self.const_byte_pointer,
+                array=f"[{tmap.iterations[0] * sub_tile_shape[0]}]")
         else:
             self.add_member("pointer_", self.const_byte_pointer)
         self.add_member("reduce_channel_offset_", "int")
@@ -1541,9 +1607,11 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
 
         if not optimized:
-            self.add_member("offset_npq_",
-                            "int",
-                            array=f"[{tmap.iterations[0] * sub_tile_shape[0]}][{self.ndim + 1}]")
+            self.add_member(
+                "offset_npq_",
+                "int",
+                array=
+                f"[{tmap.iterations[0] * sub_tile_shape[0]}][{self.ndim + 1}]")
         if optimized:
             mask_cnt = tmap.iterations[0] * self.problem_size.ndim
             self.add_member("masks_", str(self.index_t), array=f"[{mask_cnt}]")
@@ -1562,20 +1630,24 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         code.ctor_init("params_", "params")
         code.ctor_init("problem_size_", "problem_size")
         if not self.optimized:
-            code.ctor_init("pointer_",
-                        f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
-        code.ctor_init("filter_kernel_idxes_", f"{{{', '.join(['0'] * self.ndim)}}}")
+            code.ctor_init(
+                "pointer_",
+                f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
+        code.ctor_init("filter_kernel_idxes_",
+                       f"{{{', '.join(['0'] * self.ndim)}}}")
         code.raw(f"""
         auto thread_offset = threadblock_offset + ThreadMap::initial_offset(thread_id);
         reduce_channel_offset_ = thread_offset[1];
         """)
         if self.optimized:
-            code.raw(f"int offset_npq_[{self.tmap.iterations[0] * self.sub_tile_shape[0]}][{self.ndim + 1}];")
-        
+            code.raw(
+                f"int offset_npq_[{self.tmap.iterations[0] * self.sub_tile_shape[0]}][{self.ndim + 1}];"
+            )
+
         with code.range_("s", str(self.tmap.iterations[0]),
                          "TV_PRAGMA_UNROLL"):
             with code.range_("ss", str(self.sub_tile_shape[0]),
-                            "TV_PRAGMA_UNROLL"):
+                             "TV_PRAGMA_UNROLL"):
 
                 code.raw(f"""
                 int offset_npq = thread_offset[0] + s * {self.tmap.delta[0]} + ss;
@@ -1634,16 +1706,14 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             if (reduce_channel_offset_ >= problem_size.{C_or_K}){{
                 clear_mask_conv();
             }}
-            """) 
+            """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def clear_mask_conv(self):
         code = FunctionCode()
         if not self.optimized:
-            return code 
+            return code
 
         code.raw(f"""
         TV_PRAGMA_UNROLL
@@ -1653,14 +1723,12 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def clear_mask_conv_cond(self):
         # TODO replace these asm code with PTXCode.asm_block
         code = FunctionCode()
         if not self.optimized:
-            return code 
+            return code
         code.arg("enable", "bool")
         code.raw(f"""
         TV_PRAGMA_UNROLL
@@ -1716,12 +1784,17 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
                 code.raw("int next_dim = 0;")
                 for i in range(self.ndim - 1, -1, -1):
                     if i != 0:
-                        stack.enter_context(code.if_(f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"))
+                        stack.enter_context(
+                            code.if_(
+                                f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"
+                            ))
                         code.raw(f"filter_kernel_idxes_[{i}] = 0;")
                         if i > 1:
                             code.raw(f"next_dim = {self.ndim - 1 - i + 1};")
                     else:
-                        with code.if_(f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"):
+                        with code.if_(
+                                f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"
+                        ):
                             code.raw(f"next_dim = {self.ndim};")
                             code.raw(f"filter_kernel_idxes_[{i}] = 0;")
                         with code.else_():
@@ -1735,10 +1808,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         return code
 
-
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -1762,19 +1832,24 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
     def at(self):
         code = FunctionCode()
         if self.optimized:
-            return code 
+            return code
         code.arg("stride, contig, ss", "int")
         code.ret(f"tv::array<int, {self.ndim + 2}>")
         if self.op_type == bases.ConvOpType.kBackwardInput:
-            strides = [f"res[{i + 1}] / problem_size_.stride[{i}]" for i in range(self.ndim)]
+            strides = [
+                f"res[{i + 1}] / problem_size_.stride[{i}]"
+                for i in range(self.ndim)
+            ]
             code.raw(f"""
             auto res = nhwrs_to_npqk<true>(offset_npq_[stride], filter_kernel_idxes_);
             return {{res[0], {', '.join(strides)}, res[{self.ndim + 1}]}};
             """)
-            return code 
+            return code
         else:
             # forward
-            code.raw(f"auto& npq = offset_npq_[stride * {self.sub_tile_shape[0]} + ss];")
+            code.raw(
+                f"auto& npq = offset_npq_[stride * {self.sub_tile_shape[0]} + ss];"
+            )
             for i in range(self.ndim):
                 code.raw(f"""
                 int r_{i} = filter_kernel_idxes_[{i}];
@@ -1834,7 +1909,6 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-
     @pccm.cuda.member_function(host=True,
                                device=True,
                                forceinline=True,
@@ -1844,19 +1918,25 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         if not self.optimized:
             code.arg("indexes", f"const tv::array<int, {self.ndim + 2}>&")
             if self.op_type == bases.ConvOpType.kForward:
-                hw_valid = [f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.input_dims[{i}]" for i in range(self.ndim)]
+                hw_valid = [
+                    f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.input_dims[{i}]"
+                    for i in range(self.ndim)
+                ]
                 code.raw(f"""
                 return indexes[0] < problem_size_.N && 
                     {' && '.join(hw_valid)} &&
                     indexes[{self.ndim + 1}] < problem_size_.C;
                 """)
             elif self.op_type == bases.ConvOpType.kBackwardInput:
-                hw_valid = [] # type: List[str]
-                stride_valid = [] # type: List[str]
+                hw_valid = []  # type: List[str]
+                stride_valid = []  # type: List[str]
                 for i in range(self.ndim):
-                    hw_valid.append((f"indexes[{i + 1}] / problem_size_.stride[{i}] >= 0 && "
-                                    f"indexes[{i + 1}] / problem_size_.stride[{i}] < problem_size_.output_dims[{i}]"))
-                    stride_valid.append(f"!(indexes[{i + 1}] % problem_size_.stride[{i}])")
+                    hw_valid.append((
+                        f"indexes[{i + 1}] / problem_size_.stride[{i}] >= 0 && "
+                        f"indexes[{i + 1}] / problem_size_.stride[{i}] < problem_size_.output_dims[{i}]"
+                    ))
+                    stride_valid.append(
+                        f"!(indexes[{i + 1}] % problem_size_.stride[{i}])")
                 code.raw(f"""
                 return indexes[0] < problem_size_.N && 
                     {' && '.join(hw_valid)} &&
@@ -1867,13 +1947,15 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
                 raise NotImplementedError
         else:
             code.arg("stride, contig, ss", f"int")
-            mask_valids = [f"(masks_[stride * {self.ndim} + {i}] & ({self.index_t}(1) << (filter_kernel_idxes_[{i}] + (ss << 3))))" for i in range(self.ndim)]
+            mask_valids = [
+                f"(masks_[stride * {self.ndim} + {i}] & ({self.index_t}(1) << (filter_kernel_idxes_[{i}] + (ss << 3))))"
+                for i in range(self.ndim)
+            ]
             code.raw(f"""
             return {' && '.join(mask_valids)};
             """)
 
         return code.ret(f"bool")
-
 
     @pccm.cuda.member_function(host=True,
                                device=True,
@@ -1890,9 +1972,10 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         else:
             code.arg("stride, contig, ss", "int")
-            code.raw(f"return reinterpret_cast<{self.const_access_pointer}>(pointers_[stride * {self.sub_tile_shape[0]} + ss]);")
+            code.raw(
+                f"return reinterpret_cast<{self.const_access_pointer}>(pointers_[stride * {self.sub_tile_shape[0]} + ss]);"
+            )
         return code
-
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
@@ -1903,7 +1986,8 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         with self.tmap.tmap_loop(code, "s", "c"):
             if self.sub_tile_shape[0] > 1:
-                with code.range_("ss", self.sub_tile_shape[0], "TV_PRAGMA_UNROLL"):
+                with code.range_("ss", self.sub_tile_shape[0],
+                                 "TV_PRAGMA_UNROLL"):
                     if not self.optimized:
                         if self.op_type == bases.ConvOpType.kBackwardInput:
                             code.raw(f"""
@@ -1975,6 +2059,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         code = pccm.FunctionCode()
         return code
 
+
 class ForwardDgradIOIterator(bases.ConvInputIterator):
     """
     fwd: NHWC -> NPQRSC @ KRSC, k = RSC
@@ -2002,7 +2087,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         self.tile_shape_mnk = tile_shape_mnk
         super().__init__(dtype, element_count, sub_tile_shape[1])
         self.sub_tile_shape = sub_tile_shape
-        self.op_type = op_type 
+        self.op_type = op_type
         self.optimized = optimized
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
@@ -2012,7 +2097,8 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout)
         else:
-            self.params = IOOptParams(dtype, tile_shape_mnk, problem_size, input_layout, tmap, is_output)
+            self.params = IOOptParams(dtype, tile_shape_mnk, problem_size,
+                                      input_layout, tmap, is_output)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -2025,8 +2111,10 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
 
         self.add_member("params_", "Params const&")
         self.add_member("problem_size_", "ConvProblem const&")
-        if optimized :
-            self.add_member("pointers_", self.const_byte_pointer, array=f"[{tmap.iterations[0]}]")
+        if optimized:
+            self.add_member("pointers_",
+                            self.const_byte_pointer,
+                            array=f"[{tmap.iterations[0]}]")
         else:
             self.add_member("pointer_", self.const_byte_pointer)
 
@@ -2057,16 +2145,20 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         code.ctor_init("params_", "params")
         code.ctor_init("problem_size_", "problem_size")
         if not self.optimized:
-            code.ctor_init("pointer_",
-                        f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
-        code.ctor_init("filter_kernel_idxes_", f"{{{', '.join(['0'] * self.ndim)}}}")
+            code.ctor_init(
+                "pointer_",
+                f"reinterpret_cast<{self.const_byte_pointer}>(ptr)")
+        code.ctor_init("filter_kernel_idxes_",
+                       f"{{{', '.join(['0'] * self.ndim)}}}")
         code.raw(f"""
         auto thread_offset = threadblock_offset + ThreadMap::initial_offset(thread_id);
         reduce_channel_offset_ = thread_offset[1];
         """)
         if self.optimized:
-            code.raw(f"int offset_npq_[{self.tmap.iterations[0]}][{self.ndim + 1}];")
-        
+            code.raw(
+                f"int offset_npq_[{self.tmap.iterations[0]}][{self.ndim + 1}];"
+            )
+
         with code.range_("s", str(self.tmap.iterations[0]),
                          "TV_PRAGMA_UNROLL"):
             code.raw(f"""
@@ -2120,16 +2212,14 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             if (reduce_channel_offset_ >= problem_size.{C_or_K}){{
                 clear_mask_conv();
             }}
-            """) 
+            """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def clear_mask_conv(self):
         code = FunctionCode()
         if not self.optimized:
-            return code 
+            return code
 
         code.raw(f"""
         TV_PRAGMA_UNROLL
@@ -2139,13 +2229,11 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def clear_mask_conv_cond(self):
         code = FunctionCode()
         if not self.optimized:
-            return code 
+            return code
         code.arg("enable", "bool")
         code.raw(f"""
         TV_PRAGMA_UNROLL
@@ -2201,12 +2289,17 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
                 code.raw("int next_dim = 0;")
                 for i in range(self.ndim - 1, -1, -1):
                     if i != 0:
-                        stack.enter_context(code.if_(f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"))
+                        stack.enter_context(
+                            code.if_(
+                                f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"
+                            ))
                         code.raw(f"filter_kernel_idxes_[{i}] = 0;")
                         if i > 1:
                             code.raw(f"next_dim = {self.ndim - 1 - i + 1};")
                     else:
-                        with code.if_(f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"):
+                        with code.if_(
+                                f"++filter_kernel_idxes_[{i}] == problem_size_.ksize[{i}]"
+                        ):
                             code.raw(f"next_dim = {self.ndim};")
                             code.raw(f"filter_kernel_idxes_[{i}] = 0;")
                         with code.else_():
@@ -2220,10 +2313,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-
-    @pccm.cuda.member_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -2247,16 +2337,19 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
     def at(self):
         code = FunctionCode()
         if self.optimized:
-            return code 
+            return code
         code.arg("stride, contig", "int")
         code.ret(f"tv::array<int, {self.ndim + 2}>")
         if self.op_type == bases.ConvOpType.kBackwardInput:
-            strides = [f"res[{i + 1}] / problem_size_.stride[{i}]" for i in range(self.ndim)]
+            strides = [
+                f"res[{i + 1}] / problem_size_.stride[{i}]"
+                for i in range(self.ndim)
+            ]
             code.raw(f"""
             auto res = nhwrs_to_npqk<true>(offset_npq_[stride], filter_kernel_idxes_);
             return {{res[0], {', '.join(strides)}, res[{self.ndim + 1}]}};
             """)
-            return code 
+            return code
         else:
             # forward
             code.raw("auto& npq = offset_npq_[stride];")
@@ -2319,7 +2412,6 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-
     @pccm.cuda.member_function(host=True,
                                device=True,
                                forceinline=True,
@@ -2329,19 +2421,25 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         if not self.optimized:
             code.arg("indexes", f"const tv::array<int, {self.ndim + 2}>&")
             if self.op_type == bases.ConvOpType.kForward:
-                hw_valid = [f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.input_dims[{i}]" for i in range(self.ndim)]
+                hw_valid = [
+                    f"indexes[{i + 1}] >= 0 && indexes[{i + 1}] < problem_size_.input_dims[{i}]"
+                    for i in range(self.ndim)
+                ]
                 code.raw(f"""
                 return indexes[0] < problem_size_.N && 
                     {' && '.join(hw_valid)} &&
                     indexes[{self.ndim + 1}] < problem_size_.C;
                 """)
             elif self.op_type == bases.ConvOpType.kBackwardInput:
-                hw_valid = [] # type: List[str]
-                stride_valid = [] # type: List[str]
+                hw_valid = []  # type: List[str]
+                stride_valid = []  # type: List[str]
                 for i in range(self.ndim):
-                    hw_valid.append((f"indexes[{i + 1}] / problem_size_.stride[{i}] >= 0 && "
-                                    f"indexes[{i + 1}] / problem_size_.stride[{i}] < problem_size_.output_dims[{i}]"))
-                    stride_valid.append(f"!(indexes[{i + 1}] % problem_size_.stride[{i}])")
+                    hw_valid.append((
+                        f"indexes[{i + 1}] / problem_size_.stride[{i}] >= 0 && "
+                        f"indexes[{i + 1}] / problem_size_.stride[{i}] < problem_size_.output_dims[{i}]"
+                    ))
+                    stride_valid.append(
+                        f"!(indexes[{i + 1}] % problem_size_.stride[{i}])")
                 code.raw(f"""
                 return indexes[0] < problem_size_.N && 
                     {' && '.join(hw_valid)} &&
@@ -2352,13 +2450,15 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
                 raise NotImplementedError
         else:
             code.arg("stride, contig", f"int")
-            mask_valids = [f"(masks_[stride * {self.ndim} + {i}] & ({self.index_t}(1) << filter_kernel_idxes_[{i}]))" for i in range(self.ndim)]
+            mask_valids = [
+                f"(masks_[stride * {self.ndim} + {i}] & ({self.index_t}(1) << filter_kernel_idxes_[{i}]))"
+                for i in range(self.ndim)
+            ]
             code.raw(f"""
             return {' && '.join(mask_valids)};
             """)
 
         return code.ret(f"bool")
-
 
     @pccm.cuda.member_function(host=True,
                                device=True,
@@ -2375,9 +2475,10 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         else:
             code.arg("stride, contig", "int")
-            code.raw(f"return reinterpret_cast<{self.const_access_pointer}>(pointers_[stride]);")
+            code.raw(
+                f"return reinterpret_cast<{self.const_access_pointer}>(pointers_[stride]);"
+            )
         return code
-
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):

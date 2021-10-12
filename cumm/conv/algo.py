@@ -1,15 +1,16 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
+from typing import Optional, Tuple
 
-from cumm import tensorview as tv 
-from cumm.gemm.algospec.core import GemmAlgo, TensorOpParams
-import pccm 
-from pathlib import Path 
+import pccm
+
 from cumm import dtypes
-from typing import Tuple, Optional
+from cumm import tensorview as tv
+from cumm.gemm.algospec.core import GemmAlgo, TensorOpParams
+from cumm.gemm.core import MetaArray, metaseq, seq
 
-from cumm.gemm.core import metaseq, seq, MetaArray
 
 class ConvAlgoParams(object):
     def __init__(self,
@@ -54,7 +55,7 @@ class ConvAlgoParams(object):
         if self.dtype_a == dtypes.int8:
             if self.tensorop is not None:
                 if (self.trans_a or not self.trans_b):
-                    return True 
+                    return True
         return False
 
     def get_algo_name(self):

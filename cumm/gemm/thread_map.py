@@ -1,12 +1,13 @@
 import contextlib
-import pccm
-import numpy as np
-
 from typing import List
-from cumm.gemm import constants
-from cumm.common import TensorView
+
+import numpy as np
+import pccm
+
 from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray
+from cumm.common import TensorView
+from cumm.gemm import constants
+from cumm.gemm.core import MetaArray, metaseq, seq
 
 DONT_CARE = 1
 
@@ -92,6 +93,7 @@ def tight_partition_delta(shape: MetaArray[int], dilation: MetaArray[int],
         m *= shape[i] * dilation[i]
     return res
 
+
 @pccm.skip_inherit
 class InputThreadMapBase(pccm.ParameterizedClass):
     @property
@@ -103,15 +105,19 @@ class InputThreadMapBase(pccm.ParameterizedClass):
         raise NotImplementedError
 
     @contextlib.contextmanager
-    def tmap_loop(self, code: pccm.FunctionCode, stride_var: str, contig_var: str = ""):
+    def tmap_loop(self,
+                  code: pccm.FunctionCode,
+                  stride_var: str,
+                  contig_var: str = ""):
         iters = self.iterations
         with code.range_(stride_var, str(iters[0]), "TV_PRAGMA_UNROLL"):
             if contig_var:
-                with code.range_(contig_var, str(iters[1]), "TV_PRAGMA_UNROLL"):
+                with code.range_(contig_var, str(iters[1]),
+                                 "TV_PRAGMA_UNROLL"):
                     yield
             else:
                 yield
-                
+
     def tmap_loop_unroll_sc(self):
         for s in range(self.iterations[0]):
             for c in range(self.iterations[1]):
@@ -125,6 +131,7 @@ class InputThreadMapBase(pccm.ParameterizedClass):
         for c in range(self.iterations[1]):
             yield c
 
+
 class PitchLinear(InputThreadMapBase):
     def __init__(self, tile_shape: MetaArray[int],
                  sub_tile_shape: MetaArray[int], num_threads: int):
@@ -137,10 +144,9 @@ class PitchLinear(InputThreadMapBase):
         self.tile_access_shape = tile_shape // sub_tile_shape
 
         self._iterations = calc_thread_access_shape(tile_shape, num_threads,
-                                                   sub_tile_shape)
+                                                    sub_tile_shape)
         self._delta = calc_thread_access_delta(
-            metaseq(tile_shape[0], tile_shape[1]),
-            num_threads, sub_tile_shape)
+            metaseq(tile_shape[0], tile_shape[1]), num_threads, sub_tile_shape)
 
     @property
     def iterations(self) -> MetaArray[int]:
@@ -193,7 +199,7 @@ class PitchLinearWarpRaked(InputThreadMapBase):
         self.warp_count = metaseq(warp_count_strided, warp_count_contig)
         self._iterations = self.warp_access_count // self.warp_count  # type: MetaArray[int]
         self._delta = metaseq(self.warp_shape[0],
-                             self.warp_shape[1] * self.element_per_acc)
+                              self.warp_shape[1] * self.element_per_acc)
 
     @property
     def iterations(self) -> MetaArray[int]:
@@ -247,6 +253,7 @@ class PitchLinearWarpRaked(InputThreadMapBase):
 
     def initial_offset_nosubtile_python(self, thread_id: int):
         return self.initial_offset_python(thread_id)
+
 
 def get_2d_access_iter_delta(shape: MetaArray[int], warp_remain: int, epa: int,
                              element_size_bits: int):

@@ -1,7 +1,10 @@
-from cumm.dtypes import DType
 from typing import Union
-from .metaarray import seq, MetaArray, metaseq
+
 from cumm.constants import CUTLASS_MODE
+from cumm.dtypes import DType
+
+from .metaarray import MetaArray, metaseq, seq
+
 
 def array_type(dtype: Union[str, DType], count: int, align: int = 0):
     if not CUTLASS_MODE:

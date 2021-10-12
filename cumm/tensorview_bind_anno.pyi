@@ -2,7 +2,6 @@ from typing import List, Tuple, Union, overload
 
 import numpy as np
 
-
 class Tensor:
     @overload
     def __init__(self):

@@ -1,48 +1,55 @@
 import enum
 from pathlib import Path
-from cumm.gemm.algospec.core import ShuffleStrideType
-from cumm import tensorview as tv 
-from cumm.core_cc.csrc.arrayref import ArrayPtr
-from cumm import cudasim
+from typing import Dict, List, Optional, Tuple, Type, Union
+
 import numpy as np
 import pccm
-from cumm import dtypes
-from cumm.constants import CUTLASS_MODE, CUTLASS_INPUT_ITER, CUTLASS_SMEM_WARP_ITER, CUTLASS_OUTPUT_ITER, CUTLASS_DEBUG
 
-from cumm.gemm import (constants, layout, mask_iters,
-                         out_iters, thread_map, volta_iters, volta_out_iters)
+from cumm import cudasim, dtypes
+from cumm import tensorview as tv
 from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                                TensorViewKernel)
-from cumm.gemm import wmma
-from cumm.gemm.wmma.simt import WarpMmaSimt
-from typing import Dict, List, Union, Optional, Type, Tuple
-from cumm.gemm.algospec import GemmAlgo, TensorOpParams, get_algo_spec
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
+                         TensorViewKernel)
+from cumm.constants import (CUTLASS_DEBUG, CUTLASS_INPUT_ITER, CUTLASS_MODE,
+                            CUTLASS_OUTPUT_ITER, CUTLASS_SMEM_WARP_ITER)
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm import (constants, layout, mask_iters, out_iters, thread_map,
+                       volta_iters, volta_out_iters, wmma)
+from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases, get_algo_spec
+from cumm.gemm.algospec.core import ShuffleStrideType
+from cumm.gemm.blockmma import BlockMmaStorage, Mma
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.outputs import Output, OutputSmemStorage
-from cumm.gemm.blockmma import Mma, BlockMmaStorage
 from cumm.gemm.utils import GemmUtils
-from cumm.gemm.algospec import bases
+from cumm.gemm.wmma.simt import WarpMmaSimt
+
 
 def div_up(a, b):
     return (a + b - 1) // b
 
 
 class GemmParams(pccm.ParameterizedClass):
-    def __init__(self, tile_shape: MetaArray[int], dtype_a: dtypes.DType,
-                 dtype_b: dtypes.DType, dtype_c: dtypes.DType,
-                 dtype_comp: dtypes.DType, trans_a: bool, trans_b: bool, trans_c: bool,
-                 itera_params: mask_iters.MaskTileIteratorParams, 
-                 iterb_params: mask_iters.MaskTileIteratorParams, 
-                 out_params: out_iters.OutIteratorParams, 
-                 have_workspace: bool = False,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            tile_shape: MetaArray[int],
+            dtype_a: dtypes.DType,
+            dtype_b: dtypes.DType,
+            dtype_c: dtypes.DType,
+            dtype_comp: dtypes.DType,
+            trans_a: bool,
+            trans_b: bool,
+            trans_c: bool,
+            itera_params: mask_iters.MaskTileIteratorParams,
+            iterb_params: mask_iters.MaskTileIteratorParams,
+            out_params: out_iters.OutIteratorParams,
+            have_workspace: bool = False,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         super().__init__()
         self.add_dependency(TensorView, GemmBasic)
         self.add_param_class("gemmutils", GemmUtils(tile_shape), "GemmUtils")
         self.itera_params = itera_params
         self.iterb_params = iterb_params
         self.out_params = out_params
-        self.shuffle_stride = shuffle_stride 
+        self.shuffle_stride = shuffle_stride
         self.cutlass_a_type = ("Mma::IteratorA")
         self.cutlass_b_type = ("Mma::IteratorB")
         self.cutlass_a_param_type = self.cutlass_a_type + "::Params"
@@ -79,11 +86,12 @@ class GemmParams(pccm.ParameterizedClass):
             self.add_member("itera_params_", f"IterAParams")
             self.add_member("iterb_params_", f"IterBParams")
         if CUTLASS_OUTPUT_ITER:
-            self.add_member("params_C", f"Epilogue::OutputTileIterator::Params")
-            self.add_member("params_D", f"Epilogue::OutputTileIterator::Params")
+            self.add_member("params_C",
+                            f"Epilogue::OutputTileIterator::Params")
+            self.add_member("params_D",
+                            f"Epilogue::OutputTileIterator::Params")
         else:
             self.add_member("out_params_", f"OutIterParams")
-
 
         # cudasim members
         self.m = 0
@@ -101,13 +109,21 @@ class GemmParams(pccm.ParameterizedClass):
         self.iterb_params_: Optional[mask_iters.MaskTileIteratorParams] = None
         self.out_params_: Optional[out_iters.OutIteratorParams] = None
 
-    def python_ctor(self, m: int, n: int, k: int, A: ArrayPtr, B: ArrayPtr,
-                    C: ArrayPtr, D: ArrayPtr, alpha: float, beta: float, split_k_slice: int = 1):
+    def python_ctor(self,
+                    m: int,
+                    n: int,
+                    k: int,
+                    A: ArrayPtr,
+                    B: ArrayPtr,
+                    C: ArrayPtr,
+                    D: ArrayPtr,
+                    alpha: float,
+                    beta: float,
+                    split_k_slice: int = 1):
         new_obj = GemmParams(self.tile_shape, self.dtype_a, self.dtype_b,
-                             self.dtype_c, self.dtype_comp, self.trans_a, self.trans_b, 
-                             self.trans_c,
-                             self.itera_params, self.iterb_params,
-                             self.out_params)
+                             self.dtype_c, self.dtype_comp, self.trans_a,
+                             self.trans_b, self.trans_c, self.itera_params,
+                             self.iterb_params, self.out_params)
         new_obj.grid_dims.x = mask_iters.div_up(m, new_obj.tile_shape[0])
         new_obj.grid_dims.y = mask_iters.div_up(n, new_obj.tile_shape[1])
         new_obj.grid_dims.z = split_k_slice
@@ -116,7 +132,8 @@ class GemmParams(pccm.ParameterizedClass):
         gemm_k_iterations = mask_iters.div_up(total_gemm_k_iterations,
                                               new_obj.grid_dims.z)
         new_obj.gemm_k_size = gemm_k_iterations * new_obj.tile_shape[2]
-        print("gemm_k_iterations", k, new_obj.tile_shape[2], new_obj.grid_dims.z, gemm_k_iterations, new_obj.gemm_k_size)
+        print("gemm_k_iterations", k, new_obj.tile_shape[2],
+              new_obj.grid_dims.z, gemm_k_iterations, new_obj.gemm_k_size)
 
         new_obj.ptr_A = A
         new_obj.ptr_B = B
@@ -127,10 +144,10 @@ class GemmParams(pccm.ParameterizedClass):
         new_obj.k = k
         new_obj.alpha = alpha
         new_obj.beta = beta
-        a_stride = k 
+        a_stride = k
         if self.trans_a:
             a_stride = m
-        b_stride = n 
+        b_stride = n
         if self.trans_b:
             b_stride = k
 
@@ -155,7 +172,8 @@ class GemmParams(pccm.ParameterizedClass):
             grid_dims.z = grid_shape.k();
             """)
         else:
-            code.raw("grid_dims = get_logical_tile_count(m, n, k, split_k_slice);")
+            code.raw(
+                "grid_dims = get_logical_tile_count(m, n, k, split_k_slice);")
         code.raw(f"""
         // int total_gemm_k_iterations = tv::div_up(k, {self.tile_shape[2]}); // 160, 16 = 10
         // int gemm_k_iterations_per_split =
@@ -245,29 +263,29 @@ class GemmParams(pccm.ParameterizedClass):
         grid_dims.z = split_k_slice;
         return grid_dims;
         """)
-        return code 
+        return code
 
 
 class GemmKernel(pccm.ParameterizedClass):
-    def __init__(self,
-                 tile_shape: MetaArray[int],
-                 warp_tile_shape: MetaArray[int],
-                 num_stage: int,
-                 dtype_a: dtypes.DType,
-                 dtype_b: dtypes.DType,
-                 dtype_c: dtypes.DType,
-                 dtype_acc: dtypes.DType,
-                 dtype_comp: dtypes.DType,
-                 trans_a: bool,
-                 trans_b: bool,
-                 trans_c: bool,
-                 tensorop: Optional[TensorOpParams] = None,
-                 algo: GemmAlgo = GemmAlgo.Simt,
-                 splitk_serial: bool = False,
-                 splitk_parallel: bool = False,
-                 need_source: bool = True,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
-        
+    def __init__(
+            self,
+            tile_shape: MetaArray[int],
+            warp_tile_shape: MetaArray[int],
+            num_stage: int,
+            dtype_a: dtypes.DType,
+            dtype_b: dtypes.DType,
+            dtype_c: dtypes.DType,
+            dtype_acc: dtypes.DType,
+            dtype_comp: dtypes.DType,
+            trans_a: bool,
+            trans_b: bool,
+            trans_c: bool,
+            tensorop: Optional[TensorOpParams] = None,
+            algo: GemmAlgo = GemmAlgo.Simt,
+            splitk_serial: bool = False,
+            splitk_parallel: bool = False,
+            need_source: bool = True,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -284,7 +302,7 @@ class GemmKernel(pccm.ParameterizedClass):
         self.warp_tile_shape = warp_tile_shape
         self.num_stage = num_stage
         self.tensorop = tensorop
-        self.splitk_serial = splitk_serial 
+        self.splitk_serial = splitk_serial
         self.splitk_parallel = splitk_parallel
         self.need_source = need_source
         transpose_gemm = trans_c
@@ -319,32 +337,38 @@ class GemmKernel(pccm.ParameterizedClass):
         self.input_spec = algo_spec.input_spec
         self.mma_spec = algo_spec.mma_spec
         self.output_spec = algo_spec.output_spec
-        
+
         self.warp_count_shape = tile_shape // warp_tile_shape
         self.warp_count = self.warp_count_shape.prod()
         self.num_threads = self.warp_count * constants.WARP_SIZE
         self.partk = self.warp_count_shape[2]
-        self.add_param_class("inpitera", self.input_spec.input_iter_a, "InputIteratorA")
-        self.add_param_class("inpiterb", self.input_spec.input_iter_b, "InputIteratorB")
+        self.add_param_class("inpitera", self.input_spec.input_iter_a,
+                             "InputIteratorA")
+        self.add_param_class("inpiterb", self.input_spec.input_iter_b,
+                             "InputIteratorB")
 
         padding_mn = self.mma_spec.padding_mn
 
         self.acc_frag_iter = self.output_spec.acc_frag_iter
         self.out_warp_tile_iter = self.output_spec.out_warp_tile_iter
         out_smem_padding = self.output_spec.smem_padding
-        self.fragment_c_t = array_type(dtype_acc, self.output_spec.get_accumulator_count())
+        self.fragment_c_t = array_type(
+            dtype_acc, self.output_spec.get_accumulator_count())
         self.gemm_smem_storage = BlockMmaStorage(tile_shape,
                                                  seq(0, padding_mn[0]),
                                                  seq(0, padding_mn[1]),
                                                  num_stage, dtype_a, dtype_b)
         self.out_smem_storage = OutputSmemStorage(
-            seq(tile_shape[0] // self.output_spec.num_out_iters * self.warp_count_shape[2],
-                tile_shape[1]), out_smem_padding, dtype_acc, self.output_spec.frag_per_iter)
+            seq(
+                tile_shape[0] // self.output_spec.num_out_iters *
+                self.warp_count_shape[2], tile_shape[1]), out_smem_padding,
+            dtype_acc, self.output_spec.frag_per_iter)
         # if partk > 1, we need more smem tile to save each k result.
         # self.frag_per_iter = self.output_spec.frag_per_iter
         # self.out_num_tile = self.output_spec.frag_per_iter if self.output_spec.frag_per_iter > 1 else self.partk
         # self.out_tile_size = self.out_smem_storage.smem_size // dtype_acc.itemsize() // self.out_num_tile
-        print(self.out_smem_storage.smem_size, self.gemm_smem_storage.smem_size)
+        print(self.out_smem_storage.smem_size,
+              self.gemm_smem_storage.smem_size)
         self.smem_size = max(self.out_smem_storage.smem_size,
                              self.gemm_smem_storage.smem_size)
         self.add_param_class("gemm_smem_storage", self.gemm_smem_storage,
@@ -356,8 +380,9 @@ class GemmKernel(pccm.ParameterizedClass):
         have_workspace = splitk_serial or splitk_parallel
 
         self.gemm_params = GemmParams(tile_shape, dtype_a, dtype_b, dtype_c,
-                                      dtype_comp, trans_a, trans_b, trans_c, inp_iter_a_param, 
-                                      inp_iter_b_param, self.output_spec.out_iter.get_params(),
+                                      dtype_comp, trans_a, trans_b, trans_c,
+                                      inp_iter_a_param, inp_iter_b_param,
+                                      self.output_spec.out_iter.get_params(),
                                       have_workspace, shuffle_stride)
         self.add_param_class("gemm_params", self.gemm_params, "GemmParams")
 
@@ -366,10 +391,13 @@ class GemmKernel(pccm.ParameterizedClass):
         self.cutlass_warp_a_type = "Mma::Operator::IteratorA"
         self.cutlass_warp_b_type = "Mma::Operator::IteratorB"
 
-        self.mma_container = Mma(dtype_acc, self.partk, num_stage, self.mma_spec, self.gemm_smem_storage)
-        self.output = Output(dtype_acc, self.warp_count_shape, self.partk, self.output_spec, self.out_smem_storage)
+        self.mma_container = Mma(dtype_acc, self.partk, num_stage,
+                                 self.mma_spec, self.gemm_smem_storage)
+        self.output = Output(dtype_acc, self.warp_count_shape, self.partk,
+                             self.output_spec, self.out_smem_storage)
         self.add_param_class("out_iter", self.output_spec.out_iter, "OutIter")
-        self.add_param_class("out_iter_const", self.output_spec.const_out_iter, "ConstOutIter")
+        self.add_param_class("out_iter_const", self.output_spec.const_out_iter,
+                             "ConstOutIter")
 
         self.add_param_class("out_op", self.output_spec.output_op, "OutputOp")
 
@@ -400,11 +428,11 @@ class GemmKernel(pccm.ParameterizedClass):
         else:
             res += "0"
         return res
-        
+
     def support_splitk(self):
         return self.splitk_serial or self.splitk_parallel
 
-    @pccm.cuda.cuda_global_function# (inline=True)
+    @pccm.cuda.cuda_global_function  # (inline=True)
     def gemm_kernel(self):
         code = pccm.FunctionCode()
         if CUTLASS_MODE:
@@ -665,21 +693,30 @@ class GemmKernel(pccm.ParameterizedClass):
                                     {{block_offset_C[0], block_offset_C[1]}},
                                     thread_idx);
                 """)
-            code.raw(f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);")
+            code.raw(
+                f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
+            )
             if self.splitk_serial:
                 with code.if_("need_self_reduce"):
-                    code.raw(f"out.run_self_reduce(output_op, accumulators, out_iter_C);")
+                    code.raw(
+                        f"out.run_self_reduce(output_op, accumulators, out_iter_C);"
+                    )
                 with code.else_():
                     if self.need_source:
-                        code.raw(f"out.run(output_op, accumulators, out_iter_C, out_iter_D);")
+                        code.raw(
+                            f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
+                        )
                     else:
-                        code.raw(f"out.run(output_op, accumulators, out_iter_C);")
+                        code.raw(
+                            f"out.run(output_op, accumulators, out_iter_C);")
             else:
                 if self.need_source:
-                    code.raw(f"out.run(output_op, accumulators, out_iter_C, out_iter_D);")
+                    code.raw(
+                        f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
+                    )
                 else:
                     code.raw(f"out.run(output_op, accumulators, out_iter_C);")
-            
+
             if self.splitk_serial:
                 code.raw(f"""
                 if (params.grid_dims.z > 1){{
@@ -713,20 +750,20 @@ class GemmKernel(pccm.ParameterizedClass):
             dtypes.get_npdtype(self.dtype_acc))
         if cudasim.enable_debug():
             smem_A_ptr = ArrayPtr(self.dtype_a.tv_dtype,
-                                smem_A.nbytes // self.dtype_a.itemsize(),
-                                external_data=tv.from_numpy(smem_A))
+                                  smem_A.nbytes // self.dtype_a.itemsize(),
+                                  external_data=tv.from_numpy(smem_A))
             smem_B_ptr = ArrayPtr(self.dtype_b.tv_dtype,
-                                smem_B.nbytes // self.dtype_b.itemsize(),
-                                external_data=tv.from_numpy(smem_B))
+                                  smem_B.nbytes // self.dtype_b.itemsize(),
+                                  external_data=tv.from_numpy(smem_B))
         else:
             smem_A_ptr = ArrayPtr(self.dtype_a.tv_dtype,
-                                smem_A.nbytes // self.dtype_a.itemsize(),
-                                external_data=tv.from_numpy(smem_A),
-                                meta_data=tv.Tensor())
+                                  smem_A.nbytes // self.dtype_a.itemsize(),
+                                  external_data=tv.from_numpy(smem_A),
+                                  meta_data=tv.Tensor())
             smem_B_ptr = ArrayPtr(self.dtype_b.tv_dtype,
-                                smem_B.nbytes // self.dtype_b.itemsize(),
-                                external_data=tv.from_numpy(smem_B),
-                                meta_data=tv.Tensor())
+                                  smem_B.nbytes // self.dtype_b.itemsize(),
+                                  external_data=tv.from_numpy(smem_B),
+                                  meta_data=tv.Tensor())
 
         thread_idx = cudasim.threadIdx().x
 
@@ -764,20 +801,29 @@ class GemmKernel(pccm.ParameterizedClass):
             extent_A = seq(params.m, problem_size_k)
             tb_offset_A = seq(block_offset_A[0], block_offset_A[1])
 
-        input_iter_A = self.input_spec.input_iter_a.python_ctor(params.itera_params_, params.ptr_A,
-                                                   extent_A, thread_idx,
-                                                   tb_offset_A, is_left=True)
+        input_iter_A = self.input_spec.input_iter_a.python_ctor(
+            params.itera_params_,
+            params.ptr_A,
+            extent_A,
+            thread_idx,
+            tb_offset_A,
+            is_left=True)
         if self.trans_b:
             extent_B = seq(params.n, problem_size_k)
             tb_offset_B = seq(block_offset_B[1], block_offset_B[0])
         else:
             extent_B = seq(problem_size_k, params.n)
             tb_offset_B = seq(block_offset_B[0], block_offset_B[1])
-        input_iter_B = self.input_spec.input_iter_b.python_ctor(params.iterb_params_, params.ptr_B,
-                                                   extent_B, thread_idx,
-                                                   tb_offset_B, is_left=False)
+        input_iter_B = self.input_spec.input_iter_b.python_ctor(
+            params.iterb_params_,
+            params.ptr_B,
+            extent_B,
+            thread_idx,
+            tb_offset_B,
+            is_left=False)
         if cudasim.threadIdx().x == 0:
-            print(cudasim.blockIdx(), gemm_k_iterations, block_offset_A, block_offset_B)
+            print(cudasim.blockIdx(), gemm_k_iterations, block_offset_A,
+                  block_offset_B)
             print(extent_A, tb_offset_A, extent_B, tb_offset_B)
 
         warp_idx = cudasim.get_warp_id()
@@ -789,54 +835,64 @@ class GemmKernel(pccm.ParameterizedClass):
                               self.warp_count_shape[1])
         warp_m = warp_mn % self.warp_count_shape[0]
         warp_n = warp_mn // self.warp_count_shape[0]
-        mma = await self.mma_container.python_ctor(smem_A_ptr, smem_B_ptr, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx)
-        accumulators = ArrayPtr(
-            self.dtype_acc.tv_dtype,
-            self.mma_spec.accumulator_size)
+        mma = await self.mma_container.python_ctor(smem_A_ptr, smem_B_ptr,
+                                                   thread_idx, warp_idx_k,
+                                                   warp_m, warp_n, lane_idx)
+        accumulators = ArrayPtr(self.dtype_acc.tv_dtype,
+                                self.mma_spec.accumulator_size)
         accumulators.clear()
-        res_inputs = await mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators)
+        res_inputs = await mma(gemm_k_iterations, accumulators, input_iter_A,
+                               input_iter_B, accumulators)
 
         await cudasim.syncthreads()
-                # cudasim.debug_print(acc[:16])
+        # cudasim.debug_print(acc[:16])
 
-
-        output_op = self.output_spec.output_op.python_ctor(params.alpha, params.beta)
+        output_op = self.output_spec.output_op.python_ctor(
+            params.alpha, params.beta)
         if self.splitk_serial:
             if cudasim.gridDim().z > 1:
-                output_op.set_k_partition_python(tile_offset_k, cudasim.gridDim().z)
-        out_iter_C = self.output_spec.out_iter.python_ctor(params.out_params_, params.ptr_C, 
-            seq(params.m, params.n), seq(block_offset_C[0], block_offset_C[1]),
-            thread_idx)
-        out_iter_D = self.output_spec.out_iter.python_ctor(params.out_params_, params.ptr_D, 
-            seq(params.m, params.n), seq(block_offset_C[0], block_offset_C[1]),
-            thread_idx)
+                output_op.set_k_partition_python(tile_offset_k,
+                                                 cudasim.gridDim().z)
+        out_iter_C = self.output_spec.out_iter.python_ctor(
+            params.out_params_, params.ptr_C, seq(params.m, params.n),
+            seq(block_offset_C[0], block_offset_C[1]), thread_idx)
+        out_iter_D = self.output_spec.out_iter.python_ctor(
+            params.out_params_, params.ptr_D, seq(params.m, params.n),
+            seq(block_offset_C[0], block_offset_C[1]), thread_idx)
         if self.splitk_serial and cudasim.gridDim().z > 1:
             if tile_offset_k > 0:
                 out_iter_C = out_iter_D
-        output = self.output.python_ctor(smem_out_ptr, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx)
+        output = self.output.python_ctor(smem_out_ptr, thread_idx, warp_idx_k,
+                                         warp_m, warp_n, lane_idx)
         need_self_reduce = False
         if self.splitk_serial:
             if cudasim.gridDim().z > 1:
                 if tile_offset_k > 0:
-                    need_self_reduce = True 
+                    need_self_reduce = True
         if self.splitk_serial:
             if need_self_reduce:
-                res_output = await output(output_op, accumulators, out_iter_C, self_reduce=True)
+                res_output = await output(output_op,
+                                          accumulators,
+                                          out_iter_C,
+                                          self_reduce=True)
             else:
                 if self.need_source:
-                    res_output = await output(output_op, accumulators, out_iter_C, out_iter_D)
+                    res_output = await output(output_op, accumulators,
+                                              out_iter_C, out_iter_D)
                 else:
-                    res_output = await output(output_op, accumulators, out_iter_C)
+                    res_output = await output(output_op, accumulators,
+                                              out_iter_C)
         else:
             if self.need_source:
-                res_output = await output(output_op, accumulators, out_iter_C, out_iter_D)
+                res_output = await output(output_op, accumulators, out_iter_C,
+                                          out_iter_D)
             else:
                 res_output = await output(output_op, accumulators, out_iter_C)
         if not cudasim.enable_debug():
             return
-        
+
         res = {
             **res_output,
             **res_inputs,
         }
-        return res 
+        return res

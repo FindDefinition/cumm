@@ -1,14 +1,15 @@
-import pccm
 import abc
+import enum
+from typing import Optional, Union
+
+import pccm
+
 from cumm import dtypes
 from cumm.constants import CUTLASS_MODE
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
-from cumm.gemm.thread_map import PitchLinear, PitchLinearWarpRaked
-from typing import Optional, Union
 from cumm.core_cc.csrc.arrayref import ArrayPtr
-
-from cumm.gemm import bases, layout 
-import enum
+from cumm.gemm import bases, layout
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.thread_map import PitchLinear, PitchLinearWarpRaked
 
 LAYOUT_TYPES = Union[layout.TensorGeneric]
 
@@ -36,7 +37,7 @@ class ConvOpType(enum.Enum):
 
 class ConvLayout:
     def __init__(self, layout_type: ConvLayoutType, interleave: int = 1):
-        self.layout_type = layout_type 
+        self.layout_type = layout_type
         self.interleave = interleave
 
     def __repr__(self):
@@ -61,24 +62,29 @@ class ConvLayout:
             return layout.TensorGeneric(ndim)
         raise NotImplementedError
 
+
 NCHW = ConvLayout(ConvLayoutType.ChannelFirst)
 NHWC = ConvLayout(ConvLayoutType.ChannelLast)
 
+
 class ConvTensor:
     def __init__(self, ndim: int, dtype: dtypes.DType, layout: ConvLayout):
-        self.ndim = ndim 
-        self.dtype = dtype 
-        self.layout = layout 
+        self.ndim = ndim
+        self.dtype = dtype
+        self.layout = layout
+
 
 @pccm.skip_inherit
 class ConvIterParams(pccm.ParameterizedClass):
-    def python_ctor(self, conv_psize, layout: LAYOUT_TYPES) -> "ConvIterParams":
+    def python_ctor(self, conv_psize,
+                    layout: LAYOUT_TYPES) -> "ConvIterParams":
         raise NotImplementedError
+
 
 @pccm.skip_inherit
 class ConvInputIterator(bases.GemmIterator):
-    def python_ctor(self, params: ConvIterParams, problem_size, 
-        ptr: ArrayPtr, thread_id: int, tb_offset: MetaArray[int]):
+    def python_ctor(self, params: ConvIterParams, problem_size, ptr: ArrayPtr,
+                    thread_id: int, tb_offset: MetaArray[int]):
         raise NotImplementedError
 
     def get_params(self) -> pccm.ParameterizedClass:
@@ -105,4 +111,5 @@ class ConvEnum(pccm.Class):
         self.add_enum_class("OpType", [("kForward", 0), ("kBackwardInput", 1),
                                        ("kBackwardWeight", 2)])
         self.add_enum_class("IterAlgo", [("kAnalytic", 0), ("kOptimized", 1)])
-        self.add_enum_class("LayoutType", [("kChannelFirst", 0), ("kChannelLast", 1)])
+        self.add_enum_class("LayoutType", [("kChannelFirst", 0),
+                                           ("kChannelLast", 1)])

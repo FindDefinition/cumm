@@ -10,26 +10,28 @@ a warp read 4 matrix to smem.
 
 """
 
-import pccm
-import numpy as np
-
 from typing import List
-from cumm import cudasim
-from cumm.gemm import constants, thread_map, layout_tensorop, bases
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel
-from cumm.gemm.thread_map import PitchLinearWarpRaked
-from cumm.gemm import layout_tensorop
-from cumm.gemm import arch
+
+import numpy as np
+import pccm
+
+from cumm import cudasim, dtypes
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.cudasim import checkers
-from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
+from cumm.gemm import arch, bases, constants, layout_tensorop, thread_map
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.thread_map import PitchLinearWarpRaked
+
 from .turing_my_iters import MyTensorOpLayout
+
 # def seq(*vals) -> np.ndarray:
 #     return np.array([*vals], dtype=np.int64)
 
+
 def div_up(a, b):
     return (a + b - 1) // b
+
 
 class SmemTileIterator(bases.GemmSmemIterator):
     def __init__(self,
@@ -42,26 +44,34 @@ class SmemTileIterator(bases.GemmSmemIterator):
                  alignment: int = -1,
                  crosswise: int = 0,
                  num_stage: int = 2):
-        super().__init__(dtype, tmap.iterations.prod() * smem_layout.element_per_acc, smem_layout.element_per_acc)
+        super().__init__(dtype,
+                         tmap.iterations.prod() * smem_layout.element_per_acc,
+                         smem_layout.element_per_acc)
         # cultass shape: mk
         # our shape: km
         # A crosswise: [64, 32], congruous: [32, 64]
         # , congruous: [32, 128]
-        self.my_layout = my_layout 
+        self.my_layout = my_layout
         self.is_crosswise = is_crosswise
         if is_crosswise:
             assert crosswise != 0
         else:
             crosswise = 128 // self.dtype.itemsize()
         self.tile_shape_km = tile_shape_km
-        self.num_stage = num_stage 
+        self.num_stage = num_stage
         if is_crosswise:
             # col major smem
-            self.smem_vis_shape = [tile_shape_km[0], tile_shape_km[1] * num_stage]
+            self.smem_vis_shape = [
+                tile_shape_km[0], tile_shape_km[1] * num_stage
+            ]
         else:
-            self.smem_vis_shape = [tile_shape_km[0] * num_stage, tile_shape_km[1]]
+            self.smem_vis_shape = [
+                tile_shape_km[0] * num_stage, tile_shape_km[1]
+            ]
         ss = smem_layout.static_stride * smem_layout.factor
-        self.smem_vis_shape = [tile_shape_km[0] * num_stage * tile_shape_km[1] // ss, ss]
+        self.smem_vis_shape = [
+            tile_shape_km[0] * num_stage * tile_shape_km[1] // ss, ss
+        ]
         self.tmap = tmap
         if alignment == -1:
             alignment = dtype.bitsize() * tmap.element_per_acc // 8
@@ -156,11 +166,13 @@ class SmemTileIterator(bases.GemmSmemIterator):
 
     def python_ctor(self, stride: int, ptr: ArrayPtr, thread_id: int):
         new_obj = SmemTileIterator(self.is_crosswise, self.dtype,
-                                   self.tile_shape_km, self.my_layout, self.layout, self.tmap,
-                                   self.alignment, self.crosswise, self.num_stage)
+                                   self.tile_shape_km, self.my_layout,
+                                   self.layout, self.tmap, self.alignment,
+                                   self.crosswise, self.num_stage)
         if new_obj.is_crosswise:
             new_obj.sections_ = new_obj.smem_stride // new_obj.crosswise
-            new_obj.sections_per_stage_ = new_obj.tile_shape_km[0] // new_obj.crosswise
+            new_obj.sections_per_stage_ = new_obj.tile_shape_km[
+                0] // new_obj.crosswise
             new_obj.stride_ = new_obj.smem_stride * new_obj.layout.factor // new_obj.element_per_acc
         else:
             new_obj.stride_ = new_obj.smem_stride // new_obj.element_per_acc
@@ -168,7 +180,7 @@ class SmemTileIterator(bases.GemmSmemIterator):
         thread_offset_base = new_obj.tmap.initial_offset_python(thread_id)
         for i in range(new_obj.pointer_count):
             off = l(thread_offset_base[0] + i * new_obj.tmap.warp_shape[0],
-                        thread_offset_base[1])
+                    thread_offset_base[1])
             # if myoff != off:
             #     print("OFFSET DIFFERENT!!", myoff, off)
             new_obj.pointer_[i] = (
@@ -270,7 +282,8 @@ class SmemTileIterator(bases.GemmSmemIterator):
                 s * self.tile_shape_km[1] * self.stride_ *
                 self.layout.element_per_acc)
             if cudasim.threadIdx().x == 0:
-                cudasim.debug_print(f"ADD TILE OFFSET CROSSWISE {s},{c},{self.stride_}", 
+                cudasim.debug_print(
+                    f"ADD TILE OFFSET CROSSWISE {s},{c},{self.stride_}",
                     c * self.sections_per_stage_ * self.stride_ *
                     self.tmap.element_per_acc // self.sections_ +
                     s * self.tile_shape_km[1] * self.stride_ *
@@ -281,10 +294,10 @@ class SmemTileIterator(bases.GemmSmemIterator):
                                            self.stride_ *
                                            self.layout.element_per_acc)
             if cudasim.threadIdx().x == 0:
-                cudasim.debug_print(f"ADD TILE OFFSET {s},{c},{self.stride_}",  c * self.tile_shape_km[1] +
-                                            s * self.tile_shape_km[0] *
-                                            self.stride_ *
-                                            self.layout.element_per_acc)
+                cudasim.debug_print(
+                    f"ADD TILE OFFSET {s},{c},{self.stride_}",
+                    c * self.tile_shape_km[1] + s * self.tile_shape_km[0] *
+                    self.stride_ * self.layout.element_per_acc)
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def tile_increment(self):
@@ -315,7 +328,8 @@ class SmemTileIterator(bases.GemmSmemIterator):
                                                   str(self.index_t))
         return code
 
-    async def store_with_pointer_offset_python(self, frag: ArrayPtr, offset: int):
+    async def store_with_pointer_offset_python(self, frag: ArrayPtr,
+                                               offset: int):
         return await self.store_with_byte_offset_python(
             frag, offset * self.dtype.itemsize())
 
@@ -341,7 +355,8 @@ class SmemTileIterator(bases.GemmSmemIterator):
                                                   str(self.index_t))
         return code
 
-    async def store_with_byte_offset_python(self, frag: ArrayPtr, byte_offset: int):
+    async def store_with_byte_offset_python(self, frag: ArrayPtr,
+                                            byte_offset: int):
         ptr_addrs = np.zeros((frag.length, ), dtype=np.int32)
 
         frag_ptr = frag.change_access_size(self.element_per_acc)
@@ -353,11 +368,11 @@ class SmemTileIterator(bases.GemmSmemIterator):
                 access_ptr = byte_ptr.change_access_size(self.element_per_acc)
                 await checkers.smem_bank_conflicit_check(access_ptr, 0)
                 access_ptr[0] = frag_ptr[access_idx]
-                ptr_addrs[access_idx*frag_ptr.access_size:(access_idx+1) * frag_ptr.access_size] = np.arange(
-                                access_ptr.offset,
-                                access_ptr.offset + frag_ptr.access_size)
-        return ptr_addrs 
-
+                ptr_addrs[access_idx * frag_ptr.access_size:(access_idx + 1) *
+                          frag_ptr.access_size] = np.arange(
+                              access_ptr.offset,
+                              access_ptr.offset + frag_ptr.access_size)
+        return ptr_addrs
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store(self):
@@ -398,14 +413,14 @@ class SmemTileIterator(bases.GemmSmemIterator):
 
 class WarpIteratorCrosswise(bases.GemmWarpIterator):
     def __init__(self, dtype: dtypes.DType, tile_shape_km: MetaArray[int],
-                my_layout: MyTensorOpLayout, 
+                 my_layout: MyTensorOpLayout,
                  smem_layout: layout_tensorop.TensorOpMultiplicand,
                  warp_tile_shape_km: MetaArray[int], operand_a: bool,
-                 inst_shape_km: MetaArray[int], mma_inst_delta: int, partk: int):
+                 inst_shape_km: MetaArray[int], mma_inst_delta: int,
+                 partk: int):
         self.threads = 32
 
-        element_count = warp_tile_shape_km[1] * inst_shape_km[
-            0] // self.threads
+        element_count = warp_tile_shape_km[1] * inst_shape_km[0] // self.threads
         super().__init__(dtype, element_count, smem_layout.element_per_acc)
         # input: [m, k], [k, n]
         # swapped in wrapper for crosswise
@@ -418,7 +433,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
         # B congruous: 8, 8, crosswise: [8, 8]
         # cultass shape: mk
         # our shape: km
-        self.my_layout = my_layout 
+        self.my_layout = my_layout
         self.num_warp_gemm_iters = warp_tile_shape_km[0] // inst_shape_km[0]
         # TODO find out why reverse tile_shape_km
         self.warp_tile_shape_km_raw = warp_tile_shape_km.copy()
@@ -454,7 +469,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             # 4 // self.lds_shape[1] * self.lds_op_inner: maximum lds stride
             # so if lds stride is too large, just use warp_tile_shape_km[0] // self.lds_op_inner
             self.lds_shape[0] = warp_tile_shape_km[0] // self.lds_op_inner
-        
+
         self.lds_iters = seq(
             warp_tile_shape_km[0] // self.lds_op_inner // self.lds_shape[0], 1)
         # number of k per tile?
@@ -462,7 +477,8 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             1] // self.layout.factor // self.lds_shape[1]  # type: int
         self.k_group_inc_mask = 0
         if self.k_groups_per_tile // self.partk > 1:
-            self.k_group_inc_mask = (1 << int(np.log2(self.k_groups_per_tile // self.partk)) - 1) - 1
+            self.k_group_inc_mask = (1 << int(
+                np.log2(self.k_groups_per_tile // self.partk)) - 1) - 1
         # if cudasim.inside_cuda() and cudasim.threadIdx().x == 0:
         #     print(self.k_groups_per_tile, self.lds_shape, self.lds_iters, self.layout.factor)
         # print(self.lds_op_outer, self.layout.tile_shape)
@@ -661,10 +677,10 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
         """)
         return code
 
-    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int, warp_idx_mn: int,
-                    lane_idx: int):
-        new_obj = WarpIteratorCrosswise(self.dtype, self.tile_shape_km, self.my_layout,
-                                        self.layout,
+    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int,
+                          warp_idx_mn: int, lane_idx: int):
+        new_obj = WarpIteratorCrosswise(self.dtype, self.tile_shape_km,
+                                        self.my_layout, self.layout,
                                         self.warp_tile_shape_km_raw,
                                         self.operand_a, self.inst_shape_km_raw,
                                         self.mma_inst_delta, self.partk)
@@ -677,17 +693,17 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
 
         # turing
         lane_idx = lane_idx % (new_obj.lds_shape.prod() * new_obj.lds_op_inner)
-        quad_quad = (lane_idx >> 4) # 0[16] 1[16]
-        quad_pair = (lane_idx >> 3) # 0[8] 1[8] 2[8] 3[8]
-        lane_in_pair = (lane_idx & 1) 
-        lane_in_quad = (lane_idx & 0b11) # 0123 0123 0123 0123
-        lane_in_quad_pair = (lane_idx & 0b111) # 0123 4567 0123 4567
-        lane_in_quad_quad = (lane_idx & 0b1111) # 0-15 0-15
-        
+        quad_quad = (lane_idx >> 4)  # 0[16] 1[16]
+        quad_pair = (lane_idx >> 3)  # 0[8] 1[8] 2[8] 3[8]
+        lane_in_pair = (lane_idx & 1)
+        lane_in_quad = (lane_idx & 0b11)  # 0123 0123 0123 0123
+        lane_in_quad_pair = (lane_idx & 0b111)  # 0123 4567 0123 4567
+        lane_in_quad_quad = (lane_idx & 0b1111)  # 0-15 0-15
+
         partition_contiguous_idx = -1
         access_contiguous_idx = -1
         access_strided_idx = -1
-        
+
         if new_obj.layout.factor == 4:
             factor_in_partition = ((new_obj.layout.part_shape[1] *
                                     new_obj.layout.factor //
@@ -706,27 +722,28 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
 
                 # Integer matrix multiply 8816  A/B
                 # load 1/2/4 submatrix
-                
-                partition_contiguous_idx = lane_in_quad // factor_in_partition # 0011 0011 0011 0011
+
+                partition_contiguous_idx = lane_in_quad // factor_in_partition  # 0011 0011 0011 0011
                 # access_strided_idx = lane_idx // warp_bfa_access_shape[1]
                 access_strided_idx = lane_idx // new_obj.layout.factor
 
                 access_contiguous_idx = (
-                    (lane_in_pair * factor_in_partition) ^ # 0202 0202 0202 0202 0202 0202 0202 0202
-                    (lane_in_quad_quad // new_obj.layout.factor)) # 0000 1111 2222 3333 0000 1111 2222 3333
-                
+                    (lane_in_pair * factor_in_partition)
+                    ^  # 0202 0202 0202 0202 0202 0202 0202 0202
+                    (lane_in_quad_quad // new_obj.layout.factor)
+                )  # 0000 1111 2222 3333 0000 1111 2222 3333
+
                 # stride: 0000 1111 2222 3333 4444 5555 6666 7777
                 # acc_idx_c: 0202 1313 2020 3131 0202 1313 2020 3131
                 # if 01 45, noop: ^ 0
                 # if 23 67, switch:  ^ 1
                 # if 1 3 5 7, += 1
-                acc_idx_c = (lane_idx & 1) * 2 # 0202
+                acc_idx_c = (lane_idx & 1) * 2  # 0202
                 if (access_strided_idx // 2) & 1 == 1:
-                    acc_idx_c ^= 0b10 # 0202 0202 2020 2020 0202 0202 2020 2020
+                    acc_idx_c ^= 0b10  # 0202 0202 2020 2020 0202 0202 2020 2020
                 if access_strided_idx & 1 == 1:
                     acc_idx_c += 1
                 assert acc_idx_c == access_contiguous_idx, f"{lane_idx}, {acc_idx_c}, {access_contiguous_idx}"
-
 
             elif (new_obj.lds_shape[0] == (new_obj.lds_shape.prod() // 2)
                   and new_obj.operand_a):
@@ -737,7 +754,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
                 access_strided_idx = lane_in_quad_quad // new_obj.layout.factor
                 # stride: 0000 1111 2222 3333 0000 1111 2222 3333
 
-                # 0202.... + 0[16] [16] ^ 
+                # 0202.... + 0[16] [16] ^
                 access_contiguous_idx = (
                     ((lane_in_pair * factor_in_partition + quad_quad)
                      ^ access_strided_idx))
@@ -767,22 +784,23 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
                 # these lines are matching swizzle behavior in tensorop layout.
                 # for k > 0, offset is handled in set_wmma_index
                 access_contiguous_idx = (lane_in_quad_pair //
-                                         new_obj.layout.factor) # 00 11 22 33 00 11 22 33
-                
-                access_strided_idx = lane_idx // new_obj.layout.factor # 00 11 22 33 ....
+                                         new_obj.layout.factor
+                                         )  # 00 11 22 33 00 11 22 33
+
+                access_strided_idx = lane_idx // new_obj.layout.factor  # 00 11 22 33 ....
 
             elif (new_obj.lds_shape[0] == (new_obj.lds_shape.prod() // 2)
                   and new_obj.operand_a):
-                
+
                 # Matrix multiply 16816|1688.TF32 A
                 # Q0 Q2 (check mma inst for more details.)
                 # Q1 Q3
                 partition_contiguous_idx = (lane_idx % new_obj.layout.factor)
                 access_contiguous_idx = ((
                     quad_quad ^ (lane_in_quad_pair // new_obj.layout.factor)))
-                access_strided_idx = (lane_in_quad_quad // new_obj.layout.factor)
-                
-                
+                access_strided_idx = (lane_in_quad_quad //
+                                      new_obj.layout.factor)
+
             elif (new_obj.lds_shape[0] == (new_obj.lds_shape.prod() // 2)
                   and not new_obj.operand_a):
                 # 16816: f16
@@ -800,12 +818,11 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             elif (new_obj.lds_shape[1] == new_obj.lds_shape.prod()):
                 # Matrix multiply 16832.SP B
                 # Q0 Q1 Q2 Q3
-                
+
                 partition_contiguous_idx = (lane_idx % new_obj.layout.factor)
                 access_contiguous_idx = ((
                     quad_pair ^ (lane_in_quad_pair // new_obj.layout.factor)))
                 access_strided_idx = lane_in_quad_pair // new_obj.layout.factor
-                
 
         elif new_obj.layout.factor == 1:
             # Super Matrix multiply kBlock = 64
@@ -848,19 +865,21 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             partition_contiguous_idx * new_obj.layout.part_shape[1] +
             access_contiguous_idx)
         access_strided = access_strided_idx
-        
+
         expected_offset = access_contiguous + access_strided_idx * new_obj.stride_
-        ref_offset = layout.get_ldm_initial_offset_ref(lane_idx, self.lds_shape, not self.operand_a)
+        ref_offset = layout.get_ldm_initial_offset_ref(lane_idx,
+                                                       self.lds_shape,
+                                                       not self.operand_a)
         assert ref_offset == expected_offset * self.element_per_acc, f"{lane_idx}, {expected_offset}, {ref_offset}"
-        
+
         new_obj.byte_offset_ = (
             (access_contiguous + access_strided * new_obj.stride_) *
             new_obj.dtype.bitsize() * new_obj.element_per_acc // 8)
         # for k part, of partk == 2 and k of smem is 4, then num warp gemm iters is 2
         # so 0 1
         #     0 1
-        new_obj.add_tile_offset_python(warp_idx_mn,
-                                       new_obj.num_warp_gemm_iters * warp_idx_k)
+        new_obj.add_tile_offset_python(
+            warp_idx_mn, new_obj.num_warp_gemm_iters * warp_idx_k)
         return new_obj
 
     @pccm.cuda.member_function(device=True, forceinline=True)
@@ -894,7 +913,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
         self.pointer_ += (k_offset * self.stride_ *
                           self.warp_tile_shape_km[0] // self.layout.factor +
                           whole_tiles * self.my_layout.sw_shape[1])
-                          
+
     @pccm.cuda.member_function(device=True, forceinline=True)
     def tile_increment(self):
         code = pccm.FunctionCode(f"""
@@ -974,10 +993,11 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
         #   ^2 ^2
         # Matrix multiply 16816 kblock=64 | 1688.TF32 kblock=32 || Integer matrix multiply 16832 kblock=128
         #   ^2 ^6 ^2 ^6
-        k_inc_width = self.lds_shape[1] * self.dtype.bitsize() * self.layout.element_per_acc // 8
+        k_inc_width = self.lds_shape[1] * self.dtype.bitsize(
+        ) * self.layout.element_per_acc // 8
         num_k_inc = (self.k_groups_per_tile // self.partk)
         if (num_k_inc > 1):
-            # mask: largest number of bit for increment 
+            # mask: largest number of bit for increment
             mask = self.k_group_inc_mask
             # if self.k_groups_per_tile // self.partk == 8:
             #     mask = 0b11
@@ -986,7 +1006,8 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             # else:
             #     mask = 0
             # bit 0 advance
-            self.byte_offset_ ^= layout_tensorop.swizzle_increment(self.wmma_k_index_ & mask, k_inc_width)
+            self.byte_offset_ ^= layout_tensorop.swizzle_increment(
+                self.wmma_k_index_ & mask, k_inc_width)
             # if (((self.wmma_k_index_ & mask) % 2) == 0):
             #     self.byte_offset_ ^= (1 * self.lds_shape[1] *
             #                           self.dtype.bitsize() *
@@ -1065,11 +1086,11 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
                     1) + byte_offset + self.byte_offset_
                 await checkers.smem_bank_conflicit_check(fetch_ptr, access_idx)
                 await self.ldmatrix(fetch_ptr[access_idx], source_byte_ptr)
-                ptr_addrs[access_idx*fetch_ptr.access_size:(access_idx+1) * fetch_ptr.access_size] = np.arange(
-                                source_byte_ptr.offset,
-                                source_byte_ptr.offset + fetch_ptr.access_size)
-        return ptr_addrs 
-
+                ptr_addrs[access_idx * fetch_ptr.access_size:(access_idx + 1) *
+                          fetch_ptr.access_size] = np.arange(
+                              source_byte_ptr.offset,
+                              source_byte_ptr.offset + fetch_ptr.access_size)
+        return ptr_addrs
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
@@ -1105,16 +1126,16 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
 
 class WarpIteratorCongruous(bases.GemmWarpIterator):
     def __init__(self, dtype: dtypes.DType, tile_shape_km: MetaArray[int],
-                my_layout: MyTensorOpLayout, 
+                 my_layout: MyTensorOpLayout,
                  smem_layout: layout_tensorop.TensorOpMultiplicand,
                  warp_tile_shape_km: MetaArray[int], operand_a: bool,
-                 inst_shape_km: MetaArray[int], mma_inst_delta: int, partk: int):
-        element_count = warp_tile_shape_km[1] * inst_shape_km[
-            0] // self.threads
+                 inst_shape_km: MetaArray[int], mma_inst_delta: int,
+                 partk: int):
+        element_count = warp_tile_shape_km[1] * inst_shape_km[0] // self.threads
         super().__init__(dtype, element_count, smem_layout.element_per_acc)
         # cultass shape: mk
         # our shape: km
-        self.my_layout = my_layout 
+        self.my_layout = my_layout
         self.num_warp_gemm_iters = warp_tile_shape_km[0] // inst_shape_km[0]
         self.tile_shape_km = tile_shape_km
         self.warp_tile_shape_km_raw = warp_tile_shape_km
@@ -1144,7 +1165,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
             # 16816 B 1x4
 
             self.lds_shape = metaseq(inst_shape_km[0] // self.lds_op_inner,
-                                 inst_shape_km[1] // self.lds_op_outer)
+                                     inst_shape_km[1] // self.lds_op_outer)
             self.lds_iters = metaseq(
                 1, warp_tile_shape_km[1] // self.lds_shape[1] //
                 self.lds_op_outer)
@@ -1270,10 +1291,10 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
             """)
         return code
 
-    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int, warp_idx_mn: int,
-                    lane_idx: int):
-        new_obj = WarpIteratorCongruous(self.dtype, self.tile_shape_km, self.my_layout,
-                                        self.layout,
+    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int,
+                          warp_idx_mn: int, lane_idx: int):
+        new_obj = WarpIteratorCongruous(self.dtype, self.tile_shape_km,
+                                        self.my_layout, self.layout,
                                         self.warp_tile_shape_km_raw,
                                         self.operand_a, self.inst_shape_km_raw,
                                         self.mma_inst_delta, self.partk)
@@ -1281,12 +1302,12 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         new_obj.wmma_k_index_ = 0
         new_obj.byte_offset_ = 0
         assert not self.is_spec_32, "tf32 isn't supported yet."
-        quad_quad = (lane_idx >> 4) # 0[16] 1[16]
-        quad_pair = (lane_idx >> 3) # 0[8] 1[8] 2[8] 3[8]
-        lane_in_pair = (lane_idx & 1) 
-        lane_in_quad = (lane_idx & 0b11) # 0123 0123 0123 0123
-        lane_in_quad_pair = (lane_idx & 0b111) # 0123 4567 0123 4567
-        lane_in_quad_quad = (lane_idx & 0b1111) # 0-15 0-15
+        quad_quad = (lane_idx >> 4)  # 0[16] 1[16]
+        quad_pair = (lane_idx >> 3)  # 0[8] 1[8] 2[8] 3[8]
+        lane_in_pair = (lane_idx & 1)
+        lane_in_quad = (lane_idx & 0b11)  # 0123 0123 0123 0123
+        lane_in_quad_pair = (lane_idx & 0b111)  # 0123 4567 0123 4567
+        lane_in_quad_quad = (lane_idx & 0b1111)  # 0-15 0-15
         layout = new_obj.layout.python_ctor(new_obj.smem_stride)
 
         for i in range(self.pointer_count):
@@ -1306,7 +1327,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                 #  Matrix multiply 1688 A/B
                 #  Q0 Q1 Q2 Q3 (Q stands for 1 8x128bit block).
                 #  Four blocks are next to each other in the contiguous dimension.
-                # 
+                #
                 # stride: 01234567 01234567 ...
                 # contig: 01234567 10325476 sw2 sw3
                 # lane_in_quad_pair >> 2: 0000 1111 0000 1111 0000 1111 0000 1111
@@ -1343,10 +1364,10 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                 #  Q1
                 #  Q2
                 #  Q3
-                # (lane_in_quad_pair >> 2): 0000 1111 0000 1111 ^ 
+                # (lane_in_quad_pair >> 2): 0000 1111 0000 1111 ^
                 partition_contiguous_idx = ((lane_in_quad_pair >> 2) ^
                                             (i >> 2))
-                # access_contiguous_idx: 
+                # access_contiguous_idx:
                 # i == 0: 01230123.... + 00001111 * 4
                 # i == 1: 10321032.... + 00001111 * 4
                 # i == 2: 23012301.... + 00001111 * 4
@@ -1366,7 +1387,11 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                 access_contiguous + access_strided * new_obj.stride_)
             expected_offset = access_contiguous + access_strided_idx * new_obj.stride_
             # if i == 0:
-            ref_offset = layout.get_ldm_initial_offset_ref(lane_idx, self.lds_shape, self.operand_a, contig_offset=i * self.lds_shape[1] * self.lds_op_outer)
+            ref_offset = layout.get_ldm_initial_offset_ref(
+                lane_idx,
+                self.lds_shape,
+                self.operand_a,
+                contig_offset=i * self.lds_shape[1] * self.lds_op_outer)
             assert ref_offset == expected_offset * self.element_per_acc, f"{lane_idx}, {expected_offset}, {ref_offset}"
 
         new_obj.add_tile_offset_python(self.num_warp_gemm_iters * warp_idx_k,
@@ -1585,9 +1610,10 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                     1) + byte_offset + self.byte_offset_
                 await checkers.smem_bank_conflicit_check(fetch_ptr, access_idx)
                 await self.ldmatrix(fetch_ptr[access_idx], source_byte_ptr)
-                ptr_addrs[access_idx*fetch_ptr.access_size:(access_idx+1) * fetch_ptr.access_size] = np.arange(
-                                source_byte_ptr.offset,
-                                source_byte_ptr.offset + fetch_ptr.access_size)
+                ptr_addrs[access_idx * fetch_ptr.access_size:(access_idx + 1) *
+                          fetch_ptr.access_size] = np.arange(
+                              source_byte_ptr.offset,
+                              source_byte_ptr.offset + fetch_ptr.access_size)
         return ptr_addrs
 
     @pccm.cuda.member_function(device=True, forceinline=True)

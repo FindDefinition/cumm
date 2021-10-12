@@ -1,18 +1,20 @@
-import pccm
-import numpy as np
-from cumm import tensorview as tv 
-from typing import List, Optional, Union
-from cumm.gemm import constants, layout, thread_map
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
-from cumm import dtypes
 from enum import Enum
+from typing import List, Optional, Union
+
+import numpy as np
+import pccm
+
+from cumm import dtypes
+from cumm import tensorview as tv
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView
 from cumm.conv import bases
-from cumm.gemm import codeops
+from cumm.gemm import codeops, constants, layout, thread_map
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 
 
 def div_up(a: int, b: int) -> int:
     return (a + b - 1) // b
+
 
 def gemm_abc_to_conv_iwo_indices(op_type: bases.ConvOpType):
     if op_type == bases.ConvOpType.kForward:
@@ -27,6 +29,7 @@ def gemm_abc_to_conv_iwo_indices(op_type: bases.ConvOpType):
     else:
         raise NotImplementedError
 
+
 def conv_iwo_to_gemm_abc_indices(op_type: bases.ConvOpType):
     if op_type == bases.ConvOpType.kForward:
         return [0, 1, 2]
@@ -40,7 +43,9 @@ def conv_iwo_to_gemm_abc_indices(op_type: bases.ConvOpType):
 
 
 class ConvProblem(pccm.ParameterizedClass):
-    def __init__(self, ndim: int, op_type: bases.ConvOpType,
+    def __init__(self,
+                 ndim: int,
+                 op_type: bases.ConvOpType,
                  layout_desp_input: bases.ConvLayout,
                  layout_desp_weight: bases.ConvLayout,
                  layout_desp_output: bases.ConvLayout,
@@ -62,9 +67,7 @@ class ConvProblem(pccm.ParameterizedClass):
                 "input_dims, output_dims, ksize, padding, stride, dilation",
                 f"tv::array<int, {ndim}>")
         else:
-            self.add_member(
-                "ksize",
-                f"tv::array<int, {ndim}>")
+            self.add_member("ksize", f"tv::array<int, {ndim}>")
         self.add_member("mode", "ConvEnum::Mode")
         self.add_member("split_k_slices, groups", "int")
 
@@ -89,8 +92,9 @@ class ConvProblem(pccm.ParameterizedClass):
         if self.mask_sparse:
             code.arg("ksize", f"tv::array<int, {self.ndim}>")
         else:
-            code.arg("input_dims, output_dims, ksize, padding, stride, dilation",
-                    f"tv::array<int, {self.ndim}>")
+            code.arg(
+                "input_dims, output_dims, ksize, padding, stride, dilation",
+                f"tv::array<int, {self.ndim}>")
 
         code.arg("mode", "ConvEnum::Mode", "ConvEnum::Mode::kCrossCorrelation")
         code.arg("split_k_slices", "int", "1")
@@ -257,7 +261,7 @@ class ConvProblem(pccm.ParameterizedClass):
             return ksize_prod * (codeops.div_up(k_iters_in_C, tile_shape_k))
         elif conv_op_type == bases.ConvOpType.kBackwardWeight:
             k_iters_in_C = codeops.div_up(self.N_ * out_prod,
-                                         self.split_k_slices_)
+                                          self.split_k_slices_)
             return codeops.div_up(k_iters_in_C, tile_shape_k)
         else:
             raise NotImplementedError
@@ -353,4 +357,3 @@ class ConvProblem(pccm.ParameterizedClass):
             return (True, False, False)
         else:
             raise NotImplementedError
-

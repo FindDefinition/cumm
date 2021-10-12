@@ -1,10 +1,12 @@
-from typing import Dict, List, Union, Optional, Type, Tuple
-from .simt import AlgoSpecificSimt
-from .core import GemmAlgo
-from .volta import AlgoSpecificVolta
-from .turing import AlgoSpecificTuring
+from typing import Dict, List, Optional, Tuple, Type, Union
 
-ALGO_SPEC_TYPES = Union[AlgoSpecificSimt, AlgoSpecificVolta, AlgoSpecificTuring]
+from .core import GemmAlgo
+from .simt import AlgoSpecificSimt
+from .turing import AlgoSpecificTuring
+from .volta import AlgoSpecificVolta
+
+ALGO_SPEC_TYPES = Union[AlgoSpecificSimt, AlgoSpecificVolta,
+                        AlgoSpecificTuring]
 
 ALGO_TO_SPEC = {
     GemmAlgo.Simt: AlgoSpecificSimt,
@@ -12,6 +14,7 @@ ALGO_TO_SPEC = {
     GemmAlgo.Volta: AlgoSpecificVolta,
     GemmAlgo.Turing: AlgoSpecificTuring,
 }  # type: Dict[GemmAlgo, Union[Type[AlgoSpecificSimt], Type[AlgoSpecificVolta], Type[AlgoSpecificTuring]]]
+
 
 def get_algo_spec(algo: GemmAlgo):
     return ALGO_TO_SPEC[algo]

@@ -13,8 +13,8 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10'] # we only support three newest python version in windows.
-        cuda-version: ['10.2', '11.1']
+        python-version: ['3.6', '3.7', '3.8', '3.9', '3.10'] # we only support three newest python version in windows.
+        cuda-version: ['10.2', '11.1', '11.4']
     steps:
       - uses: actions/checkout@master
       - name: Install CUDA
@@ -96,10 +96,12 @@ jobs:
           .
 
       - name: Build a binary wheel and test
-        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags') || ${{ matrix.cuda-version }} == '114')
         env:
+          CUDA_VERSION: ${{ matrix.cuda-version }}
+          PYTHON_VERSION: ${{ matrix.python-version }}
           DOCKER_IMAGE: scrin/manylinux2014-cuda:cu${{ matrix.cuda-version }}-devel
           PLAT: manylinux2014_x86_64
+        if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags') || env.CUDA_VERSION == '114')
         run: |
           docker run --rm -e PLAT=$PLAT -e CUMM_CUDA_VERSION=${{ matrix.cuda-version }} -v `pwd`:/io $DOCKER_IMAGE bash -c "/io/tools/build-wheels.sh"
           python -m pip install --upgrade pip twine wheel

@@ -1,9 +1,8 @@
-from typing import Generic, List, Sequence, Union
-
-from typing import Generic, TypeVar, overload
 import functools
+from typing import Generic, List, Sequence, TypeVar, Union, overload
 
 T = TypeVar('T')
+
 
 class MetaArray(Generic[T]):
     def __init__(self, *values: T, check_floor_div: bool = True):
@@ -82,6 +81,7 @@ class MetaArray(Generic[T]):
     def __iter__(self):
         yield from self.data
 
+
 def seq(*value: T) -> MetaArray[T]:
     return MetaArray(*value, check_floor_div=False)
 
@@ -90,6 +90,7 @@ def metaseq(*value: T) -> MetaArray[T]:
     """floordiv of metaseq must be divisible
     """
     return MetaArray(*value, check_floor_div=True)
+
 
 if __name__ == "__main__":
     ma = seq(1, 2, 3)

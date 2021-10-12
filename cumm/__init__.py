@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pccm
 from pccm.utils import project_is_editable, project_is_installed
+
 from .constants import PACKAGE_NAME
 
 if project_is_installed(PACKAGE_NAME) and project_is_editable(PACKAGE_NAME):

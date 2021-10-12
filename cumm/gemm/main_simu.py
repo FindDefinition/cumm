@@ -1,28 +1,24 @@
 import sys
-from pathlib import Path
-from typing import Dict, Tuple, List
-
-from cumm import tensorview as tv 
-
-from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
-from cumm import cudasim
-from cumm import dtypes
-from cumm.gemm import kernel 
-
-import numpy as np
-import sys
-from pathlib import Path
 import time
-
-
 from collections import OrderedDict
+from pathlib import Path
+from typing import Dict, List, Tuple
+
 import codeai.visualization as vis
+import numpy as np
+
+from cumm import cudasim, dtypes
+from cumm import tensorview as tv
+from cumm.gemm import kernel
+from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
 
 VIS_IP = "127.0.0.1:50073"
 
 GEMM_VIS_GLOBAL_SCALE = 10
-import os 
+import os
+
 os.environ["CUMM_DEBUG"] = "0"
+
 
 def vis_in_relay(figs):
     vis.vis_figures(VIS_IP, figs)
@@ -108,8 +104,8 @@ def vis_area_coords(fig: vis.figure.ImageFigure,
     offsets = offsets[offsets != -1]
     coords = offset_to_coord(offsets, shape[1])
     with fig.layer(name) as layer:
-        grid = GridPlane2d([0, 0, shape[0] * scale, shape[1] * scale], [scale, scale],
-                           "green")
+        grid = GridPlane2d([0, 0, shape[0] * scale, shape[1] * scale],
+                           [scale, scale], "green")
         coor = Coords2d(coords, [scale, scale], epa, 'red')
         layer.add_object(grid)
         layer.add_object(coor)
@@ -144,8 +140,8 @@ def vis_gemm_input_2d(inp: np.ndarray,
     warp_epa = 0
     scale = GEMM_VIS_GLOBAL_SCALE
 
-    tile_shape = None 
-    part_shape = None 
+    tile_shape = None
+    part_shape = None
     for (bx, by, bz, tx, ty, tz), val in res.items():
         warp_id = (tx // 32)
         lane_id = (tx % 32)
@@ -245,10 +241,16 @@ def vis_gemm_input_2d(inp: np.ndarray,
                                      epa=warp_epa)
         bounds.append(bound_warp)
         if tile_shape is not None:
-            grid = GridPlane2d([0, 0, smem_shape[0] * scale, smem_shape[1] * scale], [scale * tile_shape[0], scale * tile_shape[1]],
-                            "black", width=2)
-            grid2 = GridPlane2d([0, 0, smem_shape[0] * scale, smem_shape[1] * scale], [scale * part_shape[0], scale * part_shape[1]],
-                            "magenta", width=1)
+            grid = GridPlane2d(
+                [0, 0, smem_shape[0] * scale, smem_shape[1] * scale],
+                [scale * tile_shape[0], scale * tile_shape[1]],
+                "black",
+                width=2)
+            grid2 = GridPlane2d(
+                [0, 0, smem_shape[0] * scale, smem_shape[1] * scale],
+                [scale * part_shape[0], scale * part_shape[1]],
+                "magenta",
+                width=1)
 
             with fig.layer(f"{name}_tile") as layer:
                 layer.add_object(grid)
@@ -260,14 +262,15 @@ def vis_gemm_input_2d(inp: np.ndarray,
     return np.array(
         [*bounds_arr[:, :2].min(axis=0), *bounds_arr[:, 2:].max(axis=0)])
 
+
 def vis_gemm_output_2d(dtype_acc: dtypes.DType,
-                      blocks: cudasim.Dim3,
-                      threads: cudasim.Dim3,
-                      fig_per_group: Dict[int, vis.figure.ImageFigure],
-                      res,
-                      name: str,
-                      offset: List[float],
-                      coord_input: bool = False):
+                       blocks: cudasim.Dim3,
+                       threads: cudasim.Dim3,
+                       fig_per_group: Dict[int, vis.figure.ImageFigure],
+                       res,
+                       name: str,
+                       offset: List[float],
+                       coord_input: bool = False):
     grouped_res = {}
     smem_shape = [0, 0]
     smem_save_epa = 0
@@ -294,8 +297,7 @@ def vis_gemm_output_2d(dtype_acc: dtypes.DType,
         #     continue
         if group_id not in grouped_res:
             grouped_res[group_id] = []
-        grouped_res[group_id].append(
-            (smem_save_coords, smem_load_coords, tx))
+        grouped_res[group_id].append((smem_save_coords, smem_load_coords, tx))
     # smem shape to bank view
     bank_size_element_view = 128 // dtype_acc.itemsize()
     # smem_shape = [kernel.div_up(smem_shape[0] * smem_shape[1], bank_size_element_view), bank_size_element_view]
@@ -314,12 +316,12 @@ def vis_gemm_output_2d(dtype_acc: dtypes.DType,
                                                              group_id=group_id)
         fig = fig_per_group[group_id]
         bound_save = vis_area_coords(fig,
-                                    smem_save_coords_list,
-                                    group_size,
-                                    smem_shape,
-                                    offset,
-                                    f"{name}_smem_save",
-                                    epa=smem_save_epa)
+                                     smem_save_coords_list,
+                                     group_size,
+                                     smem_shape,
+                                     offset,
+                                     f"{name}_smem_save",
+                                     epa=smem_save_epa)
         bounds.append(bound_save)
         bound_load = vis_area_coords(fig,
                                      smem_load_coords_list,
@@ -364,13 +366,15 @@ def _asdv_test_simt_python(coord_input: bool = False):
                 c_dev_2 = a[4:8] @ b[:, :4]
 
                 acc_dev = np.concatenate([c_dev_0, c_dev_1])
-                print(acc_dev.shape, acc_dev.mean(), acc_dev.max(), acc_dev.min())
+                print(acc_dev.shape, acc_dev.mean(), acc_dev.max(),
+                      acc_dev.min())
                 print(np.concatenate([a[:4, :2], a[16:20, :2]]))
                 c_dev_0 = a[:4, :2] @ b[:2, :4]
                 c_dev_1 = a[16:20, :2] @ b[:2, :4]
-                
+
                 acc_dev = np.concatenate([c_dev_0, c_dev_1])
-                print(acc_dev.shape, acc_dev.mean(), acc_dev.max(), acc_dev.min())
+                print(acc_dev.shape, acc_dev.mean(), acc_dev.max(),
+                      acc_dev.min())
 
             else:
                 m = 256 + 32
@@ -456,16 +460,23 @@ def _asdv_test_simt_python(coord_input: bool = False):
                     vis_res[k2][k] = v2
 
             fig_per_group: Dict[int, vis.figure.ImageFigure] = {}
-            A_bound = vis_gemm_input_2d(a_tv, blocks, threads, fig_per_group,
-                                        vis_res["InputA"], "A", [0, 0], coord_input=coord_input)
-            B_bound = vis_gemm_input_2d(b_tv, blocks, threads, fig_per_group,
-                                        vis_res["InputB"], "B",
-                                        [0, A_bound[3] + 10], coord_input=coord_input)
-            O_bound = vis_gemm_output_2d(params.dtype_acc, blocks,
+            A_bound = vis_gemm_input_2d(a_tv,
+                                        blocks,
                                         threads,
                                         fig_per_group,
-                                        vis_res["Output"],
-                                        "O", [0, B_bound[3] + 10])
+                                        vis_res["InputA"],
+                                        "A", [0, 0],
+                                        coord_input=coord_input)
+            B_bound = vis_gemm_input_2d(b_tv,
+                                        blocks,
+                                        threads,
+                                        fig_per_group,
+                                        vis_res["InputB"],
+                                        "B", [0, A_bound[3] + 10],
+                                        coord_input=coord_input)
+            O_bound = vis_gemm_output_2d(params.dtype_acc, blocks, threads,
+                                         fig_per_group, vis_res["Output"], "O",
+                                         [0, B_bound[3] + 10])
 
             vis_in_relay(list(fig_per_group.values()))
             # print(TestCase().assertAllClose(c_tv, c))
@@ -473,7 +484,7 @@ def _asdv_test_simt_python(coord_input: bool = False):
             print(c_tv.reshape(-1)[-10:], c.reshape(-1)[-10:])
 
             print(params.get_algo_name(), a.mean(), b.mean(),
-                np.linalg.norm(c_tv - c), "Time=", duration)
+                  np.linalg.norm(c_tv - c), "Time=", duration)
 
 
 def _asdv_test_volta_python(coord_input: bool):
@@ -571,20 +582,18 @@ def _asdv_test_volta_python(coord_input: bool):
                                         vis_res["InputB"],
                                         "B", [0, A_bound[3] + 10],
                                         coord_input=coord_input)
-            O_bound = vis_gemm_output_2d(params.dtype_acc, blocks,
-                                        threads,
-                                        fig_per_group,
-                                        vis_res["Output"],
-                                        "O", [0, B_bound[3] + 10])
-
+            O_bound = vis_gemm_output_2d(params.dtype_acc, blocks, threads,
+                                         fig_per_group, vis_res["Output"], "O",
+                                         [0, B_bound[3] + 10])
 
             # print(TestCase().assertAllClose(c_tv, c))
             # print(c_tv.reshape(-1)[:10] -  c.reshape(-1)[:10])
             # print(c_tv.reshape(-1)[-10:] -  c.reshape(-1)[-10:])
 
             print(params.get_algo_name(), a.mean(), np.linalg.norm(c_tv - c),
-                "Time=", duration)
+                  "Time=", duration)
             vis_in_relay(list(fig_per_group.values()))
+
 
 def unittest_python():
     np.random.seed(12315)
@@ -642,7 +651,8 @@ def unittest_python():
                 tensorop=[0, 0, 0])
             duration = time.time() - t
             print(params.get_algo_name(), a.mean(), np.linalg.norm(c_tv - c),
-                "Time=", duration)
+                  "Time=", duration)
+
 
 def _asdv_test_turing_python(coord_input: bool = False):
     np.random.seed(12315)
@@ -756,20 +766,19 @@ def _asdv_test_turing_python(coord_input: bool = False):
                                         vis_res["InputB"],
                                         "B", [0, A_bound[3] + 10],
                                         coord_input=coord_input)
-            O_bound = vis_gemm_output_2d(params.dtype_acc, blocks,
-                                        threads,
-                                        fig_per_group,
-                                        vis_res["Output"],
-                                        "O", [0, B_bound[3] + 10])
+            O_bound = vis_gemm_output_2d(params.dtype_acc, blocks, threads,
+                                         fig_per_group, vis_res["Output"], "O",
+                                         [0, B_bound[3] + 10])
 
             # print(TestCase().assertAllClose(c_tv, c))
             # print(c_tv.reshape(-1)[:10], c.reshape(-1)[:10])
             # print(c_tv.reshape(-1)[-10:] -  c.reshape(-1)[-10:])
 
-            print(params.get_algo_name(), a.mean(), b.mean(), c.mean(), np.linalg.norm(c_tv - c),
-                "Time=", duration)
+            print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
+                  np.linalg.norm(c_tv - c), "Time=", duration)
 
             # vis_in_relay(list(fig_per_group.values()))
+
 
 if __name__ == "__main__":
     # fig = vis.figure.PointCloudFigure(0, np.zeros((1, 3)))

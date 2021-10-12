@@ -1,6 +1,9 @@
-from typing import Dict, List, Union, Optional, Type, Tuple
+from typing import Dict, List, Optional, Tuple, Type, Union
+
 from cumm.gemm.algospec import GemmAlgo
+
 from .simt import AlgoSpecificSimt
+
 # from .volta import AlgoSpecificVolta
 # from .turing import AlgoSpecificTuring
 
@@ -10,6 +13,7 @@ ALGO_TO_SPEC = {
     # GemmAlgo.Volta: AlgoSpecificVolta,
     # GemmAlgo.Turing: AlgoSpecificTuring,
 }  # type: Dict[GemmAlgo, Union[Type[AlgoSpecificSimt]]]
+
 
 def get_algo_spec(algo: GemmAlgo):
     return ALGO_TO_SPEC[algo]

@@ -1,15 +1,15 @@
-import pccm
-import numpy as np
-
 from typing import List
-from cumm.gemm import constants, layout, thread_map
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel
-from cumm.gemm.thread_map import PitchLinearWarpRaked
-from cumm.gemm import layout_tensorop, bases
-from cumm.core_cc.csrc.arrayref import ArrayPtr
+
+import numpy as np
+import pccm
+
 from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.cudasim import checkers
+from cumm.gemm import bases, constants, layout, layout_tensorop, thread_map
+from cumm.gemm.core import MetaArray, metaseq, seq
+from cumm.gemm.thread_map import PitchLinearWarpRaked
 
 
 def div_up(a, b):
@@ -20,7 +20,8 @@ class VoltaSmemTileIteratorCrosswise(bases.GemmSmemIterator):
     def __init__(self, dtype: dtypes.DType, tile_shape_km: MetaArray[int],
                  tmap: PitchLinearWarpRaked, num_stage: int):
         self.layout = layout_tensorop.VoltaTensorOpCrosswise(dtype.bitsize())
-        super().__init__(dtype, tmap.element_per_acc * tmap.iterations.prod(), self.layout.element_per_acc)
+        super().__init__(dtype, tmap.element_per_acc * tmap.iterations.prod(),
+                         self.layout.element_per_acc)
         self.add_dependency(TensorView, GemmBasicKernel)
 
         self.tile_shape_km = tile_shape_km
@@ -51,7 +52,8 @@ class VoltaSmemTileIteratorCrosswise(bases.GemmSmemIterator):
 
     def python_ctor(self, stride: int, ptr: ArrayPtr, thread_id: int):
         new_obj = VoltaSmemTileIteratorCrosswise(self.dtype,
-                                                 self.tile_shape_km, self.tmap, self.num_stage)
+                                                 self.tile_shape_km, self.tmap,
+                                                 self.num_stage)
         l = new_obj.layout.python_ctor(stride)
         thread_offset_base = new_obj.tmap.initial_offset_python(thread_id)
         for i in range(self.pointer_count):
@@ -170,9 +172,11 @@ class VoltaSmemTileIteratorCrosswise(bases.GemmSmemIterator):
                         access_ptr, access_offset)
 
                     access_ptr[access_offset] = frag_ptr[idx]
-                    ptr_addrs[idx * frag_ptr.access_size:(idx + 1) * frag_ptr.access_size] = np.arange(
-                        (access_ptr + access_offset).offset,
-                        (access_ptr + access_offset).offset + frag_ptr.access_size)
+                    ptr_addrs[idx * frag_ptr.access_size:(idx + 1) *
+                              frag_ptr.access_size] = np.arange(
+                                  (access_ptr + access_offset).offset,
+                                  (access_ptr + access_offset).offset +
+                                  frag_ptr.access_size)
         return ptr_addrs
 
     async def store_python(self, frag: ArrayPtr):
@@ -189,10 +193,12 @@ class VoltaSmemTileIteratorCrosswise(bases.GemmSmemIterator):
 
 class VoltaSmemTileIteratorCongruous(bases.GemmSmemIterator):
     def __init__(self, dtype: dtypes.DType, operand_a: bool,
-                 tile_shape_km: MetaArray[int], tmap: PitchLinearWarpRaked, num_stage: int):
+                 tile_shape_km: MetaArray[int], tmap: PitchLinearWarpRaked,
+                 num_stage: int):
         self.layout = layout_tensorop.VoltaTensorOpCongruous(
             operand_a, dtype.bitsize())
-        super().__init__(dtype, tmap.element_per_acc * tmap.iterations.prod(), self.layout.element_per_acc)
+        super().__init__(dtype, tmap.element_per_acc * tmap.iterations.prod(),
+                         self.layout.element_per_acc)
         self.add_dependency(TensorView, GemmBasicKernel)
         self.operand_a = operand_a
         self.tile_shape_km = tile_shape_km
@@ -216,7 +222,7 @@ class VoltaSmemTileIteratorCongruous(bases.GemmSmemIterator):
                         array=f"[{self.pointer_count}]")
         # cudasim members
         self.pointers_: List[ArrayPtr] = [None] * self.pointer_count
-        
+
     def get_smem_vis_shape(self) -> MetaArray[int]:
         return seq(self.smem_vis_shape[0], self.smem_vis_shape[1])
 
@@ -240,7 +246,8 @@ class VoltaSmemTileIteratorCongruous(bases.GemmSmemIterator):
 
     def python_ctor(self, stride: int, ptr: ArrayPtr, thread_id: int):
         new_obj = VoltaSmemTileIteratorCongruous(self.dtype, self.operand_a,
-                                                 self.tile_shape_km, self.tmap, self.num_stage)
+                                                 self.tile_shape_km, self.tmap,
+                                                 self.num_stage)
         l = new_obj.layout.python_ctor(stride)
         thread_offset_base = new_obj.tmap.initial_offset_python(thread_id)
         for i in range(self.pointer_count):
@@ -337,9 +344,11 @@ class VoltaSmemTileIteratorCongruous(bases.GemmSmemIterator):
                     access_ptr, access_offset)
 
                 access_ptr[access_offset] = frag_ptr[idx]
-                ptr_addrs[idx * frag_ptr.access_size:(idx + 1) * frag_ptr.access_size] = np.arange(
-                    (access_ptr + access_offset).offset,
-                    (access_ptr + access_offset).offset + frag_ptr.access_size)
+                ptr_addrs[idx * frag_ptr.access_size:(idx + 1) *
+                          frag_ptr.access_size] = np.arange(
+                              (access_ptr + access_offset).offset,
+                              (access_ptr + access_offset).offset +
+                              frag_ptr.access_size)
         return ptr_addrs
 
     async def store_python(self, frag: ArrayPtr):
@@ -364,8 +373,8 @@ class VoltaWarpTileIteratorCrosswise(bases.GemmWarpIterator):
         self.interleaved_wmma_shape = metaseq(32, 32, 4)
         self.inst_shape = metaseq(16, 16, 4)
 
-        element_count = warp_tile_shape_km[
-            1] // self.interleaved_wmma_shape[self.advance_axis]
+        element_count = warp_tile_shape_km[1] // self.interleaved_wmma_shape[
+            self.advance_axis]
         element_count *= self.interleaved_wmma_shape[2]
         element_count *= self.interleaved_wmma_shape[
             self.advance_axis] // self.inst_shape[self.advance_axis]
@@ -384,8 +393,8 @@ class VoltaWarpTileIteratorCrosswise(bases.GemmWarpIterator):
         self.line_size = tile_shape_km[
             1] * self.stride_of_volta_block // self.element_per_acc
         self.lds_shape = metaseq(self.interleaved_wmma_shape[0], 1)
-        self.lds_iterations = metaseq(warp_tile_shape_km[1] // self.lds_shape[0],
-                                  1)
+        self.lds_iterations = metaseq(
+            warp_tile_shape_km[1] // self.lds_shape[0], 1)
         self.stride_in_access = tile_shape_km[1] // self.element_per_acc
         self.add_member("pointer_", self.const_access_pointer)
         self.add_member("byte_offset_, wmma_k_index_", self.index_t)
@@ -425,8 +434,8 @@ class VoltaWarpTileIteratorCrosswise(bases.GemmWarpIterator):
         """)
         return code
 
-    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int, warp_idx_mn: int,
-                    lane_idx: int):
+    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int,
+                          warp_idx_mn: int, lane_idx: int):
         new_obj = VoltaWarpTileIteratorCrosswise(self.dtype,
                                                  self.tile_shape_km,
                                                  self.warp_tile_shape_km,
@@ -561,9 +570,10 @@ class VoltaWarpTileIteratorCrosswise(bases.GemmWarpIterator):
                     1) + byte_offset + self.byte_offset_
                 dst_ptr[idx] = source_byte_ptr.change_access_size(
                     self.element_per_acc)[0]
-                ptr_addrs[idx*dst_ptr.access_size:(idx+1) * dst_ptr.access_size] = np.arange(
-                                source_byte_ptr.offset,
-                                source_byte_ptr.offset + dst_ptr.access_size)
+                ptr_addrs[idx * dst_ptr.access_size:(idx + 1) *
+                          dst_ptr.access_size] = np.arange(
+                              source_byte_ptr.offset,
+                              source_byte_ptr.offset + dst_ptr.access_size)
                 await checkers.smem_bank_conflicit_check(
                     source_byte_ptr.change_access_size(self.element_per_acc),
                     0)
@@ -608,8 +618,8 @@ class VoltaWarpTileIteratorCongruous(bases.GemmWarpIterator):
         self.advance_axis = 0 if left else 1
         self.inst_shape = metaseq(16, 16, 4)
 
-        element_count = warp_tile_shape_km[
-            1] // self.interleaved_wmma_shape[self.advance_axis]
+        element_count = warp_tile_shape_km[1] // self.interleaved_wmma_shape[
+            self.advance_axis]
         element_count *= self.interleaved_wmma_shape[2]
         element_count *= self.interleaved_wmma_shape[
             self.advance_axis] // self.inst_shape[self.advance_axis]
@@ -628,12 +638,13 @@ class VoltaWarpTileIteratorCongruous(bases.GemmWarpIterator):
         self.line_size = tile_shape_km[
             1] * self.stride_of_volta_block // self.element_per_acc
         self.lds_shape = metaseq(self.interleaved_wmma_shape[2],
-                             self.interleaved_wmma_shape[0])
+                                 self.interleaved_wmma_shape[0])
         self.lds_iterations = metaseq(
             warp_tile_shape_km[1] // self.lds_shape[1],
             self.interleaved_wmma_shape[2] // self.lds_shape[0])
         if not left:
-            self.lds_iterations = self.lds_iterations[::-1]  # type: MetaArray[int]
+            self.lds_iterations = self.lds_iterations[::
+                                                      -1]  # type: MetaArray[int]
         self.pointer_count = 2 if left else 1
         self.stride_in_access = tile_shape_km[1] // self.element_per_acc
         self.add_member("pointers_",
@@ -679,8 +690,8 @@ class VoltaWarpTileIteratorCongruous(bases.GemmWarpIterator):
         """)
         return code
 
-    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int, warp_idx_mn: int,
-                    lane_idx: int):
+    async def python_ctor(self, ptr: ArrayPtr, warp_idx_k: int,
+                          warp_idx_mn: int, lane_idx: int):
         new_obj = VoltaWarpTileIteratorCongruous(self.dtype,
                                                  self.tile_shape_km,
                                                  self.warp_tile_shape_km,
@@ -858,10 +869,11 @@ class VoltaWarpTileIteratorCongruous(bases.GemmWarpIterator):
                 await checkers.smem_bank_conflicit_check(
                     source_byte_ptr.change_access_size(self.element_per_acc),
                     0)
-                ptr_addrs[idx*dst_ptr.access_size:(idx+1) * dst_ptr.access_size] = np.arange(
-                                source_byte_ptr.offset,
-                                source_byte_ptr.offset + dst_ptr.access_size)
-        return ptr_addrs 
+                ptr_addrs[idx * dst_ptr.access_size:(idx + 1) *
+                          dst_ptr.access_size] = np.arange(
+                              source_byte_ptr.offset,
+                              source_byte_ptr.offset + dst_ptr.access_size)
+        return ptr_addrs
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load(self):

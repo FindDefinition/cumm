@@ -1,14 +1,13 @@
-import pccm
-import numpy as np
-
 from typing import List, Optional
-from cumm import cudasim
-from cumm.gemm import bases
+
+import numpy as np
+import pccm
+
+from cumm import cudasim, dtypes
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView
 from cumm.core_cc.csrc.arrayref import ArrayPtr
-from cumm.gemm import constants, layout, thread_map
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel
-from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray
+from cumm.gemm import bases, constants, layout, thread_map
+from cumm.gemm.core import MetaArray, metaseq, seq
 
 
 def seq(*vals):
@@ -135,8 +134,7 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
                 tile_access_idx = ((tile_n * self.params.mma_tile_iters[0] +
                                     (self.index_ & 2) // 2) *
                                    self.params.mma_iters[0] *
-                                   self.params.mma_iters[1] *
-                                   kAccessesPerMma)
+                                   self.params.mma_iters[1] * kAccessesPerMma)
 
                 for mma_n in range(self.params.mma_iters[1] * kAccessesPerMma):
                     mma_access_idx = (((mma_n & 1) * 2 +
@@ -173,7 +171,6 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
 
                         # frag_ptr += 1
                         idx += 1
-
 
     @pccm.cuda.member_function(name="operator++",
                                device=True,

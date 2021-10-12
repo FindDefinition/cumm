@@ -1,10 +1,12 @@
-from cumm.core_cc.csrc.arrayref import ArrayPtr
 import pccm
+
 from cumm import cudasim, dtypes
 from cumm.common import TensorView
-from cumm.dtypes import DType
-from cumm.gemm import core, bases
 from cumm.constants import CUTLASS_MODE
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.dtypes import DType
+from cumm.gemm import bases, core
+
 if not CUTLASS_MODE:
     _DEFAULT_ROUND_STYLE = "tv::gemm::FloatRoundStyle::round_to_nearest"
 else:
@@ -37,10 +39,9 @@ class LinearCombination(bases.GemmOutputOp):
 
         # cudasim members
         self.alpha = -1
-        self.beta = -1 
+        self.beta = -1
 
-    @pccm.cuda.constructor(device=True,
-                             forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("alpha_", self.dtype_comp, f"{self.dtype_comp}(1)")
@@ -51,22 +52,19 @@ class LinearCombination(bases.GemmOutputOp):
         return code
 
     def python_ctor(self, alpha: float, beta: float):
-        self.alpha = alpha 
-        self.beta = beta 
-        return self 
+        self.alpha = alpha
+        self.beta = beta
+        return self
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def is_source_needed(self):
         return pccm.FunctionCode(f"return  beta != {self.dtype_comp}(0);").ret(
             "bool")
 
     def is_source_needed_python(self):
         return self.beta != 0
-        
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True)
+
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def set_k_partition(self):
         code = pccm.FunctionCode()
         code.arg("k_part, k_part_count", "int")
@@ -128,7 +126,8 @@ class LinearCombination(bases.GemmOutputOp):
         converted_acc = accumulator.astype(self.dtype_comp.tv_dtype)
         # if cudasim.debug_once():
         #     print("converted_source", converted_source.data.numpy_view())
-        res.data.numpy_view()[:] = self.alpha * converted_acc.data.numpy_view() + self.beta * converted_source.data.numpy_view()
+        res.data.numpy_view()[:] = self.alpha * converted_acc.data.numpy_view(
+        ) + self.beta * converted_source.data.numpy_view()
         res = self.unary_op(res)
         return res.astype(self.dtype_out.tv_dtype)
 

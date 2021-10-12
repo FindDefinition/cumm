@@ -1,11 +1,11 @@
-import pccm
-import numpy as np
-
 from typing import List, Tuple
-from cumm.gemm import constants
-from cumm.common import TensorView, GemmBasic
-from cumm import dtypes
 
+import numpy as np
+import pccm
+
+from cumm import dtypes
+from cumm.common import GemmBasic, TensorView
+from cumm.gemm import constants
 
 
 class RowMajorInterleaved(pccm.ParameterizedClass):
@@ -54,7 +54,6 @@ class RowMajorInterleaved(pccm.ParameterizedClass):
         code.arg("shape", "const tv::array<int, 2> &")
         code.ret(self.class_name)
         return code
-
 
     def from_shape_python(self, shape):
         l = RowMajorInterleaved(self.interleave)
@@ -106,8 +105,8 @@ class RowMajorInterleaved(pccm.ParameterizedClass):
         return self.inverse(0)
 
     def inverse_0_python(self, offset: int):
-        row_major = offset // self.stride 
-        residual = offset % self.stride 
+        row_major = offset // self.stride
+        residual = offset % self.stride
         row_minor = residual % self.interleave
         return row_major * self.interleave + row_minor
 
@@ -123,7 +122,6 @@ class RowMajorInterleaved(pccm.ParameterizedClass):
         return (offset % self.stride) // self.interleave
 
 
-
 class ColumnMajorInterleaved(pccm.ParameterizedClass):
     def __init__(self, interleave: int, shape: List[int]):
         super().__init__()
@@ -137,7 +135,7 @@ class ColumnMajorInterleaved(pccm.ParameterizedClass):
         self.shape = shape
         self.stride = shape[0] * interleave
         self.static_stride = -1
-        
+
     def python_ctor(self, stride):
         new_obj = ColumnMajorInterleaved(self.interleave)
         new_obj.stride = stride
@@ -249,7 +247,6 @@ class RowMajor(pccm.Class):
         new_obj = RowMajor()
         new_obj.stride = stride
         return new_obj
-
 
     @pccm.cuda.constructor(host=True,
                            device=True,
@@ -369,7 +366,6 @@ class ColumnMajor(pccm.Class):
         l.stride = shape[0]
         return l
 
-
     @pccm.cuda.member_function(name="operator()",
                                host=True,
                                device=True,
@@ -392,7 +388,7 @@ class ColumnMajor(pccm.Class):
                 f"return {self.index_t}(offset / stride);")
         code.arg("offset", self.long_index_t)
         return code.ret(self.index_t)
-        
+
     def inverse_0_python(self, offset: int):
         return (offset % self.stride)
 
@@ -418,10 +414,12 @@ class ColumnMajor(pccm.Class):
     def __call__(self, x: int, y: int):
         return y * self.stride + x
 
+
 def to_stride(shape: np.ndarray):
     stride = np.ones_like(shape)
     stride[:shape.shape[0] - 1] = np.cumprod(shape[::-1])[::-1][1:]
     return stride
+
 
 class TensorGeneric(pccm.ParameterizedClass):
     """Generic Tensor Layout. 
@@ -432,19 +430,21 @@ class TensorGeneric(pccm.ParameterizedClass):
         super().__init__()
         assert ndim > 1
         self.add_dependency(TensorView)
-        self.fast_divmod = fast_divmod 
-        self.ndim = ndim 
+        self.fast_divmod = fast_divmod
+        self.ndim = ndim
         self.index_t = str(dtypes.int32)
         self.long_index_t = str(dtypes.int64)
         # we only need contiguous stride here.
         self.add_member("strides", f"tv::array<int, {ndim - 1}>")
         if fast_divmod:
-            self.add_member("multipliers", f"tv::array<unsigned int, {ndim - 1}>")
-            self.add_member("shift_rights", f"tv::array<unsigned int, {ndim - 1}>")
+            self.add_member("multipliers",
+                            f"tv::array<unsigned int, {ndim - 1}>")
+            self.add_member("shift_rights",
+                            f"tv::array<unsigned int, {ndim - 1}>")
 
         self.add_include("tensorview/math/fastmath.h")
 
-        # cudasim 
+        # cudasim
         self.strides = [0] * ndim
 
     def python_ctor(self, stride: List[int]):
@@ -454,7 +454,7 @@ class TensorGeneric(pccm.ParameterizedClass):
         return new_obj
 
     def from_shape_python(self, shape: List[int]):
-        assert len(shape) == self.ndim 
+        assert len(shape) == self.ndim
         new_obj = TensorGeneric(self.ndim)
         new_obj.strides = to_stride(np.array(shape)).tolist()[:-1]
         return new_obj
@@ -466,9 +466,7 @@ class TensorGeneric(pccm.ParameterizedClass):
             offset += self.strides[i] * indexes[i]
         return offset
 
-    @pccm.cuda.constructor(host=True,
-                           device=True,
-                           forceinline=True)
+    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("strides", f"tv::array<int, {self.ndim - 1}> const&")
@@ -480,9 +478,7 @@ class TensorGeneric(pccm.ParameterizedClass):
                 """)
         return code
 
-    @pccm.cuda.static_function(host=True,
-                               device=True,
-                               forceinline=True)
+    @pccm.cuda.static_function(host=True, device=True, forceinline=True)
     def from_shape(self):
         code = pccm.FunctionCode()
         code.arg("shape", f"const tv::array<int, {self.ndim}> &")
@@ -527,14 +523,17 @@ class TensorGeneric(pccm.ParameterizedClass):
         return code.ret(self.long_index_t)
 
     def inverse_python(self, offset: int):
-        out = [0] * self.ndim 
+        out = [0] * self.ndim
         for i in range(self.ndim - 1):
             out[i] = offset // self.strides[i]
             offset -= out[i] * self.strides[i]
         out[-1] = offset
-        return out 
+        return out
 
-    def inverse_template(self, external_out: bool = False, unpack: bool = False, ptr_out: bool = False):
+    def inverse_template(self,
+                         external_out: bool = False,
+                         unpack: bool = False,
+                         ptr_out: bool = False):
         if unpack:
             assert external_out is True, "packed must be external out"
         if ptr_out:
@@ -594,43 +593,49 @@ class TensorGeneric(pccm.ParameterizedClass):
             return out;
             """)
             code.ret(f"tv::array<int, {self.ndim}>")
-        return code 
+        return code
 
-    @pccm.cuda.member_function(name="inverse", host=True,
+    @pccm.cuda.member_function(name="inverse",
+                               host=True,
                                device=True,
                                forceinline=True,
                                const=True)
     def inverse_return_out(self):
         return self.inverse_template(False)
 
-    @pccm.cuda.member_function(name="inverse", host=True,
+    @pccm.cuda.member_function(name="inverse",
+                               host=True,
                                device=True,
                                forceinline=True,
                                const=True)
     def inverse_input_out(self):
         return self.inverse_template(True)
 
-    @pccm.cuda.member_function(name="inverse", host=True,
+    @pccm.cuda.member_function(name="inverse",
+                               host=True,
                                device=True,
                                forceinline=True,
                                const=True)
     def inverse_input_unpack(self):
         return self.inverse_template(True, True)
 
-    @pccm.cuda.member_function(name="inverse", host=True,
+    @pccm.cuda.member_function(name="inverse",
+                               host=True,
                                device=True,
                                forceinline=True,
                                const=True)
     def inverse_input_ptr_out(self):
         return self.inverse_template(True, False, True)
 
+
 class TensorNCxHWx(pccm.ParameterizedClass):
     # TODO
     def __init__(self, ndim: int, interleave: int):
         super().__init__()
         assert ndim > 1
-        self.ndim = ndim 
-        self.interleave = interleave 
+        self.ndim = ndim
+        self.interleave = interleave
+
 
 if __name__ == "__main__":
     T = TensorGeneric(4)

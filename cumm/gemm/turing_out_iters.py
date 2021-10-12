@@ -1,15 +1,14 @@
-import pccm
-import numpy as np
 from typing import List, Optional, Union
-from cumm import cudasim
-from cumm.cudasim import checkers
 
+import numpy as np
+import pccm
+
+from cumm import cudasim, dtypes
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView
 from cumm.core_cc.csrc.arrayref import ArrayPtr
-from cumm.gemm import constants, layout, thread_map
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel
-from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
-from cumm.gemm import bases
+from cumm.cudasim import checkers
+from cumm.gemm import bases, constants, layout, thread_map
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 
 
 def div_up(a, b):
@@ -35,8 +34,7 @@ class OutFragIterTensorOp(bases.GemmOutFragIterator):
     def __init__(self, dtype: dtypes.DType, warp_tile_shape: MetaArray[int],
                  wmma_shape: MetaArray[int]):
         self.params = TensorOpOutParams(dtype, warp_tile_shape, wmma_shape)
-        element_count = self.params.mma_count[
-            1] * self.params.element_per_acc
+        element_count = self.params.mma_count[1] * self.params.element_per_acc
 
         super().__init__(dtype, element_count, self.params.element_per_acc,
                          dtype.bitsize() * self.params.element_per_acc // 8)
@@ -114,8 +112,7 @@ class OutWarpTileIteratorTensorOp(bases.GemmOutWarpIterator):
     def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int],
                  warp_tile_shape: MetaArray[int], wmma_shape: MetaArray[int]):
         self.params = TensorOpOutParams(dtype, warp_tile_shape, wmma_shape)
-        element_count = self.params.mma_count[
-            1] * self.params.element_per_acc
+        element_count = self.params.mma_count[1] * self.params.element_per_acc
 
         super().__init__(dtype, element_count, self.params.element_per_acc,
                          dtype.bitsize() * self.params.element_per_acc // 8)
@@ -259,16 +256,17 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
                  warp_tile_shape: MetaArray[int], wmma_shape: MetaArray[int],
                  out_count: int, contig_lanes: int):
         self.params = TensorOpOutParams(dtype, warp_tile_shape, wmma_shape)
-        element_count = self.params.mma_count[
-            1] * self.params.element_per_acc
+        element_count = self.params.mma_count[1] * self.params.element_per_acc
 
         super().__init__(dtype, element_count, self.params.element_per_acc,
                          dtype.bitsize() * self.params.element_per_acc // 8)
         self.add_dependency(TensorView, GemmBasicKernel, layout.RowMajor)
         self.out_count = out_count
         self.contig_lanes = contig_lanes
-        self.spec_s32_168 = dtype == dtypes.int32 and out_count == 16 and tile_shape[1] == 128
-        self.spec_s32_88 = dtype == dtypes.int32 and out_count == 8 and tile_shape[1] == 64
+        self.spec_s32_168 = dtype == dtypes.int32 and out_count == 16 and tile_shape[
+            1] == 128
+        self.spec_s32_88 = dtype == dtypes.int32 and out_count == 8 and tile_shape[
+            1] == 64
         self.tile_shape = tile_shape
         self.warp_tile_shape = warp_tile_shape
         self.wmma_shape = wmma_shape
@@ -291,14 +289,18 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
         self.stride_in_access = (tile_shape[1] +
                                  self.padding[1]) // self.element_per_acc
         # print(tile_shape, padding, self.stride_in_access, self.element_per_acc)
-        self.add_member("pointers_", self.access_pointer, array=f"[{self.pointer_count}]")
+        self.add_member("pointers_",
+                        self.access_pointer,
+                        array=f"[{self.pointer_count}]")
         if cudasim.enable_debug():
             self.add_member("smem_pointer_", self.const_pointer)
 
         self.add_member("layout_", "RowMajor")
         self.add_member("warp_column_", "int")
         if self.spec_s32_168:
-            self.add_member("uniform_offset_", "int", array=f"[{self.offset_count}]")
+            self.add_member("uniform_offset_",
+                            "int",
+                            array=f"[{self.offset_count}]")
         # cudasim members
         self.pointers_: List[Union[ArrayPtr,
                                    None]] = [None] * self.pointer_count
@@ -411,8 +413,8 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
 
     def add_warp_offset_python(self, warp_m: int, warp_n: int):
         offset = self.layout_(
-                warp_m * self.params.rows_per_iteration,
-                warp_n * self.warp_tile_shape[1] // self.element_per_acc)
+            warp_m * self.params.rows_per_iteration,
+            warp_n * self.warp_tile_shape[1] // self.element_per_acc)
         # if cudasim.threadIdx().x == 234:
         #     print("PFFSET", offset)
         for i in range(self.pointer_count):
@@ -535,13 +537,15 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
         code = pccm.FunctionCode()
         code.arg("pointer_offset", f"int")
         for i in range(self.pointer_count):
-            code.raw(f"pointers_[{i}] += pointer_offset / {self.element_per_acc};")
+            code.raw(
+                f"pointers_[{i}] += pointer_offset / {self.element_per_acc};")
         return code
 
+
 class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
-    def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int], tmap: thread_map.Out5DLinear,
-                 access_length: int, stride: int, max_alignment: int,
-                 contig_lanes: int):
+    def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int],
+                 tmap: thread_map.Out5DLinear, access_length: int, stride: int,
+                 max_alignment: int, contig_lanes: int):
         element_count = tmap.iterations.prod() * access_length
         assert element_count != 0, str(tmap.iterations)
         num_sub_access = min(128 // dtype.bitsize(), access_length)
@@ -549,12 +553,15 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
         self.max_alignment = max_alignment
         self.alignment = max_alignment if max_alignment < min_alignment else min_alignment
 
-        super().__init__(dtype, element_count, num_sub_access, min(16, self.alignment))
+        super().__init__(dtype, element_count, num_sub_access,
+                         min(16, self.alignment))
         self.add_dependency(TensorView, GemmBasicKernel)
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.tile_shape = tile_shape
-        self.spec_s32_168 = dtype == dtypes.int32 and access_length == 16 and tile_shape[1] == 128
-        self.spec_s32_88 = dtype == dtypes.int32 and access_length == 8 and tile_shape[1] == 64
+        self.spec_s32_168 = dtype == dtypes.int32 and access_length == 16 and tile_shape[
+            1] == 128
+        self.spec_s32_88 = dtype == dtypes.int32 and access_length == 8 and tile_shape[
+            1] == 64
         self.stride = stride
         self.contig_lanes = contig_lanes
         self.tmap = tmap
@@ -587,7 +594,9 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
         code.arg("ptr", self.pointer)
         code.arg("thread_idx", "int")
         if cudasim.enable_debug():
-            code.ctor_init("smem_pointer_", f"reinterpret_cast<{self.const_access_pointer}>(ptr)")
+            code.ctor_init(
+                "smem_pointer_",
+                f"reinterpret_cast<{self.const_access_pointer}>(ptr)")
 
         with code.range_("i", self.loads_per_access, "TV_PRAGMA_UNROLL"):
             if self.spec_s32_168:
@@ -633,8 +642,9 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
                 new_obj.pointers_[i] = pointer + thread_offset[
                     0] * new_obj.stride_vec + lane_offset
             else:
-                col_idx_in_subacc = (thread_offset[1] // self.element_per_acc_output
-                                     ) * self.loads_per_access
+                col_idx_in_subacc = (
+                    thread_offset[1] //
+                    self.element_per_acc_output) * self.loads_per_access
                 smem_line_offset = (col_idx_in_subacc * self.num_sub_access *
                                     self.dtype.itemsize() //
                                     128) % self.loads_per_access
@@ -714,11 +724,11 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
 
                         frag_idx = frag_row_idx * self.iterations[4] + column
                         vector_idx = ((column * self.delta[4] //
-                                        self.element_per_acc_output) *
-                                        self.loads_per_access)
+                                       self.element_per_acc_output) *
+                                      self.loads_per_access)
                         for v in range(self.loads_per_access):
                             mem_ptr = self.pointers_[v] + row_ptr_offset
-                            
+
                             frag_ptr[frag_idx * self.loads_per_access +
                                      v] = (mem_ptr[vector_idx])
                             # if cudasim.threadIdx().x == cudasim.debug_tx():
@@ -760,7 +770,8 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
         code = pccm.FunctionCode()
         code.arg("pointer_offset", f"int")
         for i in range(self.loads_per_access):
-            code.raw(f"pointers_[{i}] += pointer_offset / {self.num_sub_access};")
+            code.raw(
+                f"pointers_[{i}] += pointer_offset / {self.num_sub_access};")
         return code
 
 
@@ -792,6 +803,5 @@ def _ci_dev_wtf_mixed2():
             # i=0: 0011223344556677
             # i=1: 1100332255447766
             # i=2: ...
-            lane_offset = ((lane_col_idx % 8) * 2) | (
-                (lane_col_idx // 4) ^ i)
+            lane_offset = ((lane_col_idx % 8) * 2) | ((lane_col_idx // 4) ^ i)
             print(lane_offset)

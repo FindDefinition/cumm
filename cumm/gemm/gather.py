@@ -1,44 +1,48 @@
-import pccm 
+import pccm
+
 from cumm import dtypes
-from cumm.gemm.core import MetaArray, metaseq, seq
-from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType
+from cumm.common import GemmBasic, TensorView, TensorViewKernel
 from cumm.gemm import (constants, gemmmath, layout, mask_iters, out_iters,
-                         output_op, thread_map, volta_iters, volta_out_iters,
-                         wmma)
-from cumm.common import TensorView, TensorViewKernel, GemmBasic
+                       output_op, thread_map, volta_iters, volta_out_iters,
+                       wmma)
+from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType
+from cumm.gemm.core import MetaArray, metaseq, seq
+
 
 class GatherKernel(pccm.ParameterizedClass):
-    def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int], 
-                epa: int, num_threads: int):
+    def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int],
+                 epa: int, num_threads: int):
         super().__init__()
         self.add_dependency(TensorView, TensorViewKernel)
         self.dtype = dtype
         self.tile_shape = tile_shape
         self.epa = epa
         sub_tile_shape = seq(1, epa)
-        self.tmap = thread_map.PitchLinear(tile_shape,
-                                            sub_tile_shape,
-                                            num_threads)
+        self.tmap = thread_map.PitchLinear(tile_shape, sub_tile_shape,
+                                           num_threads)
         self.num_threads = num_threads
         self.inp_iter_in_param = mask_iters.MaskTileIteratorParams(
-            dtype, tile_shape, sub_tile_shape,
-            self.tmap, 1, True)
+            dtype, tile_shape, sub_tile_shape, self.tmap, 1, True)
 
         self.inp_iter_out_param = mask_iters.MaskTileIteratorParams(
-            dtype, tile_shape, sub_tile_shape,
-            self.tmap, 1, False)
+            dtype, tile_shape, sub_tile_shape, self.tmap, 1, False)
 
         self.inp_iter_in = mask_iters.MaskTileIterator(
-            dtype, tile_shape, sub_tile_shape,
-            self.tmap,  self.inp_iter_in_param, 1,
-            epa, False,
-            False, True)
+            dtype, tile_shape, sub_tile_shape, self.tmap,
+            self.inp_iter_in_param, 1, epa, False, False, True)
 
         self.inp_iter_out = mask_iters.MaskTileIterator(
-            dtype, tile_shape, sub_tile_shape,
-            self.tmap,  self.inp_iter_out_param, 1,
-            epa, False,
-            False, False, read_only=False)
+            dtype,
+            tile_shape,
+            sub_tile_shape,
+            self.tmap,
+            self.inp_iter_out_param,
+            1,
+            epa,
+            False,
+            False,
+            False,
+            read_only=False)
 
         self.add_param_class("inpp1", self.inp_iter_in_param, "InputParams")
         self.add_param_class("outp1", self.inp_iter_out_param, "OutputParams")
@@ -77,7 +81,7 @@ class GatherKernel(pccm.ParameterizedClass):
             ++output_iter;
         }}
         """)
-        return code 
+        return code
 
     @pccm.pybind.mark
     @pccm.cuda.static_function
@@ -100,4 +104,4 @@ class GatherKernel(pccm.ParameterizedClass):
             input.dim(1), k_iterations, parmas_inp, parmas_out);
         tv::ssprint("gather time", timer.report() / 1000.0);
         """)
-        return code 
+        return code

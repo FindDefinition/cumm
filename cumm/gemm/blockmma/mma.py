@@ -1,20 +1,22 @@
 import contextlib
-from cumm.gemm.bases import GemmInputIterator, GemmOutSmemLoader, GemmOutWarpIterator, GemmOutputIterator, GemmOutputOp, GemmSmemIterator, GemmWarpIterator
-from cumm import tensorview as tv 
-from cumm.core_cc.csrc.arrayref import ArrayPtr
+from typing import Dict, List, Optional, Tuple, Type, Union
+
 import numpy as np
 import pccm
-from cumm import dtypes
 
-from cumm import cudasim
-from cumm.gemm import (constants, layout, mask_iters, out_iters,
-                         thread_map, volta_iters, volta_out_iters)
+from cumm import cudasim, dtypes
+from cumm import tensorview as tv
 from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                                TensorViewKernel)
-from typing import Dict, List, Union, Optional, Type, Tuple
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
-
+                         TensorViewKernel)
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm import (constants, layout, mask_iters, out_iters, thread_map,
+                       volta_iters, volta_out_iters)
 from cumm.gemm.algospec import bases
+from cumm.gemm.bases import (GemmInputIterator, GemmOutputIterator,
+                             GemmOutputOp, GemmOutSmemLoader,
+                             GemmOutWarpIterator, GemmSmemIterator,
+                             GemmWarpIterator)
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 
 
 def div_up(a, b):
@@ -58,6 +60,7 @@ class BlockMmaStorage(pccm.ParameterizedClass):
             f"tv::alignedarray<{dtype_b}, {self.smem_shape_b.prod()}, {self.smem_alignment}>"
         )
 
+
 class MaskIGemmIterator(pccm.ParameterizedClass):
     def __init__(self, increment_k_first: bool = False):
         super().__init__()
@@ -87,9 +90,11 @@ class MaskIGemmIterator(pccm.ParameterizedClass):
         code.ctor_init("mask", "mask")
         code.ctor_init("end", "false")
 
-        return code 
+        return code
 
-    @pccm.cuda.member_function(device=True, forceinline=True, name="operator++")
+    @pccm.cuda.member_function(device=True,
+                               forceinline=True,
+                               name="operator++")
     def increment(self):
         code = pccm.FunctionCode()
         if self.increment_k_first:
@@ -110,7 +115,7 @@ class MaskIGemmIterator(pccm.ParameterizedClass):
             }}
             end = true;
             """)
-        return code 
+        return code
 
     @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
@@ -135,7 +140,7 @@ class Mma(pccm.ParameterizedClass):
                  first_input_clear: bool = True,
                  clear_mask: bool = True,
                  mask_sparse: bool = False,
-                 increment_k_first = False, 
+                 increment_k_first=False,
                  mask_width: int = -1,
                  is_sparse_wgrad: bool = False):
         super().__init__()
@@ -154,7 +159,7 @@ class Mma(pccm.ParameterizedClass):
         self.increment_k_first = increment_k_first
         self.partk = partk
         self.first_input_clear = first_input_clear
-        self.clear_mask = clear_mask 
+        self.clear_mask = clear_mask
         self.input_spec = spec.input_spec
         self.mask_width = mask_width
         self.is_sparse_wgrad = is_sparse_wgrad
@@ -178,8 +183,8 @@ class Mma(pccm.ParameterizedClass):
         self.smem_iter_A: Optional[GemmSmemIterator] = None
         self.smem_iter_B: Optional[GemmSmemIterator] = None
 
-        self.smem_A_ptr: Optional[ArrayPtr] = None 
-        self.smem_B_ptr: Optional[ArrayPtr] = None 
+        self.smem_A_ptr: Optional[ArrayPtr] = None
+        self.smem_B_ptr: Optional[ArrayPtr] = None
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
@@ -207,7 +212,8 @@ class Mma(pccm.ParameterizedClass):
                           thread_idx: int, warp_idx_k: int, warp_m: int,
                           warp_n: int, lane_idx: int):
         new_obj = Mma(self.dtype_acc, self.partk, self.num_stage, self.spec,
-                      self.smem_storage, self.first_input_clear, self.clear_mask)
+                      self.smem_storage, self.first_input_clear,
+                      self.clear_mask)
         new_obj.warp_iter_A = await self.spec.warp_iter_a.python_ctor(
             smem_A_ptr, warp_idx_k, warp_m, lane_idx)
         new_obj.warp_iter_B = await self.spec.warp_iter_b.python_ctor(
@@ -369,7 +375,7 @@ class Mma(pccm.ParameterizedClass):
         # mask_width % (tile_shape[2] * splitk) == 0 OR (tile_shape[2] * splitk) % mask_width == 0
         # mask_width_rate = mask_width // tile_shape[2]
         # unified_iterations delta = (tile_shape[2] * splitk)
-        # 
+        #
         # so mask_idx = unified_iterations // mask_width_rate
         code.raw(f"""
         // tv::printf2_once("WTF num_reduced_mask", num_reduced_mask, split_k_slices, {mask_width_rate}, filter_offset);
@@ -829,7 +835,9 @@ class Mma(pccm.ParameterizedClass):
             }}
             """)
         with code.for_("; gemm_k_iterations > 0; --gemm_k_iterations"):
-            with code.for_(f"int warp_mma_k = 0; warp_mma_k < {self.spec.num_warp_mma_iters}; ++warp_mma_k", prefix="TV_PRAGMA_UNROLL"):
+            with code.for_(
+                    f"int warp_mma_k = 0; warp_mma_k < {self.spec.num_warp_mma_iters}; ++warp_mma_k",
+                    prefix="TV_PRAGMA_UNROLL"):
                 code.raw(f"""
                 if (warp_mma_k == {self.spec.num_warp_mma_iters} - 1) {{
                     // TODO
@@ -929,10 +937,11 @@ class Mma(pccm.ParameterizedClass):
         if cudasim.debug_once():
             print("GEMM ITERATIONS", gemm_k_iterations)
             inpd = input_frag_A.data.numpy_view()
-            print("FirstInputA", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+            print("FirstInputA",
+                  cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
             inpd = input_frag_B.data.numpy_view()
-            print("FirstInputB", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
-
+            print("FirstInputB",
+                  cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
 
         input_iter_A.increment_python()
         input_iter_B.increment_python()
@@ -975,10 +984,12 @@ class Mma(pccm.ParameterizedClass):
         warp_iter_B.increment_python()
         if cudasim.debug_once():
             inpd = warp_frag_A[0].data.numpy_view()
-            print("FirstWarpA", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+            print("FirstWarpA",
+                  cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
             print(inpd)
             inpd = warp_frag_B[0].data.numpy_view()
-            print("FirstWarpB", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+            print("FirstWarpB",
+                  cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
 
         warp_mma = self.spec.warp_mma.python_ctor()
         smem_write_stage_idx = 1
@@ -1025,7 +1036,9 @@ class Mma(pccm.ParameterizedClass):
                     warp_frag_A[(warp_mma_k + 1) % 2])
                 warp_coords_B = await warp_iter_B.load_python(
                     warp_frag_B[(warp_mma_k + 1) % 2])
-                if len(warp_frag_A_list) != self.spec.num_warp_mma_iters * gemm_k_iterations_bkp:
+                if len(
+                        warp_frag_A_list
+                ) != self.spec.num_warp_mma_iters * gemm_k_iterations_bkp:
                     warp_frag_A_list.append(
                         warp_frag_A[(warp_mma_k + 1) %
                                     2].meta_data.numpy_view().copy())
@@ -1047,9 +1060,13 @@ class Mma(pccm.ParameterizedClass):
                     inp_coords_B_list.append(inp_coors_B)
                     if cudasim.debug_once():
                         inpd = input_frag_A.data.numpy_view()
-                        print("InputA", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+                        print("InputA",
+                              cudasim.blockIdx().z, inpd.mean(), inpd.max(),
+                              inpd.min())
                         inpd = input_frag_B.data.numpy_view()
-                        print("InputB", cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+                        print("InputB",
+                              cudasim.blockIdx().z, inpd.mean(), inpd.max(),
+                              inpd.min())
 
                     # if cudasim.threadIdx().x == 200:
                     #     print(input_frag_A.data.mean(), "INPUT A")
@@ -1060,16 +1077,22 @@ class Mma(pccm.ParameterizedClass):
                         input_iter_B.clear_mask_python()
                 if cudasim.debug_once():
                     inpd = warp_frag_A[warp_mma_k % 2].data.numpy_view()
-                    print(f"WarpA", warp_mma_k, cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+                    print(f"WarpA", warp_mma_k,
+                          cudasim.blockIdx().z, inpd.mean(), inpd.max(),
+                          inpd.min())
                     inpd = warp_frag_B[warp_mma_k % 2].data.numpy_view()
-                    print(f"WarpB", warp_mma_k, cudasim.blockIdx().z, inpd.mean(), inpd.max(), inpd.min())
+                    print(f"WarpB", warp_mma_k,
+                          cudasim.blockIdx().z, inpd.mean(), inpd.max(),
+                          inpd.min())
                 await warp_mma(accumulators, warp_frag_A[warp_mma_k % 2],
                                warp_frag_B[warp_mma_k % 2], accumulators)
 
             gemm_k_iterations -= 1
         if cudasim.debug_once():
-            acc =  accumulators.data.numpy_view()
-            cudasim.debug_print(f"accumulator {acc.mean()} , max: {acc.max()} , min: {acc.min()}")
+            acc = accumulators.data.numpy_view()
+            cudasim.debug_print(
+                f"accumulator {acc.mean()} , max: {acc.max()} , min: {acc.min()}"
+            )
 
         res = {
             "InputA": {

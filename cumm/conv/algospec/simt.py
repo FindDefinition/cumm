@@ -1,14 +1,16 @@
-from cumm.conv.bases import ConvInputIterator, ConvOpType, LAYOUT_TYPES
-from cumm.conv.params import ConvProblem
-from cumm.gemm.algospec.simt import MmaSimt, OutputSimt
-from cumm.gemm.core import metaseq, seq, MetaArray
-from cumm import dtypes
-from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
-from cumm.conv.bases import ConvIterAlgo, ConvLayout, ConvLayoutType, ConvTensor
 from typing import Optional
-from cumm.gemm import (constants, layout, mask_iters, thread_map)
+
+from cumm import dtypes
 from cumm.conv import input_iters, sparse_iters
+from cumm.conv.bases import (LAYOUT_TYPES, ConvInputIterator, ConvIterAlgo,
+                             ConvLayout, ConvLayoutType, ConvOpType,
+                             ConvTensor)
+from cumm.conv.params import ConvProblem
+from cumm.gemm import constants, layout, mask_iters, thread_map
 from cumm.gemm.algospec import bases
+from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
+from cumm.gemm.algospec.simt import MmaSimt, OutputSimt
+from cumm.gemm.core import MetaArray, metaseq, seq
 
 
 class InputSimt(bases.Input):
@@ -20,7 +22,7 @@ class InputSimt(bases.Input):
                  dtype_a: dtypes.DType,
                  dtype_b: dtypes.DType,
                  algo: GemmAlgo = GemmAlgo.Simt,
-                 mask_sparse : bool = False,
+                 mask_sparse: bool = False,
                  increment_k_first: bool = False):
         is_dp4a = algo == GemmAlgo.SimtDP4A
         ndim = problem.ndim
@@ -73,14 +75,11 @@ class InputSimt(bases.Input):
             if mask_sparse:
                 inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator
                 w_iter_cls = input_iters.WeightIteratorDP4A
-                self.inp_iter_a = inp_iter_cls(
-                    dtype_a,
-                    problem.op_type,
-                    tile_shape,
-                    self.input_sub_tile_shape_a,
-                    self.tmap_a,
-                    self.problem,
-                    increment_k_first)
+                self.inp_iter_a = inp_iter_cls(dtype_a, problem.op_type,
+                                               tile_shape,
+                                               self.input_sub_tile_shape_a,
+                                               self.tmap_a, self.problem,
+                                               increment_k_first)
             else:
                 if is_dp4a:
                     inp_iter_cls = input_iters.ForwardDgradIOIteratorDP4A
@@ -152,7 +151,6 @@ class InputSimt(bases.Input):
                     self.layout_b,
                     optimized=iter_algo == ConvIterAlgo.Optimized)
 
-
     @property
     def layout_a(self) -> LAYOUT_TYPES:
         return self._layout_a
@@ -180,6 +178,7 @@ class InputSimt(bases.Input):
     @property
     def tile_shape(self) -> MetaArray[int]:
         return self._tile_shape
+
 
 class AlgoSpecificSimt(object):
     def __init__(self,
@@ -209,7 +208,14 @@ class AlgoSpecificSimt(object):
         if mask_sparse and not problem.op_type == ConvOpType.kBackwardWeight:
             shuffle_stride = ShuffleStrideType.ShuffleAC
 
-        self.output_spec = OutputSimt(self.mma_spec, tile_shape,
-                                      warp_tile_shape, num_stage, dtype_c,
-                                      dtype_acc, dtype_comp, trans_c, tensorop,
-                                      algo, shuffle_stride=shuffle_stride)
+        self.output_spec = OutputSimt(self.mma_spec,
+                                      tile_shape,
+                                      warp_tile_shape,
+                                      num_stage,
+                                      dtype_c,
+                                      dtype_acc,
+                                      dtype_comp,
+                                      trans_c,
+                                      tensorop,
+                                      algo,
+                                      shuffle_stride=shuffle_stride)

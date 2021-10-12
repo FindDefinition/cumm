@@ -1,41 +1,42 @@
 import asyncio
-from functools import partial
-from cumm.gemm.core.metaarray import MetaArray
-from cumm import tensorview as tv 
-from cumm.core_cc.csrc.arrayref import ArrayPtr
+import os
 import sys
+from functools import partial
 from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
 
-from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
-import pccm
 import numpy as np
-from cumm.constants import CUTLASS_MODE
-
-from typing import Callable, Dict, Tuple, Optional, List
-from cumm.common import PyBind11, TensorView, TensorViewKernel, GemmBasic
-from cumm import cudasim
-from cumm.gemm import codeops, kernel 
+import pccm
 from ccimport import compat
 from pccm.core import CodeFormatter, FunctionCode
+
 # from myclang import clangformat
-from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type
-import os 
+from cumm import cudasim, dtypes
+from cumm import tensorview as tv
+from cumm.common import GemmBasic, PyBind11, TensorView, TensorViewKernel
+from cumm.constants import CUTLASS_MODE
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm import codeops, kernel
+from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.core.metaarray import MetaArray
+
 
 class GemmAlgoParams(object):
-    def __init__(self,
-                 ts: Tuple[int, int, int],
-                 wts: Tuple[int, int, int],
-                 num_stage: int,
-                 dtype_shorts: str,
-                 trans_a: bool,
-                 trans_b: bool,
-                 trans_c: bool,
-                 algo: kernel.GemmAlgo,
-                 tensorop: Optional[kernel.TensorOpParams] = None,
-                 splitk_serial: bool = False,
-                 splitk_parallel: bool = False,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+    def __init__(
+            self,
+            ts: Tuple[int, int, int],
+            wts: Tuple[int, int, int],
+            num_stage: int,
+            dtype_shorts: str,
+            trans_a: bool,
+            trans_b: bool,
+            trans_c: bool,
+            algo: kernel.GemmAlgo,
+            tensorop: Optional[kernel.TensorOpParams] = None,
+            splitk_serial: bool = False,
+            splitk_parallel: bool = False,
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         self.ts = MetaArray(*ts)
         self.wts = MetaArray(*wts)
         self.num_stage = num_stage
@@ -67,7 +68,7 @@ class GemmAlgoParams(object):
         if self.dtype_a == dtypes.int8:
             if self.tensorop is not None:
                 if (self.trans_a or not self.trans_b):
-                    return True 
+                    return True
         return False
 
     def get_algo_name(self):
@@ -96,15 +97,16 @@ class GemmAlgoParams(object):
         return res
 
 
-def gen_gemm_params(ts,
-                    wts,
-                    stage: int,
-                    dtypes_string: str,
-                    algo: kernel.GemmAlgo,
-                    tensorop: Optional[kernel.TensorOpParams],
-                    splitk_serial: bool = False,
-                 splitk_parallel: bool = False,
-                 shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+def gen_gemm_params(
+        ts,
+        wts,
+        stage: int,
+        dtypes_string: str,
+        algo: kernel.GemmAlgo,
+        tensorop: Optional[kernel.TensorOpParams],
+        splitk_serial: bool = False,
+        splitk_parallel: bool = False,
+        shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
     res = []
     # for ta in [False, True]:
     #     for tb in [False, True]:
@@ -116,30 +118,27 @@ def gen_gemm_params(ts,
         for tb in [False]:
             for tc in [False]:
                 p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc,
-                                   algo, tensorop, splitk_serial, splitk_parallel,
-                                   shuffle_stride)
+                                   algo, tensorop, splitk_serial,
+                                   splitk_parallel, shuffle_stride)
                 if not p.skipped():
                     res.append(p)
 
     return res
 
-def gen_shuffle_params(ts,
-                    wts,
-                    dss: List[str],
-                    stage: int,
-                    algo: kernel.GemmAlgo,
-                    tensorop: Optional[kernel.TensorOpParams]):
+
+def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
+                       algo: kernel.GemmAlgo,
+                       tensorop: Optional[kernel.TensorOpParams]):
     res = []
     for ds in dss:
         for tb in [False, True]:
-            p = GemmAlgoParams(ts, wts, stage, ds, False, tb, False,
-                                algo, tensorop, False, False,
-                                ShuffleStrideType.ShuffleAC)
+            p = GemmAlgoParams(ts, wts, stage, ds, False, tb, False, algo,
+                               tensorop, False, False,
+                               ShuffleStrideType.ShuffleAC)
             if not p.skipped():
                 res.append(p)
-        p = GemmAlgoParams(ts, wts, stage, ds, True, False, False,
-                            algo, tensorop, True, False,
-                            ShuffleStrideType.ShuffleAB)
+        p = GemmAlgoParams(ts, wts, stage, ds, True, False, False, algo,
+                           tensorop, True, False, ShuffleStrideType.ShuffleAB)
         if not p.skipped():
             res.append(p)
     return res
@@ -152,13 +151,14 @@ def gen_gemm_params_rowmajor_c(ts,
                                algo: kernel.GemmAlgo,
                                tensorop: Optional[kernel.TensorOpParams],
                                splitk_serial: bool = False,
-                 splitk_parallel: bool = False):
+                               splitk_parallel: bool = False):
     res = []
     for ta in [False]:
         for tb in [False]:
             for tc in [False]:
                 p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc,
-                                   algo, tensorop, splitk_serial, splitk_parallel)
+                                   algo, tensorop, splitk_serial,
+                                   splitk_parallel)
                 if not p.skipped():
                     res.append(p)
     return res
@@ -182,10 +182,12 @@ def gen_gemm_kernels(params: GemmAlgoParams):
                              splitk_parallel=params.splitk_parallel,
                              shuffle_stride=params.shuffle_stride)
 
+
 class SpconvKernel(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("spconv/minkowski.cu.h")
+
 
 class IGemmMaskIterator(pccm.Class):
     def __init__(self):
@@ -197,24 +199,30 @@ class IGemmMaskIterator(pccm.Class):
     def increment(self):
         pass
 
+
 class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
         self.add_dependency(TensorView)
         # why not std::optional?
         # c++17 requires cuda11. to support cuda 10.2, we can't use c++17 for now.
-        self.add_member("dtype_a,dtype_b,dtype_c", "int") # -1 means unset
-        self.add_member("trans_a_,trans_b_,trans_c_", "int") # -1 means unset
-        self.add_pybind_member("tile_shape,warp_tile_shape", "std::array<int, 3>", pyanno="Tuple[int, int, int]")
+        self.add_member("dtype_a,dtype_b,dtype_c", "int")  # -1 means unset
+        self.add_member("trans_a_,trans_b_,trans_c_", "int")  # -1 means unset
+        self.add_pybind_member("tile_shape,warp_tile_shape",
+                               "std::array<int, 3>",
+                               pyanno="Tuple[int, int, int]")
         self.add_pybind_member("num_stage", "int")
         self.add_pybind_member("dacc,dcomp", "int")
         self.add_pybind_member("algo", "std::string")
-        self.add_pybind_member("tensorop", "std::array<int, 3>", "std::array<int, 3>{}")
-        self.add_pybind_member("split_k_serial_", "int", "0") # -1 means unset
-        self.add_pybind_member("split_k_parallel_", "int", "0") # -1 means unset
-        self.add_pybind_member("shuffle_type", "std::string", f"\"{ShuffleStrideType.NoShuffle.value}\"")
+        self.add_pybind_member("tensorop", "std::array<int, 3>",
+                               "std::array<int, 3>{}")
+        self.add_pybind_member("split_k_serial_", "int", "0")  # -1 means unset
+        self.add_pybind_member("split_k_parallel_", "int",
+                               "0")  # -1 means unset
+        self.add_pybind_member("shuffle_type", "std::string",
+                               f"\"{ShuffleStrideType.NoShuffle.value}\"")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
         code = pccm.FunctionCode()
@@ -232,12 +240,12 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("dcomp", "int(tv::unknown)")
         code.ctor_init("algo", "\"\"")
         code.ctor_init("tensorop", "{-1, -1, -1}")
-        code.ctor_init("shuffle_type", f"\"{ShuffleStrideType.NoShuffle.value}\"")
+        code.ctor_init("shuffle_type",
+                       f"\"{ShuffleStrideType.NoShuffle.value}\"")
         code.ctor_init("split_k_serial_", "0")
         code.ctor_init("split_k_parallel_", "0")
 
-        return code 
-
+        return code
 
     @pccm.pybind.mark_prop_getter(prop_name="split_k_serial")
     @pccm.member_function
@@ -246,7 +254,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return split_k_serial_ == 1;
         """)
-        return code.ret("bool") 
+        return code.ret("bool")
 
     @pccm.pybind.mark_prop_setter(prop_name="split_k_serial")
     @pccm.member_function
@@ -256,7 +264,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         split_k_serial_ = val ? 1 : 0;
         """)
-        return code 
+        return code
 
     @pccm.pybind.mark_prop_getter(prop_name="split_k_parallel")
     @pccm.member_function
@@ -265,7 +273,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return split_k_parallel_ == 1;
         """)
-        return code.ret("bool") 
+        return code.ret("bool")
 
     @pccm.pybind.mark_prop_setter(prop_name="split_k_parallel")
     @pccm.member_function
@@ -275,7 +283,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         split_k_parallel_ = val ? 1 : 0;
         """)
-        return code 
+        return code
 
     @pccm.pybind.mark
     @pccm.member_function
@@ -303,7 +311,6 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         """)
         return code
 
-
     @pccm.pybind.mark_prop_getter(prop_name="trans_a")
     @pccm.member_function
     def trans_a(self):
@@ -311,7 +318,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return trans_a_ == 1;
         """)
-        return code.ret("bool") 
+        return code.ret("bool")
 
     @pccm.pybind.mark_prop_setter(prop_name="trans_a")
     @pccm.member_function
@@ -321,7 +328,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         trans_a_ = val ? 1 : 0;
         """)
-        return code 
+        return code
 
     @pccm.pybind.mark_prop_getter(prop_name="trans_b")
     @pccm.member_function
@@ -330,7 +337,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return trans_b_ == 1;
         """)
-        return code.ret("bool") 
+        return code.ret("bool")
 
     @pccm.pybind.mark_prop_setter(prop_name="trans_b")
     @pccm.member_function
@@ -340,7 +347,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         trans_b_ = val ? 1 : 0;
         """)
-        return code 
+        return code
 
     @pccm.pybind.mark_prop_getter(prop_name="trans_c")
     @pccm.member_function
@@ -349,7 +356,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return trans_c_ == 1;
         """)
-        return code.ret("bool") 
+        return code.ret("bool")
 
     @pccm.pybind.mark_prop_setter(prop_name="trans_c")
     @pccm.member_function
@@ -359,7 +366,8 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         trans_c_ = val ? 1 : 0;
         """)
-        return code 
+        return code
+
 
 class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
@@ -367,17 +375,31 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_dependency(TensorView, GemmAlgoDesp)
         # why not std::optional?
         # c++17 requires cuda11. to support cuda 10.2, we can't use c++17 for now.
-        self.add_pybind_member("algo_desp", "GemmAlgoDesp", pyanno="GemmAlgoDesp")
+        self.add_pybind_member("algo_desp",
+                               "GemmAlgoDesp",
+                               pyanno="GemmAlgoDesp")
         self.add_member("a,b,c", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
         self.add_pybind_member("split_k_slices", "int", "1")
-        self.add_pybind_member("workspace", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("workspace",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
         # for spatial sparse convolution (split kernel algorithm)
-        self.add_pybind_member("a_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_pybind_member("b_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_pybind_member("c_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("a_inds",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("b_inds",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("c_inds",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_member("alpha,beta", "float")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
         code = pccm.FunctionCode()
@@ -392,8 +414,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("alpha", "1.0")
         code.ctor_init("beta", "0.0")
 
-        return code 
-
+        return code
 
     @pccm.pybind.mark
     @pccm.member_function
@@ -418,7 +439,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return a;
         """)
-        return code.ret("tv::Tensor") 
+        return code.ret("tv::Tensor")
 
     @pccm.pybind.mark_prop_setter(prop_name="a")
     @pccm.member_function
@@ -429,7 +450,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         a = val;
         algo_desp.dtype_a = int(a.dtype());
         """)
-        return code 
+        return code
 
     @pccm.pybind.mark_prop_getter(prop_name="b")
     @pccm.member_function
@@ -438,7 +459,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return b;
         """)
-        return code.ret("tv::Tensor") 
+        return code.ret("tv::Tensor")
 
     @pccm.pybind.mark_prop_setter(prop_name="b")
     @pccm.member_function
@@ -449,7 +470,8 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         b = val;
         algo_desp.dtype_b = int(b.dtype());
         """)
-        return code 
+        return code
+
     @pccm.pybind.mark_prop_getter(prop_name="c")
     @pccm.member_function
     def c_get(self):
@@ -457,7 +479,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw(f"""
         return c;
         """)
-        return code.ret("tv::Tensor") 
+        return code.ret("tv::Tensor")
 
     @pccm.pybind.mark_prop_setter(prop_name="c")
     @pccm.member_function
@@ -468,235 +490,295 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         c = val;
         algo_desp.dtype_c = int(c.dtype());
         """)
-        return code 
+        return code
 
-class GemmMainUnitTest(pccm.Class):
-    def __init__(self):
+
+SHUFFLE_SIMT_PARAMS: List[GemmAlgoParams] = [
+    *gen_shuffle_params(
+        (64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (128, 128, 8),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (128, 128, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 128, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 128, 8),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (128, 64, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (128, 64, 8),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 64, 8),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 64, 16),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 32, 16),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 32, 32),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+]
+
+SHUFFLE_VOLTA_PARAMS: List[GemmAlgoParams] = [
+    *gen_shuffle_params(
+        (64, 64, 32),
+        (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+    *gen_shuffle_params(
+        (128, 256, 32),
+        (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+    *gen_shuffle_params(
+        (256, 128, 32),
+        (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+    *gen_shuffle_params(
+        (128, 64, 32),
+        (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+    *gen_shuffle_params(
+        (64, 128, 32),
+        (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+]
+
+SHUFFLE_TURING_PARAMS: List[GemmAlgoParams] = [
+    *gen_shuffle_params(
+        (64, 64, 32),
+        (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (128, 256, 32),
+        (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (256, 128, 32),
+        (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (128, 64, 32),
+        (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (64, 128, 32),
+        (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+    *gen_shuffle_params(
+        (128, 256, 32),
+        (64, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+    *gen_shuffle_params(
+        (256, 128, 32),
+        (64, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+    *gen_shuffle_params(
+        (128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+    *gen_shuffle_params(
+        (64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+]
+
+
+class GemmMainUnitTest(pccm.ParameterizedClass):
+    def __init__(self, gemm_params: Optional[List[GemmAlgoParams]] = None):
         super().__init__()
         self.add_dependency(TensorView, GemmBasic, GemmParams)
-        is_debug = os.getenv("CUMM_DEBUG", None)
-        if is_debug is not None and is_debug == "1":
-            self.simt_params = [
-                # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
-                # *gen_gemm_params((64, 64, 16),
-                #                  (32, 32, 16), 2, "f16,f16,f16,f16,f16",
-                #                  kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params((64, 64, 32),
-                #                  (32, 32, 32), 2, "s8,s8,s32,s32,s32",
-                #                  kernel.GemmAlgo.SimtDP4A, None),
-                # *gen_gemm_params((128, 128, 8),
-                #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
-                #                 kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params((128, 128, 8),
-                #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
-                #                 kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAB, splitk_serial=True),
+        if gemm_params is None:
+            is_debug = os.getenv("CUMM_DEBUG", None)
+            if is_debug is not None and is_debug == "1":
+                simt_params = [
+                    # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
+                    # *gen_gemm_params((64, 64, 16),
+                    #                  (32, 32, 16), 2, "f16,f16,f16,f16,f16",
+                    #                  kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params((64, 64, 32),
+                    #                  (32, 32, 32), 2, "s8,s8,s32,s32,s32",
+                    #                  kernel.GemmAlgo.SimtDP4A, None),
+                    # *gen_gemm_params((128, 128, 8),
+                    #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
+                    #                 kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params((128, 128, 8),
+                    #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
+                    #                 kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAB, splitk_serial=True),
 
-                # *gen_gemm_params((32, 128, 16),
-                #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
-                #                  kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params((64, 128, 32),
-                #                  (32, 64, 32), 2, "s8,s8,s32,s32,s32",
-                #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC),
-                # *gen_gemm_params((32, 32, 32),
-                #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
-                #                  kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
-                # *gen_gemm_params((128, 64, 32),
-                #                  (64, 32, 32), 2, "s8,s8,s32,s32,s32",
-                #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
+                    # *gen_gemm_params((32, 128, 16),
+                    #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
+                    #                  kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params((64, 128, 32),
+                    #                  (32, 64, 32), 2, "s8,s8,s32,s32,s32",
+                    #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC),
+                    # *gen_gemm_params((32, 32, 32),
+                    #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
+                    #                  kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
+                    # *gen_gemm_params((128, 64, 32),
+                    #                  (64, 32, 32), 2, "s8,s8,s32,s32,s32",
+                    #                  kernel.GemmAlgo.SimtDP4A, None, shuffle_stride=ShuffleStrideType.ShuffleAC, splitk_serial=False),
 
-                # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((8, 64, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((64, 128, 8), (32, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
-            ]  # type: List[GemmAlgoParams]
-            self.volta_params = [
-                # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params((64, 64, 32),
-                #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
-                #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            ]
-            self.turing_params = [
-                *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8)), splitk_serial=True),
-                # *gen_gemm_params(
-                #     (64, 64, 32),
-                #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
-                #     TensorOpParams((16, 8, 8))),
-                # interleave = 4:
-                # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
+                    # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((8, 64, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 16, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((64, 128, 8), (32, 32, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
+                ]  # type: List[GemmAlgoParams]
+                volta_params = [
+                    # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params((64, 64, 32),
+                    #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
+                    #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                ]
+                turing_params = [
+                    *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32),
+                                                2,
+                                                "f16,f16,f16,f32,f32",
+                                                kernel.GemmAlgo.Turing,
+                                                TensorOpParams((16, 8, 8)),
+                                                splitk_serial=True),
+                    # *gen_gemm_params(
+                    #     (64, 64, 32),
+                    #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
+                    #     TensorOpParams((16, 8, 8))),
+                    # interleave = 4:
+                    # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
 
-                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
+                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
 
-                # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
-            ]
-            # self.turing_s8_params = [
-            #     *gen_gemm_params((128, 128, 64), (64, 64, 64), 2, "s8,s8,s8,s32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            #     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            #     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            #     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
-            # ]
-            # print(self.simt_params[0].dtype_b)
-            # raise NotImplementedError
+                    # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
+                ]
+                # self.turing_s8_params = [
+                #     *gen_gemm_params((128, 128, 64), (64, 64, 64), 2, "s8,s8,s8,s32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
+                # ]
+                # print(self.simt_params[0].dtype_b)
+                # raise NotImplementedError
+            else:
+                simt_params = [
+                    *SHUFFLE_SIMT_PARAMS,
+                    # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None, splitk_serial=True),
+
+                    # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
+                ]  # type: List[GemmAlgoParams]
+                volta_params = [
+                    # *SHUFFLE_SIMT_PARAMS,
+
+                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params((128, 256, 32),
+                    #                  (64, 64, 32), 2, "f16,f16,f16,f16,f16",
+                    #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                ]
+                turing_params = [
+                    *SHUFFLE_TURING_PARAMS,
+                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+                    # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8)), splitk_serial=True),
+
+                    # *gen_gemm_params(
+                    #     (64, 64, 32),
+                    #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
+                    #     TensorOpParams((16, 8, 8))),
+                    # interleave = 4:
+                    # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
+
+                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
+
+                    # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
+                ]
+
+            self.all_params = simt_params + volta_params + turing_params
+            self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
         else:
-            self.simt_params = [
-                *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
-                *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
-                *gen_shuffle_params((128, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
-                *gen_shuffle_params((128, 128, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
-                *gen_shuffle_params((64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.SimtDP4A, None),
-                *gen_shuffle_params((128, 128, 8), (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((128, 128, 8), (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((64, 128, 8), (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((64, 128, 8), (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((128, 64, 8), (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((128, 64, 8), (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((64, 64, 8), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((32, 64, 16), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((64, 32, 16), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                *gen_shuffle_params((32, 32, 32), (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f32,f32,f32,f32,f32", kernel.GemmAlgo.Simt, None, splitk_serial=True),
+            assert len(gemm_params) > 0
+            self.all_params = gemm_params
+            self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
 
-                # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
-            ]  # type: List[GemmAlgoParams]
-            self.volta_params = [
-                # *gen_gemm_params_rowmajor_c((128, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-
-                # *gen_shuffle_params((64, 64, 32), (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_shuffle_params((128, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_shuffle_params((128, 256, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_shuffle_params((256, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params((128, 256, 32),
-                #                  (64, 64, 32), 2, "f16,f16,f16,f16,f16",
-                #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            ]
-            self.turing_params = [
-                *gen_shuffle_params((64, 64, 32), (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-                *gen_shuffle_params((128, 128, 32), (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-                *gen_shuffle_params((128, 128, 32), (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-                *gen_shuffle_params((128, 256, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-                *gen_shuffle_params((256, 128, 32), (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-                *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-                *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-
-                *gen_shuffle_params((64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                *gen_shuffle_params((128, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                *gen_shuffle_params((128, 128, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                *gen_shuffle_params((128, 256, 32), (64, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                *gen_shuffle_params((256, 128, 32), (64, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                *gen_shuffle_params((128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                *gen_shuffle_params((64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8)), splitk_serial=True),
-
-                # *gen_gemm_params(
-                #     (64, 64, 32),
-                #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
-                #     TensorOpParams((16, 8, 8))),
-                # interleave = 4:
-                # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
-
-                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
-
-                # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
-            ]
-
-        self.all_params = self.simt_params + self.volta_params + self.turing_params
-        self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
         # self.add_impl_only_dependency(self.shuffle_matmul_ref, SpconvKernel)
-
-    # @pccm.pybind.mark
-    # @pccm.cuda.static_function
-    # def shuffle_matmul_ref(self):
-    #     code = pccm.FunctionCode()
-    #     code.add_dependency(SpconvKernel)
-    #     code.arg("output", "tv::Tensor")
-    #     code.arg("features", "tv::Tensor")
-    #     code.arg("filters", "tv::Tensor")
-    #     code.arg("indicesIn", "tv::Tensor")
-    #     code.arg("indicesOut", "tv::Tensor")
-    #     code.arg("nHot", "int")
-
-    #     code.raw(f"""
-    #     auto in_nchannel = features.dim(1);
-    #     auto out_nchannel = output.dim(1);
-    #     int shared_mem_size = -1;
-    #     if ((in_nchannel > 16 && out_nchannel > 16 &&
-    #         in_nchannel * out_nchannel >= 512) ||
-    #         (in_nchannel > 24 && out_nchannel > 24))
-    #         shared_mem_size = 32;
-    #     else if (in_nchannel % 24 == 0 && out_nchannel % 24 == 0)
-    #         shared_mem_size = 24;
-    #     else if ((in_nchannel > 8 && out_nchannel > 8) ||
-    #             (in_nchannel % 16 == 0 && out_nchannel % 16 == 0))
-    #         shared_mem_size = 16;
-    #     else
-    #         shared_mem_size = 8;
-    #     constexpr int MAX_GRID = 65535;
-    #     using shmem_sizes_t = tv::mp_list_c<int, 32, 24, 16, 8>;
-    #     int num_grid = (nHot + shared_mem_size - 1) / shared_mem_size;
-    #     int num_div = (num_grid + MAX_GRID - 1) / MAX_GRID;
-    #     int step = (nHot + num_div - 1) / num_div;
-    #     dim3 threads(shared_mem_size, shared_mem_size);
-    #     auto timer = tv::CudaContextTimer<>();
-
-    #     tv::dispatch<float>(output.dtype(), [&](auto I) {{
-    #         using T = TV_DECLTYPE(I);
-    #         tv::DispatchInt<shmem_sizes_t>()(shared_mem_size, [&](auto ShSizeValue) {{
-    #             constexpr int ShmemSize = TV_DECLTYPE(ShSizeValue)::value;
-    #             for (int s = 0; s < num_div; s++) {{
-    #                 int remainder = nHot - step * s;
-    #                 int curr_num_active = remainder < step ? remainder : step;
-    #                 dim3 grid((out_nchannel + threads.x - 1) / threads.x,
-    #                         (curr_num_active + threads.y - 1) / threads.y);
-    #                 matmulX<T, int32_t, ShmemSize><<<grid, threads>>>(
-    #                     features.data_ptr<T>(), in_nchannel, curr_num_active,
-    #                     filters.data_ptr<T>(), out_nchannel, in_nchannel,
-    #                     output.data_ptr<T>(), indicesIn.data_ptr<int32_t>(),
-    #                     indicesOut.data_ptr<int32_t>());
-    #             }}
-    #         }});
-    #     }});
-    #     tv::ssprint("fused shuffle conv time", timer.report() / 1000.0);
-
-    #     """)
-    #     return code 
 
     def matmul_select_helper_base(self, code: FunctionCode):
         """if based algorithm selector
         """
-        tabc_to_kers = codeops.group_by(lambda x: (x.trans_a, x.trans_b, x.trans_c), self.all_kernels)
-        func: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (x.warp_tile_shape[0], x.warp_tile_shape[1], x.warp_tile_shape[2])
-        func2: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (x.num_stage, x.dtype_acc.tv_dtype, x.dtype_comp.tv_dtype)
+        tabc_to_kers = codeops.group_by(
+            lambda x: (x.trans_a, x.trans_b, x.trans_c), self.all_kernels)
+        func: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (
+            x.warp_tile_shape[0], x.warp_tile_shape[1], x.warp_tile_shape[2])
+        func2: Callable[[kernel.GemmKernel], Tuple[
+            int, int, int]] = lambda x: (x.num_stage, x.dtype_acc.tv_dtype, x.
+                                         dtype_comp.tv_dtype)
 
         for tabc, tabc_kers in tabc_to_kers.items():
             if_tests = [
@@ -705,22 +787,35 @@ class GemmMainUnitTest(pccm.Class):
                 f"algo_desp.trans_c() == {pccm.boolean(tabc[2])}",
             ]
             with code.if_(" && ".join(if_tests)):
-                ts_to_kers = codeops.group_by(lambda x: (x.tile_shape[0], x.tile_shape[1], x.tile_shape[2]), tabc_kers)
+                ts_to_kers = codeops.group_by(
+                    lambda x:
+                    (x.tile_shape[0], x.tile_shape[1], x.tile_shape[2]),
+                    tabc_kers)
                 for ts, ts_kers in ts_to_kers.items():
-                    with code.if_(f"algo_desp.tile_shape == std::array<int, 3>{{{ts[0]}, {ts[1]}, {ts[2]}}}"):
+                    with code.if_(
+                            f"algo_desp.tile_shape == std::array<int, 3>{{{ts[0]}, {ts[1]}, {ts[2]}}}"
+                    ):
                         wts_to_kers = codeops.group_by(func, ts_kers)
                         for wts, wts_kers in wts_to_kers.items():
-                            with code.if_(f"algo_desp.warp_tile_shape == std::array<int, 3>{{{wts[0]}, {wts[1]}, {wts[2]}}}"):
-                                saccomp_to_kers = codeops.group_by(func2, wts_kers)
-                                for saccomp, saccomp_kers in saccomp_to_kers.items():
+                            with code.if_(
+                                    f"algo_desp.warp_tile_shape == std::array<int, 3>{{{wts[0]}, {wts[1]}, {wts[2]}}}"
+                            ):
+                                saccomp_to_kers = codeops.group_by(
+                                    func2, wts_kers)
+                                for saccomp, saccomp_kers in saccomp_to_kers.items(
+                                ):
                                     saccomp_if_tests = [
                                         f"algo_desp.num_stage == {saccomp[0]}",
                                         f"algo_desp.dacc == {saccomp[1]}",
                                         f"algo_desp.dcomp == {saccomp[2]}",
                                     ]
-                                    with code.if_(" && ".join(saccomp_if_tests)):
-                                        spks_to_kers = codeops.group_by(lambda k: k.splitk_serial, saccomp_kers)
-                                        for spks, spks_kers in spks_to_kers.items():
+                                    with code.if_(
+                                            " && ".join(saccomp_if_tests)):
+                                        spks_to_kers = codeops.group_by(
+                                            lambda k: k.splitk_serial,
+                                            saccomp_kers)
+                                        for spks, spks_kers in spks_to_kers.items(
+                                        ):
                                             if spks:
                                                 spks_if_test = f"(params.split_k_slices > 1)"
                                             else:
@@ -728,25 +823,36 @@ class GemmMainUnitTest(pccm.Class):
                                             with code.if_(spks_if_test):
                                                 yield spks_kers
                                         # iterate spkers again, run splitk>1 algo for splitk==1 inputs
-                                        for spks, spks_kers in spks_to_kers.items():
+                                        for spks, spks_kers in spks_to_kers.items(
+                                        ):
                                             if spks:
                                                 yield spks_kers
 
     def matmul_select_helper_stage2(self, code: FunctionCode):
-        func3: Callable[[kernel.GemmKernel], Optional[Tuple[int, int, int]]] = lambda x: (x.tensorop[0], x.tensorop[1], x.tensorop[2]) if x.tensorop is not None else None
+        func3: Callable[[kernel.GemmKernel], Optional[Tuple[
+            int, int, int]]] = lambda x: (x.tensorop[0], x.tensorop[
+                1], x.tensorop[2]) if x.tensorop is not None else None
         for spks_kers in self.matmul_select_helper_base(code):
             top_to_kers = codeops.group_by(func3, spks_kers)
             for top, top_kers in top_to_kers.items():
-                algo_to_kers = codeops.group_by(lambda x: (x.algo, x.shuffle_stride), top_kers)
+                algo_to_kers = codeops.group_by(
+                    lambda x: (x.algo, x.shuffle_stride), top_kers)
 
                 if top is None:
                     for (algo, shuf), algo_kers in algo_to_kers.items():
                         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
-                        with code.if_(f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""):
-                            dabc_to_kers = codeops.group_by(lambda x: (x.dtype_a.tv_dtype, x.dtype_b.tv_dtype, x.dtype_c.tv_dtype), algo_kers)
+                        with code.if_(
+                                f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""
+                        ):
+                            dabc_to_kers = codeops.group_by(
+                                lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
+                                           tv_dtype, x.dtype_c.tv_dtype),
+                                algo_kers)
                             for dabc, dabc_kers in dabc_to_kers.items():
-                                assert len(dabc_kers) == 1, "find multiple kernels for one configuration"
-                                dtype_if_tests = [ 
+                                assert len(
+                                    dabc_kers
+                                ) == 1, "find multiple kernels for one configuration"
+                                dtype_if_tests = [
                                     f"algo_desp.dtype_a == tv::DType({dabc[0]})",
                                     f"algo_desp.dtype_b == tv::DType({dabc[1]})",
                                     f"algo_desp.dtype_c == tv::DType({dabc[2]})",
@@ -754,90 +860,29 @@ class GemmMainUnitTest(pccm.Class):
                                 with code.if_(" && ".join(dtype_if_tests)):
                                     yield dabc_kers[0]
                 else:
-                    with code.if_(f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"):
+                    with code.if_(
+                            f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"
+                    ):
                         for (algo, shuf), algo_kers in algo_to_kers.items():
                             assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
-                            with code.if_(f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""):
-                                dabc_to_kers = codeops.group_by(lambda x: (x.dtype_a.tv_dtype, x.dtype_b.tv_dtype, x.dtype_c.tv_dtype), algo_kers)
+                            with code.if_(
+                                    f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""
+                            ):
+                                dabc_to_kers = codeops.group_by(
+                                    lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
+                                               tv_dtype, x.dtype_c.tv_dtype),
+                                    algo_kers)
                                 for dabc, dabc_kers in dabc_to_kers.items():
-                                    assert len(dabc_kers) == 1, "find multiple kernels for one configuration"
-                                    dtype_if_tests = [ 
+                                    assert len(
+                                        dabc_kers
+                                    ) == 1, "find multiple kernels for one configuration"
+                                    dtype_if_tests = [
                                         f"algo_desp.dtype_a == tv::DType({dabc[0]})",
                                         f"algo_desp.dtype_b == tv::DType({dabc[1]})",
                                         f"algo_desp.dtype_c == tv::DType({dabc[2]})",
                                     ]
                                     with code.if_(" && ".join(dtype_if_tests)):
                                         yield dabc_kers[0]
-
-
-
-    def matmul_select_helper(self, code: FunctionCode):
-        """if based algorithm selector
-        """
-        tabc_to_kers = codeops.group_by(lambda x: (x.trans_a, x.trans_b, x.trans_c), self.all_kernels)
-        func: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (x.warp_tile_shape[0], x.warp_tile_shape[1], x.warp_tile_shape[2])
-        func2: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (x.num_stage, x.dtype_acc.tv_dtype, x.dtype_comp.tv_dtype)
-        func3: Callable[[kernel.GemmKernel], Optional[Tuple[int, int, int]]] = lambda x: (x.tensorop[0], x.tensorop[1], x.tensorop[2]) if x.tensorop is not None else None
-
-        for tabc, tabc_kers in tabc_to_kers.items():
-            if_tests = [
-                f"algo_desp.trans_a() == {pccm.boolean(tabc[0])}",
-                f"algo_desp.trans_b() == {pccm.boolean(tabc[1])}",
-                f"algo_desp.trans_c() == {pccm.boolean(tabc[2])}",
-            ]
-            with code.if_(" && ".join(if_tests)):
-                ts_to_kers = codeops.group_by(lambda x: (x.tile_shape[0], x.tile_shape[1], x.tile_shape[2]), tabc_kers)
-                for ts, ts_kers in ts_to_kers.items():
-                    with code.if_(f"algo_desp.tile_shape == std::array<int, 3>{{{ts[0]}, {ts[1]}, {ts[2]}}}"):
-                        wts_to_kers = codeops.group_by(func, ts_kers)
-                        for wts, wts_kers in wts_to_kers.items():
-                            with code.if_(f"algo_desp.warp_tile_shape == std::array<int, 3>{{{wts[0]}, {wts[1]}, {wts[2]}}}"):
-                                saccomp_to_kers = codeops.group_by(func2, wts_kers)
-                                for saccomp, saccomp_kers in saccomp_to_kers.items():
-                                    saccomp_if_tests = [
-                                        f"algo_desp.num_stage == {saccomp[0]}",
-                                        f"algo_desp.dacc == {saccomp[1]}",
-                                        f"algo_desp.dcomp == {saccomp[2]}",
-                                    ]
-                                    with code.if_(" && ".join(saccomp_if_tests)):
-                                        spks_to_kers = codeops.group_by(lambda k: k.splitk_serial, saccomp_kers)
-                                        for spks, spks_kers in spks_to_kers.items():
-                                            spks_if_test = f"({pccm.boolean(spks)} && params.split_k_slices > 1) || (!{pccm.boolean(spks)} && params.split_k_slices == 1)"
-                                            with code.if_(spks_if_test):
-                                                top_to_kers = codeops.group_by(func3, spks_kers)
-                                                for top, top_kers in top_to_kers.items():
-                                                    algo_to_kers = codeops.group_by(lambda x: (x.algo, x.shuffle_stride), top_kers)
-
-                                                    if top is None:
-                                                        for (algo, shuf), algo_kers in algo_to_kers.items():
-                                                            assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
-                                                            with code.if_(f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""):
-                                                                dabc_to_kers = codeops.group_by(lambda x: (x.dtype_a.tv_dtype, x.dtype_b.tv_dtype, x.dtype_c.tv_dtype), algo_kers)
-                                                                for dabc, dabc_kers in dabc_to_kers.items():
-                                                                    assert len(dabc_kers) == 1, "find multiple kernels for one configuration"
-                                                                    dtype_if_tests = [ 
-                                                                        f"algo_desp.dtype_a == tv::DType({dabc[0]})",
-                                                                        f"algo_desp.dtype_b == tv::DType({dabc[1]})",
-                                                                        f"algo_desp.dtype_c == tv::DType({dabc[2]})",
-                                                                    ]
-                                                                    with code.if_(" && ".join(dtype_if_tests)):
-                                                                        yield dabc_kers[0]
-                                                    else:
-                                                        with code.if_(f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"):
-                                                            for (algo, shuf), algo_kers in algo_to_kers.items():
-                                                                assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
-                                                                with code.if_(f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""):
-                                                                    dabc_to_kers = codeops.group_by(lambda x: (x.dtype_a.tv_dtype, x.dtype_b.tv_dtype, x.dtype_c.tv_dtype), algo_kers)
-                                                                    for dabc, dabc_kers in dabc_to_kers.items():
-                                                                        assert len(dabc_kers) == 1, "find multiple kernels for one configuration"
-                                                                        dtype_if_tests = [ 
-                                                                            f"algo_desp.dtype_a == tv::DType({dabc[0]})",
-                                                                            f"algo_desp.dtype_b == tv::DType({dabc[1]})",
-                                                                            f"algo_desp.dtype_c == tv::DType({dabc[2]})",
-                                                                        ]
-                                                                        with code.if_(" && ".join(dtype_if_tests)):
-                                                                            yield dabc_kers[0]
-
 
     @pccm.pybind.mark
     @pccm.cuda.static_function
@@ -863,7 +908,9 @@ class GemmMainUnitTest(pccm.Class):
             desp.warp_tile_shape = {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}};
             """)
             if ker.tensorop is not None:
-                code.raw(f"desp.tensorop = {{{ker.tensorop[0]}, {ker.tensorop[1]}, {ker.tensorop[2]}}};")
+                code.raw(
+                    f"desp.tensorop = {{{ker.tensorop[0]}, {ker.tensorop[1]}, {ker.tensorop[2]}}};"
+                )
             else:
                 code.raw(f"desp.tensorop = {{-1, -1, -1}};")
             code.raw(f"""
@@ -886,8 +933,10 @@ class GemmMainUnitTest(pccm.Class):
     def matmul2(self):
         code = pccm.FunctionCode()
         for p, ker in zip(self.all_params, self.all_kernels):
-            code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params, "GemmParams" + ker.get_algo_name())
-            code.add_param_class( ker.get_algo_name(), ker, "Gemm" + ker.get_algo_name())
+            code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params,
+                                 "GemmParams" + ker.get_algo_name())
+            code.add_param_class(ker.get_algo_name(), ker,
+                                 "Gemm" + ker.get_algo_name())
         code.arg("params", "GemmParams", pyanno="GemmParams")
         # TODO spatial sparse conv (implicit gemm)
         code.raw(f"""
@@ -1078,8 +1127,7 @@ class GemmMainUnitTest(pccm.Class):
         """)
         return code
 
-
-    # @pccm.expose_main.mark 
+    # @pccm.expose_main.mark
     # @pccm.cuda.static_function
     def main_function(self):
         code = pccm.FunctionCode()
@@ -1158,14 +1206,26 @@ class GemmMainUnitTest(pccm.Class):
         tv::ssprint("?");
         return 0;
         """)
-        return code 
+        return code
 
     # @lineprof.lineprof_wrapper_cpp
-    def matmul_python(self, a: np.ndarray, b: np.ndarray, c: np.ndarray,
-                      a_meta: np.ndarray, b_meta: np.ndarray, ta: bool,
-                      tb: bool, tc: bool, ts: np.ndarray, wts: np.ndarray,
-                      num_stage: int, dacc: dtypes.DType, dcomp: dtypes.DType,
-                      algo: str, tensorop: np.ndarray, split_k_slice: int = 1):
+    def matmul_python(self,
+                      a: np.ndarray,
+                      b: np.ndarray,
+                      c: np.ndarray,
+                      a_meta: np.ndarray,
+                      b_meta: np.ndarray,
+                      ta: bool,
+                      tb: bool,
+                      tc: bool,
+                      ts: np.ndarray,
+                      wts: np.ndarray,
+                      num_stage: int,
+                      dacc: dtypes.DType,
+                      dcomp: dtypes.DType,
+                      algo: str,
+                      tensorop: np.ndarray,
+                      split_k_slice: int = 1):
         found = False
         for p, ker in zip(self.all_params, self.all_kernels):
             if_tests = [
@@ -1211,28 +1271,37 @@ class GemmMainUnitTest(pccm.Class):
                 n = b_ten.shape[int(not trans_b)]
                 if cudasim.enable_debug():
                     a_ptr = ArrayPtr(p.dtype_a.tv_dtype,
-                                    a_ten.size,
-                                    external_data=tv.from_numpy(a_ten),
-                                    meta_data=tv.from_numpy(a_meta_ten))
+                                     a_ten.size,
+                                     external_data=tv.from_numpy(a_ten),
+                                     meta_data=tv.from_numpy(a_meta_ten))
                     b_ptr = ArrayPtr(p.dtype_b.tv_dtype,
-                                    b_ten.size,
-                                    external_data=tv.from_numpy(b_ten),
-                                    meta_data=tv.from_numpy(b_meta_ten))
+                                     b_ten.size,
+                                     external_data=tv.from_numpy(b_ten),
+                                     meta_data=tv.from_numpy(b_meta_ten))
                 else:
                     a_ptr = ArrayPtr(p.dtype_a.tv_dtype,
-                                    a_ten.size,
-                                    external_data=tv.from_numpy(a_ten),
-                                    meta_data=tv.Tensor())
+                                     a_ten.size,
+                                     external_data=tv.from_numpy(a_ten),
+                                     meta_data=tv.Tensor())
                     b_ptr = ArrayPtr(p.dtype_b.tv_dtype,
-                                    b_ten.size,
-                                    external_data=tv.from_numpy(b_ten),
-                                    meta_data=tv.Tensor())
+                                     b_ten.size,
+                                     external_data=tv.from_numpy(b_ten),
+                                     meta_data=tv.Tensor())
 
                 c_ptr = ArrayPtr(p.dtype_c.tv_dtype,
                                  c_ten.size,
                                  external_data=tv.from_numpy(c_ten))
-                params = ker.gemm_params.python_ctor(m, n, k, a_ptr, b_ptr,
-                                                     c_ptr, c_ptr, 1.0, 0.0, split_k_slice=split_k_slice)
+                params = ker.gemm_params.python_ctor(
+                    m,
+                    n,
+                    k,
+                    a_ptr,
+                    b_ptr,
+                    c_ptr,
+                    c_ptr,
+                    1.0,
+                    0.0,
+                    split_k_slice=split_k_slice)
                 func = partial(ker.gemm_kernel_python, params=params)
                 blocks = params.grid_dims
                 threads = cudasim.Dim3(ker.num_threads, 1, 1)

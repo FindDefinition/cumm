@@ -1,28 +1,28 @@
 import asyncio
-from functools import partial
-from cumm.conv.params import ConvProblem, gemm_abc_to_conv_iwo_indices, conv_iwo_to_gemm_abc_indices
-from cumm.gemm.core.metaarray import MetaArray
-from cumm import tensorview as tv
-from cumm.core_cc.csrc.arrayref import ArrayPtr
 import sys
+from functools import partial
 from pathlib import Path
+from typing import List, Optional, Tuple
 
-from cumm.gemm.algospec.core import TensorOpParams
-import pccm
 import numpy as np
-from cumm.constants import CUTLASS_MODE
-
-from typing import Tuple, Optional, List
-from cumm.common import TensorView, TensorViewKernel, GemmBasic
-from cumm import cudasim
+import pccm
 from ccimport import compat
 from pccm.core import CodeFormatter
-# from myclang import clangformat
-from cumm import dtypes
-from cumm.conv.bases import ConvEnum, ConvLayoutType, ConvMode, ConvOpType, ConvIterAlgo, ConvLayout, NCHW, NHWC
-from cumm.gemm.algospec import GemmAlgo
 
-from cumm.conv import kernel 
+# from myclang import clangformat
+from cumm import cudasim, dtypes
+from cumm import tensorview as tv
+from cumm.common import GemmBasic, TensorView, TensorViewKernel
+from cumm.constants import CUTLASS_MODE
+from cumm.conv import kernel
+from cumm.conv.bases import (NCHW, NHWC, ConvEnum, ConvIterAlgo, ConvLayout,
+                             ConvLayoutType, ConvMode, ConvOpType)
+from cumm.conv.params import (ConvProblem, conv_iwo_to_gemm_abc_indices,
+                              gemm_abc_to_conv_iwo_indices)
+from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm.algospec import GemmAlgo
+from cumm.gemm.algospec.core import TensorOpParams
+from cumm.gemm.core.metaarray import MetaArray
 
 
 def seq(*vals):
@@ -31,7 +31,7 @@ def seq(*vals):
 
 class ConvAlgoParams(object):
     def __init__(self,
-                ndim: int,
+                 ndim: int,
                  op_type: ConvOpType,
                  iter_algo: ConvIterAlgo,
                  ts: Tuple[int, int, int],
@@ -87,7 +87,8 @@ class ConvAlgoParams(object):
         return self.splitk_serial or self.splitk_parallel
 
     def skipped(self):
-        if self.op_type != ConvOpType.kForward and self.dtype_a.itemsize() == 1:
+        if self.op_type != ConvOpType.kForward and self.dtype_a.itemsize(
+        ) == 1:
             return True
         return False
 
@@ -103,7 +104,7 @@ class ConvAlgoParams(object):
         res += f"_C{self.ndim}_{self.op_type.value}{self.iter_algo.value}"
         if self.mask_sparse:
             res += "_F" if not self.increment_k_first else "_K"
-        
+
         return res
 
 
@@ -120,8 +121,8 @@ def gen_gemm_params(ts,
                     tensorop: Optional[TensorOpParams],
                     splitk_serial: bool = False,
                     splitk_parallel: bool = False,
-                    mask_sparse: bool=False,
-                    increment_k_first: bool=False,
+                    mask_sparse: bool = False,
+                    increment_k_first: bool = False,
                     mask_width: int = -1):
     res = []
     # for ta in [False, True]:
@@ -130,45 +131,86 @@ def gen_gemm_params(ts,
     #             p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc, algo, tensorop)
     #             if not p.skipped():
     #                 res.append(p)
-    op_types = [ConvOpType.kForward, ConvOpType.kBackwardInput, ConvOpType.kBackwardWeight]
-    op_types = [ConvOpType.kForward, ConvOpType.kBackwardInput, ConvOpType.kBackwardWeight]
+    op_types = [
+        ConvOpType.kForward, ConvOpType.kBackwardInput,
+        ConvOpType.kBackwardWeight
+    ]
+    op_types = [
+        ConvOpType.kForward, ConvOpType.kBackwardInput,
+        ConvOpType.kBackwardWeight
+    ]
     # if mask_sparse:
     #     op_types = [ConvOpType.kForward, ConvOpType.kBackwardInput]
 
     for op_type in op_types:
         if op_type == ConvOpType.kBackwardWeight:
-            p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage, dtypes_string, li, lw, lo,
-                                    algo, tensorop, True, splitk_parallel, mask_sparse, increment_k_first, mask_width=mask_width)
+            p = ConvAlgoParams(ndim,
+                               op_type,
+                               iter_algo,
+                               ts,
+                               wts,
+                               stage,
+                               dtypes_string,
+                               li,
+                               lw,
+                               lo,
+                               algo,
+                               tensorop,
+                               True,
+                               splitk_parallel,
+                               mask_sparse,
+                               increment_k_first,
+                               mask_width=mask_width)
         else:
-            p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage, dtypes_string, li, lw, lo,
-                                    algo, tensorop, splitk_serial, splitk_parallel, mask_sparse, increment_k_first)
+            p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
+                               dtypes_string, li, lw, lo, algo, tensorop,
+                               splitk_serial, splitk_parallel, mask_sparse,
+                               increment_k_first)
 
         if not p.skipped():
             res.append(p)
     return res
 
+
 def gen_spwgrad_params(ts,
-                    wts,
-                    ndim: int,
-                    iter_algo: ConvIterAlgo,
-                    stage: int,
-                    dtypes_string: str,
-                    li: ConvLayout,
-                    lw: ConvLayout,
-                    lo: ConvLayout,
-                    algo: GemmAlgo,
-                    tensorop: Optional[TensorOpParams],
-                    splitk_serial: bool = False,
-                    splitk_parallel: bool = False,
-                    mask_sparse: bool=False,
-                    increment_k_first: bool=False,
-                    mask_width: int = -1):
-    p = ConvAlgoParams(ndim, ConvOpType.kBackwardWeight, iter_algo, ts, wts, stage, dtypes_string, li, lw, lo,
-                            algo, tensorop, True, splitk_parallel, mask_sparse, increment_k_first, mask_width=mask_width)
+                       wts,
+                       ndim: int,
+                       iter_algo: ConvIterAlgo,
+                       stage: int,
+                       dtypes_string: str,
+                       li: ConvLayout,
+                       lw: ConvLayout,
+                       lo: ConvLayout,
+                       algo: GemmAlgo,
+                       tensorop: Optional[TensorOpParams],
+                       splitk_serial: bool = False,
+                       splitk_parallel: bool = False,
+                       mask_sparse: bool = False,
+                       increment_k_first: bool = False,
+                       mask_width: int = -1):
+    p = ConvAlgoParams(ndim,
+                       ConvOpType.kBackwardWeight,
+                       iter_algo,
+                       ts,
+                       wts,
+                       stage,
+                       dtypes_string,
+                       li,
+                       lw,
+                       lo,
+                       algo,
+                       tensorop,
+                       True,
+                       splitk_parallel,
+                       mask_sparse,
+                       increment_k_first,
+                       mask_width=mask_width)
     return [p]
 
+
 def gen_gemm_kernels(params: ConvAlgoParams):
-    return kernel.ConvKernel(params.ndim, params.op_type, 
+    return kernel.ConvKernel(params.ndim,
+                             params.op_type,
                              params.iter_algo,
                              params.ts,
                              params.wts,
@@ -196,16 +238,17 @@ class ConvMainUnitTest(pccm.Class):
         self.add_dependency(TensorView, GemmBasic, ConvEnum)
         # unit test params: [ts, wts, stage, dtypes, trans, algo, tensorop]
         self.simt_params = [
-            # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, ConvIterAlgo.Optimized, 2, "s8,s8,s32,s32,s32", 
+            # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, ConvIterAlgo.Optimized, 2, "s8,s8,s32,s32,s32",
             #     NHWC, NHWC, NHWC, GemmAlgo.SimtDP4A, None),
-            # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32", 
+            # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
             #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-            # *gen_spwgrad_params((128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32", 
+            # *gen_spwgrad_params((128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
             #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
-            # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32", 
+            # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
             #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
-            *gen_gemm_params((32, 32, 32), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32", 
-                NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
+            *gen_gemm_params(
+                (32, 32, 32), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2,
+                "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
             # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
             # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
             # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
@@ -260,15 +303,20 @@ class ConvMainUnitTest(pccm.Class):
                                            ker.gemm_params,
                                            "ConvParams" + p.get_algo_name())
 
-            self.add_impl_only_param_class(self.implicit_gemm, p.get_algo_name(), ker,
+            self.add_impl_only_param_class(self.implicit_gemm,
+                                           p.get_algo_name(), ker,
                                            "Conv" + p.get_algo_name())
 
     @pccm.pybind.mark
     @pccm.cuda.static_function
     def implicit_gemm(self):
         code = pccm.FunctionCode()
-        code.arg("input,weight,output", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
-        code.arg("padding,stride,dilation", f"std::vector<int>", pyanno="List[int]")
+        code.arg("input,weight,output",
+                 "tv::Tensor",
+                 pyanno="cumm.tensorview.Tensor")
+        code.arg("padding,stride,dilation",
+                 f"std::vector<int>",
+                 pyanno="List[int]")
 
         code.arg("ndim, iter_algo_, op_type_", "int")
         code.arg("i_ltype_,w_ltype_,o_ltype_", "int")
@@ -284,14 +332,29 @@ class ConvMainUnitTest(pccm.Class):
         code.arg("beta", "float", "0")
 
         code.arg("split_k_slices", "int", "1")
-        code.arg("workspace", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("workspace",
+                 "tv::Tensor",
+                 "tv::Tensor()",
+                 pyanno="cumm.tensorview.Tensor = Tensor()")
         code.arg("mask_sparse", "bool", "false")
         code.arg("increment_k_first", "bool", "false")
 
-        code.arg("mask", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("mask_argsort", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("indices", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("mask_output", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("mask",
+                 "tv::Tensor",
+                 "tv::Tensor()",
+                 pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("mask_argsort",
+                 "tv::Tensor",
+                 "tv::Tensor()",
+                 pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("indices",
+                 "tv::Tensor",
+                 "tv::Tensor()",
+                 pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("mask_output",
+                 "tv::Tensor",
+                 "tv::Tensor()",
+                 pyanno="cumm.tensorview.Tensor = Tensor()")
 
         code.raw(f"""
         int groups = 1;
@@ -302,7 +365,7 @@ class ConvMainUnitTest(pccm.Class):
         ConvEnum::LayoutType w_ltype = static_cast<ConvEnum::LayoutType>(w_ltype_);
         ConvEnum::LayoutType o_ltype = static_cast<ConvEnum::LayoutType>(o_ltype_);
         """)
-        
+
         for p, ker in zip(self.all_params, self.all_kernels):
             indices = gemm_abc_to_conv_iwo_indices(p.op_type)
             inv_indices = conv_iwo_to_gemm_abc_indices(p.op_type)
@@ -364,7 +427,9 @@ class ConvMainUnitTest(pccm.Class):
                 """)
                 if p.mask_sparse:
                     if p.op_type == ConvOpType.kForward:
-                        code.raw(f"TV_ASSERT_RT_ERR(!mask_output.empty(), \"error\");")
+                        code.raw(
+                            f"TV_ASSERT_RT_ERR(!mask_output.empty(), \"error\");"
+                        )
                     elif p.op_type == ConvOpType.kBackwardWeight:
                         assert p.mask_width > 0 and p.mask_width % p.ts[2] == 0
                         code.raw(f"""
@@ -483,17 +548,34 @@ class ConvMainUnitTest(pccm.Class):
         }
         """)
         return code
-    
+
     # @lineprof.lineprof_wrapper_cpp
-    def implicit_gemm_python(self, input_: np.ndarray, weight: np.ndarray, output: np.ndarray,
-                      input_meta: np.ndarray, weight_meta: np.ndarray, output_meta: np.ndarray, 
-                      padding: List[int], stride: List[int], dilation: List[int],
-                      ndim: int, iter_algo: ConvIterAlgo, op_type: ConvOpType,
-                      i_ltype: ConvLayoutType, w_ltype: ConvLayoutType, o_ltype: ConvLayoutType,
-                      ts: np.ndarray, wts: np.ndarray,
-                      num_stage: int, dacc: dtypes.DType, dcomp: dtypes.DType,
-                      algo: str, tensorop: np.ndarray, i_interleave: int = 1, 
-                      w_interleave: int = 1, o_interleave: int = 1):
+    def implicit_gemm_python(self,
+                             input_: np.ndarray,
+                             weight: np.ndarray,
+                             output: np.ndarray,
+                             input_meta: np.ndarray,
+                             weight_meta: np.ndarray,
+                             output_meta: np.ndarray,
+                             padding: List[int],
+                             stride: List[int],
+                             dilation: List[int],
+                             ndim: int,
+                             iter_algo: ConvIterAlgo,
+                             op_type: ConvOpType,
+                             i_ltype: ConvLayoutType,
+                             w_ltype: ConvLayoutType,
+                             o_ltype: ConvLayoutType,
+                             ts: np.ndarray,
+                             wts: np.ndarray,
+                             num_stage: int,
+                             dacc: dtypes.DType,
+                             dcomp: dtypes.DType,
+                             algo: str,
+                             tensorop: np.ndarray,
+                             i_interleave: int = 1,
+                             w_interleave: int = 1,
+                             o_interleave: int = 1):
         found = False
         for p, ker in zip(self.all_params, self.all_kernels):
             indices = gemm_abc_to_conv_iwo_indices(p.op_type)
@@ -534,7 +616,7 @@ class ConvMainUnitTest(pccm.Class):
                     K2 = output.shape[1]
                 else:
                     K2 = output.shape[p.ndim + 1]
-                assert K == K2 
+                assert K == K2
                 ksize = [0] * p.ndim
                 input_dims = [0] * p.ndim
                 output_dims = [0] * p.ndim
@@ -544,10 +626,14 @@ class ConvMainUnitTest(pccm.Class):
                     input_dims[i - dim_start] = input_.shape[i]
                     output_dims[i - dim_start] = output.shape[i]
 
-                output_dims_check_again = ConvProblem.calc_output_dims_python(input_dims, ksize, padding, stride, dilation)
+                output_dims_check_again = ConvProblem.calc_output_dims_python(
+                    input_dims, ksize, padding, stride, dilation)
                 assert output_dims_check_again == output_dims
-                problem = ker.problem.python_ctor(N, C, K, input_dims, output_dims, ksize, padding, 
-                    stride, dilation, ConvMode.kCrossCorrelation, 1, 1)
+                problem = ker.problem.python_ctor(N, C, K, input_dims,
+                                                  output_dims, ksize, padding,
+                                                  stride, dilation,
+                                                  ConvMode.kCrossCorrelation,
+                                                  1, 1)
                 print(problem.N_, problem.C_, problem.K_, problem.output_dims_)
                 inputs = [input_, weight, output]
                 input_metas = [input_meta, weight_meta, output_meta]
@@ -562,22 +648,22 @@ class ConvMainUnitTest(pccm.Class):
 
                 if cudasim.enable_debug():
                     a_ptr = ArrayPtr(p.dtype_a.tv_dtype,
-                                    a_ten.size,
-                                    external_data=tv.from_numpy(a_ten),
-                                    meta_data=tv.from_numpy(a_meta_ten))
+                                     a_ten.size,
+                                     external_data=tv.from_numpy(a_ten),
+                                     meta_data=tv.from_numpy(a_meta_ten))
                     b_ptr = ArrayPtr(p.dtype_b.tv_dtype,
-                                    b_ten.size,
-                                    external_data=tv.from_numpy(b_ten),
-                                    meta_data=tv.from_numpy(b_meta_ten))
+                                     b_ten.size,
+                                     external_data=tv.from_numpy(b_ten),
+                                     meta_data=tv.from_numpy(b_meta_ten))
                 else:
                     a_ptr = ArrayPtr(p.dtype_a.tv_dtype,
-                                    a_ten.size,
-                                    external_data=tv.from_numpy(a_ten),
-                                    meta_data=tv.Tensor())
+                                     a_ten.size,
+                                     external_data=tv.from_numpy(a_ten),
+                                     meta_data=tv.Tensor())
                     b_ptr = ArrayPtr(p.dtype_b.tv_dtype,
-                                    b_ten.size,
-                                    external_data=tv.from_numpy(b_ten),
-                                    meta_data=tv.Tensor())
+                                     b_ten.size,
+                                     external_data=tv.from_numpy(b_ten),
+                                     meta_data=tv.Tensor())
 
                 c_ptr = ArrayPtr(p.dtype_c.tv_dtype,
                                  c_ten.size,

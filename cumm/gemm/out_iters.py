@@ -1,19 +1,20 @@
 # from codeai.astex.lineprof import lineprof_wrapper_cpp
-import pccm
-import numpy as np
-
 from typing import List, Optional, Union
-from cumm.gemm import codeops
-from cumm import cudasim 
+
+import numpy as np
+import pccm
+
+from cumm import cudasim, dtypes
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView
 from cumm.core_cc.csrc.arrayref import ArrayPtr
-from cumm.cudasim import checkers 
+from cumm.cudasim import checkers
+from cumm.gemm import codeops, constants, layout, thread_map
+from cumm.gemm.bases import (GemmIterator, GemmOutFragIterator,
+                             GemmOutputIterator, GemmOutSmemLoader,
+                             GemmOutWarpIterator)
+from cumm.gemm.core import (MetaArray, aligned_array_type, array_type, metaseq,
+                            seq)
 
-
-from cumm.gemm import constants, layout, thread_map
-from cumm.common import TensorView, GemmBasic, GemmBasicKernel
-from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray, array_type, aligned_array_type
-from cumm.gemm.bases import GemmIterator, GemmOutFragIterator, GemmOutSmemLoader, GemmOutWarpIterator, GemmOutputIterator
 
 def div_up(a, b):
     return (a + b - 1) // b
@@ -42,8 +43,11 @@ class OutWarpTileIterator(GemmOutWarpIterator):
         vector_length = warp_tile_shape[1] // warp_shape[1]
         self.num_access_per_it = vector_length // self.access_length_wmma
 
-        super().__init__(dtype, self.num_access_per_it * self.access_length_wmma, self.element_per_acc, dtype.itemsize() * self.element_per_acc)
-        
+        super().__init__(dtype,
+                         self.num_access_per_it * self.access_length_wmma,
+                         self.element_per_acc,
+                         dtype.itemsize() * self.element_per_acc)
+
         self.add_dependency(TensorView, GemmBasicKernel)
         self.add_param_class("ns2", lane_layout,
                              "LaneLayout")  # TODO add a real layout class
@@ -101,8 +105,9 @@ class OutWarpTileIterator(GemmOutWarpIterator):
             lane_offset_1 * new_obj.lane_mma_shape[1]).change_access_size(
                 new_obj.element_per_acc)
         off = ((logical_offset[0] * new_obj.warp_shape[0] + lane_offset_0) *
-            new_obj.stride + logical_offset[1] * new_obj.warp_tile_shape[1] +
-            lane_offset_1 * new_obj.lane_mma_shape[1])
+               new_obj.stride +
+               logical_offset[1] * new_obj.warp_tile_shape[1] +
+               lane_offset_1 * new_obj.lane_mma_shape[1])
         # new_obj.pointer_ +=
         # new_obj.pointer_ = new_obj.pointer_.change_access_size(
         #     new_obj.element_per_acc)
@@ -134,27 +139,29 @@ class OutWarpTileIterator(GemmOutWarpIterator):
         return code
 
     async def store_with_pointer_offset_python(self, frag: ArrayPtr,
-                                         pointer_offset: int):
+                                               pointer_offset: int):
         dst_ptr = frag.change_access_size(self.element_per_acc)
         ptr_addrs = np.zeros((frag.length, ), dtype=np.int32)
 
         for acc_idx in range(self.num_access_per_it):
             if self.scalar_store:
                 for s in range(self.access_length_wmma):
-                    self.pointer_[acc_idx * self.warp_shape[1] * self.access_length_wmma + s +
-                            pointer_offset] = dst_ptr[acc_idx * self.access_length_wmma + s]
+                    self.pointer_[acc_idx * self.warp_shape[1] *
+                                  self.access_length_wmma + s +
+                                  pointer_offset] = dst_ptr[
+                                      acc_idx * self.access_length_wmma + s]
             else:
                 self.pointer_[acc_idx * self.warp_shape[1] + pointer_offset //
                               self.access_length_wmma] = dst_ptr[acc_idx]
-                access_offset = (acc_idx * self.warp_shape[1] + pointer_offset //
-                              self.access_length_wmma)
+                access_offset = (acc_idx * self.warp_shape[1] +
+                                 pointer_offset // self.access_length_wmma)
                 ptr_addrs[acc_idx * dst_ptr.access_size:(acc_idx + 1) *
                           dst_ptr.access_size] = np.arange(
                               (self.pointer_ + access_offset).offset,
                               (self.pointer_ + access_offset).offset +
                               dst_ptr.access_size)
-        return ptr_addrs 
-        
+        return ptr_addrs
+
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store(self):
         code = pccm.FunctionCode(f"""
@@ -190,11 +197,14 @@ class OutSmemLoader(GemmOutSmemLoader):
         alignment = max_alignment if max_alignment < min_alignment else min_alignment
         element_count = self.iterations.prod() * self.element_per_acc_output
         assert element_count != 0, str(tmap.iterations)
-        num_sub_access = min(128 // dtype.bitsize(), self.element_per_acc_output)
+        num_sub_access = min(128 // dtype.bitsize(),
+                             self.element_per_acc_output)
         self.loads_per_access = self.element_per_acc_output // num_sub_access
         self.num_sub_access = num_sub_access
 
-        super().__init__(dtype, self.iterations.prod() * self.element_per_acc_output, num_sub_access, min(16, alignment))
+        super().__init__(dtype,
+                         self.iterations.prod() * self.element_per_acc_output,
+                         num_sub_access, min(16, alignment))
         self.add_dependency(TensorView, GemmBasicKernel)
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.stride = stride
@@ -214,8 +224,9 @@ class OutSmemLoader(GemmOutSmemLoader):
         return code
 
     def python_ctor(self, ptr: ArrayPtr, thread_idx: int):
-        new_obj = OutSmemLoader(self.dtype, self.tmap, self.element_per_acc_output,
-                                self.stride, self.max_alignment)
+        new_obj = OutSmemLoader(self.dtype, self.tmap,
+                                self.element_per_acc_output, self.stride,
+                                self.max_alignment)
         thread_offset = new_obj.tmap.initial_offset_python(thread_idx)
         new_obj.pointer_ = ptr + thread_offset[
             0] * new_obj.stride + thread_offset[1]
@@ -267,7 +278,7 @@ class OutSmemLoader(GemmOutSmemLoader):
         return code
 
     async def load_with_pointer_offset_python(self, frag: ArrayPtr,
-                                        pointer_offset: int):
+                                              pointer_offset: int):
         frag_ptr = frag.change_access_size(self.num_sub_access)
         ptr_addrs = np.zeros((frag.length, ), dtype=np.int32)
         for cluster in range(self.iterations[1]):
@@ -290,15 +301,18 @@ class OutSmemLoader(GemmOutSmemLoader):
                         frag_idx = frag_row_idx * self.iterations[4] + column
 
                         for v in range(self.loads_per_access):
-                            mem_ptr = (memory_pointer + (column * self.delta[4] //
-                                                self.element_per_acc_output) *
-                                               self.loads_per_access + v)
-                            frag_ptr[frag_idx * self.loads_per_access + v] = (
-                                mem_ptr[0])
+                            mem_ptr = (memory_pointer +
+                                       (column * self.delta[4] //
+                                        self.element_per_acc_output) *
+                                       self.loads_per_access + v)
+                            frag_ptr[frag_idx * self.loads_per_access +
+                                     v] = (mem_ptr[0])
                             dst_offset = frag_idx * self.loads_per_access + v
-                            ptr_addrs[dst_offset*frag_ptr.access_size:(dst_offset+1) * frag_ptr.access_size] = np.arange(
-                                        mem_ptr.offset,
-                                        mem_ptr.offset + frag_ptr.access_size)
+                            ptr_addrs[dst_offset *
+                                      frag_ptr.access_size:(dst_offset + 1) *
+                                      frag_ptr.access_size] = np.arange(
+                                          mem_ptr.offset, mem_ptr.offset +
+                                          frag_ptr.access_size)
 
                             # await checkers.smem_bank_conflicit_check(mem_ptr, 0)
         return ptr_addrs
@@ -327,10 +341,13 @@ class OutSmemLoader(GemmOutSmemLoader):
         code.arg("pointer_offset", f"int")
         return code
 
+
 class OutIteratorParams(pccm.ParameterizedClass):
-    def __init__(self, tmap: thread_map.Out5DLinear, shuffle_in_stride: bool = False ):
+    def __init__(self,
+                 tmap: thread_map.Out5DLinear,
+                 shuffle_in_stride: bool = False):
         super().__init__()
-        self.tmap = tmap 
+        self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.long_index_t = dtypes.int64
         self.shuffle_in_stride = shuffle_in_stride
@@ -371,7 +388,7 @@ class OutIteratorParams(pccm.ParameterizedClass):
         new_obj.advance_cluster = advance_params[1]
         new_obj.advance_group = advance_params[2]
         new_obj.advance_row = advance_params[3]
-        return new_obj 
+        return new_obj
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def default_ctor(self):
@@ -398,20 +415,27 @@ class OutIteratorParams(pccm.ParameterizedClass):
         advance_group = advance_params[2];
         advance_row = advance_params[3];
         """)
-        return code 
-
+        return code
 
 
 class OutIterator(GemmOutputIterator):
-    def __init__(self, dtype: dtypes.DType, tmap: thread_map.Out5DLinear, param_class: OutIteratorParams,
-                 part_shape: MetaArray[int], part_dilation: MetaArray[int],
-                 access_length: int, read_only: bool = False, shuffle_in_stride: bool = False):
+    def __init__(self,
+                 dtype: dtypes.DType,
+                 tmap: thread_map.Out5DLinear,
+                 param_class: OutIteratorParams,
+                 part_shape: MetaArray[int],
+                 part_dilation: MetaArray[int],
+                 access_length: int,
+                 read_only: bool = False,
+                 shuffle_in_stride: bool = False):
         self.iterations = tmap.iterations  # type: MetaArray[int]
         self.delta = tmap.delta  # type: MetaArray[int]
 
-        super().__init__(dtype, self.iterations.prod() * access_length, access_length, dtype.itemsize() * access_length)
+        super().__init__(dtype,
+                         self.iterations.prod() * access_length, access_length,
+                         dtype.itemsize() * access_length)
         self.add_dependency(TensorView, GemmBasicKernel)
-        self.read_only = read_only 
+        self.read_only = read_only
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.params = param_class
         self.add_param_class("params", self.params, "Params")
@@ -426,17 +450,20 @@ class OutIterator(GemmOutputIterator):
             self.add_member("pointer_", self.pointer)
 
         # self.add_member("pointer_bkp_", self.pointer)
-        self.add_member(
-            "params_", "Params const&")
-        self.add_member("column_masks_", "bool", array=f"[{self.iterations[4]}]")
+        self.add_member("params_", "Params const&")
+        self.add_member("column_masks_",
+                        "bool",
+                        array=f"[{self.iterations[4]}]")
         self.add_member("extent_row_, thread_start_row_", self.index_t)
         self.add_member("counts_", "int", array="[3]")
         if self.shuffle_in_stride:
-            self.add_member("indices_", "int", array=f"[{self.iterations[1:4].prod()}]")
+            self.add_member("indices_",
+                            "int",
+                            array=f"[{self.iterations[1:4].prod()}]")
 
         # cudasim members
         self.pointer_ = None  # type: Optional[ArrayPtr]
-        self.params_ = None # type: Optional[OutIteratorParams]
+        self.params_ = None  # type: Optional[OutIteratorParams]
 
         self.column_masks_ = [False] * self.iterations[4]
         self.extent_row_ = 0
@@ -464,9 +491,12 @@ class OutIterator(GemmOutputIterator):
 
         """)
         if self.shuffle_in_stride:
-            with code.range_("cluster", str(self.iterations[1]), "TV_PRAGMA_UNROLL"):
-                with code.range_("group", str(self.iterations[2]), "TV_PRAGMA_UNROLL"):
-                    with code.range_("row", str(self.iterations[3]), "TV_PRAGMA_UNROLL"):
+            with code.range_("cluster", str(self.iterations[1]),
+                             "TV_PRAGMA_UNROLL"):
+                with code.range_("group", str(self.iterations[2]),
+                                 "TV_PRAGMA_UNROLL"):
+                    with code.range_("row", str(self.iterations[3]),
+                                     "TV_PRAGMA_UNROLL"):
                         code.raw(f"""
                         int idx = (row +  {self.iterations[3]} * (group +  {self.iterations[2]} * cluster));
 
@@ -487,16 +517,19 @@ class OutIterator(GemmOutputIterator):
             """)
 
         code.arg("params", "Params const&")
-        code.arg("ptr", f"{self.const_pointer if self.read_only else self.pointer}")
+        code.arg("ptr",
+                 f"{self.const_pointer if self.read_only else self.pointer}")
         code.arg("extent, offset_2d", "tv::array<int, 2>")
         code.arg("thread_idx", "int")
         code.ctor_init("params_", "params")
         return code
 
-    def python_ctor(self, params: OutIteratorParams, ptr: ArrayPtr, extent: MetaArray[int], offset_2d: MetaArray[int],
+    def python_ctor(self, params: OutIteratorParams, ptr: ArrayPtr,
+                    extent: MetaArray[int], offset_2d: MetaArray[int],
                     thread_idx: int) -> "OutIterator":
-        new_obj = OutIterator(self.dtype, self.tmap, self.params, self.part_shape,
-                              self.part_dilation, self.element_per_acc, self.read_only,
+        new_obj = OutIterator(self.dtype, self.tmap, self.params,
+                              self.part_shape, self.part_dilation,
+                              self.element_per_acc, self.read_only,
                               self.shuffle_in_stride)
         new_obj.extent_row_ = extent[0]
         new_obj.counts_[0] = 0
@@ -511,7 +544,8 @@ class OutIterator(GemmOutputIterator):
             new_obj.column_masks_[c] = (
                 (thread_offset[1] + new_obj.delta[4] * c) < extent[1])
         # print(cudasim.threadIdx().x, increment_params, advance_params, thread_offset[0], thread_offset[1], (thread_offset[0]) * stride + thread_offset[1])
-        new_obj.pointer_ = ptr + (thread_offset[0]) * params.stride + thread_offset[1]
+        new_obj.pointer_ = ptr + (
+            thread_offset[0]) * params.stride + thread_offset[1]
         return new_obj
 
     def load_store_with_offset_template(self, store: bool):
@@ -519,15 +553,18 @@ class OutIterator(GemmOutputIterator):
         const_frag = "const" if store else ""
         const_mem = "" if store else "const"
 
-        code.arg("frag",
-                 f"{self.fragment_t} {const_frag} &").arg("offset", str(self.index_t))
+        code.arg("frag", f"{self.fragment_t} {const_frag} &").arg(
+            "offset", str(self.index_t))
         code.raw(f"""
         auto cur_pointer = pointer_;
         {self.access_t} {const_frag} *frag_ptr = reinterpret_cast<{self.access_t} {const_frag} *>(&frag);
         """)
-        with code.range_("cluster", str(self.iterations[1]), "TV_PRAGMA_UNROLL"):
-            with code.range_("group", str(self.iterations[2]), "TV_PRAGMA_UNROLL"):
-                with code.range_("row", str(self.iterations[3]), "TV_PRAGMA_UNROLL"):
+        with code.range_("cluster", str(self.iterations[1]),
+                         "TV_PRAGMA_UNROLL"):
+            with code.range_("group", str(self.iterations[2]),
+                             "TV_PRAGMA_UNROLL"):
+                with code.range_("row", str(self.iterations[3]),
+                                 "TV_PRAGMA_UNROLL"):
                     code.raw(f"""
                     int frag_row_idx =
                         (row +  {self.iterations[3]} * (group +  {self.iterations[2]} * cluster));
@@ -547,8 +584,11 @@ class OutIterator(GemmOutputIterator):
                         {self.access_t} {const_mem} *memory_pointer =
                             reinterpret_cast<{self.access_t} {const_mem} *>(cur_pointer + offset);
                         """)
-                    with code.range_("column", str(self.iterations[4]), "TV_PRAGMA_UNROLL"):
-                        code.raw(f"bool guard = row_guard && column_masks_[column];")
+                    with code.range_("column", str(self.iterations[4]),
+                                     "TV_PRAGMA_UNROLL"):
+                        code.raw(
+                            f"bool guard = row_guard && column_masks_[column];"
+                        )
                         if store:
                             code.raw(f"""
                             tv::gemm::global_store<{self.access_t}, sizeof({self.access_t})>(
@@ -583,7 +623,6 @@ class OutIterator(GemmOutputIterator):
                 """)
         return code
 
-
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store_with_offset(self):
         code = pccm.FunctionCode()
@@ -593,19 +632,18 @@ class OutIterator(GemmOutputIterator):
             return code
         return self.load_store_with_offset_template(True)
 
-
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_offset(self):
         code = pccm.FunctionCode()
-        code.arg("frag",
-                 f"{self.fragment_t} &").arg("offset", str(self.index_t))
+        code.arg("frag", f"{self.fragment_t} &").arg("offset",
+                                                     str(self.index_t))
         return self.load_store_with_offset_template(False)
 
-
     # @lineprof_wrapper_cpp
-    def loadstore_with_offset_python(self, frag: ArrayPtr, offset: int, store: bool):
+    def loadstore_with_offset_python(self, frag: ArrayPtr, offset: int,
+                                     store: bool):
         frag_ptr = frag.change_access_size(self.element_per_acc)
-        cur_pointer = self.pointer_.shadow_copy() # type: ArrayPtr
+        cur_pointer = self.pointer_.shadow_copy()  # type: ArrayPtr
         # print(cudasim.threadIdx().x, cur_pointer)
         for cluster in range(self.iterations[1]):
             for group in range(self.iterations[2]):
@@ -624,13 +662,16 @@ class OutIterator(GemmOutputIterator):
                         guard = row_guard and self.column_masks_[column]
                         if guard:
                             if store:
-                                memory_pointer[column * self.delta[4] //
-                                            self.element_per_acc] = frag_ptr[
-                                                frag_row_idx *
-                                                self.iterations[4] + column]
+                                memory_pointer[
+                                    column * self.delta[4] //
+                                    self.element_per_acc] = frag_ptr[
+                                        frag_row_idx * self.iterations[4] +
+                                        column]
                             else:
-                                frag_ptr[frag_row_idx * self.iterations[4] + column] = memory_pointer[column * self.delta[4] //
-                                            self.element_per_acc]
+                                frag_ptr[frag_row_idx * self.iterations[4] +
+                                         column] = memory_pointer[
+                                             column * self.delta[4] //
+                                             self.element_per_acc]
                     if (row + 1 < self.iterations[3]):
                         cur_pointer += self.params_.increment_row
 
@@ -661,7 +702,6 @@ class OutIterator(GemmOutputIterator):
         """)
         code.arg("frag", f"{self.fragment_t} &")
         return code
-
 
     @pccm.cuda.member_function(name="operator++",
                                device=True,
@@ -701,9 +741,12 @@ class OutIterator(GemmOutputIterator):
         """)
         if self.shuffle_in_stride:
             # update indices
-            with code.range_("cluster", str(self.iterations[1]), "TV_PRAGMA_UNROLL"):
-                with code.range_("group", str(self.iterations[2]), "TV_PRAGMA_UNROLL"):
-                    with code.range_("row", str(self.iterations[3]), "TV_PRAGMA_UNROLL"):
+            with code.range_("cluster", str(self.iterations[1]),
+                             "TV_PRAGMA_UNROLL"):
+                with code.range_("group", str(self.iterations[2]),
+                                 "TV_PRAGMA_UNROLL"):
+                    with code.range_("row", str(self.iterations[3]),
+                                     "TV_PRAGMA_UNROLL"):
                         code.raw(f"""
                         int idx =
                             (row +  {self.iterations[3]} * (group +  {self.iterations[2]} * cluster));
@@ -753,7 +796,8 @@ class OutIterator(GemmOutputIterator):
 class OutFragIter(GemmOutFragIterator):
     def __init__(self, dtype: dtypes.DType, element_per_acc: int,
                  num_iteration: int):
-        super().__init__(dtype, element_per_acc * num_iteration, element_per_acc)
+        super().__init__(dtype, element_per_acc * num_iteration,
+                         element_per_acc)
         self.add_dependency(TensorView, GemmBasicKernel)
 
         self.num_iteration = num_iteration
@@ -812,4 +856,4 @@ class OutFragIter(GemmOutFragIterator):
 
     def increment_python(self):
         self.index_ += 1
-        return self 
+        return self

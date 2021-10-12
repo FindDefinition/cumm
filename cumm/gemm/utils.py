@@ -1,6 +1,7 @@
-from cumm.gemm.core.metaarray import MetaArray
 import pccm
+
 from cumm.common import TensorView
+from cumm.gemm.core.metaarray import MetaArray
 
 
 class GemmUtils(pccm.ParameterizedClass):

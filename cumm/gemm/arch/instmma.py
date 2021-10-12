@@ -1,28 +1,31 @@
-import pccm
-import numpy as np
-
 from typing import List, Tuple
-from cumm.gemm import constants, core
-from cumm.common import TensorView, GemmBasic
+
+import numpy as np
+import pccm
+
+from cumm import cudasim, dtypes
+from cumm.common import GemmBasic, TensorView
 from cumm.core_cc.csrc.arrayref import ArrayPtr
-from cumm import cudasim 
-from cumm import dtypes
+from cumm.gemm import constants, core
+
 
 class InstMma(pccm.ParameterizedClass):
-    def __init__(self, shape: Tuple[int, int, int], num_threads: int, dtype_a: dtypes.DType, dtype_b: dtypes.DType,
-                 dtype_c: dtypes.DType, trans_a: bool, trans_b: bool, trans_c: bool):
+    def __init__(self, shape: Tuple[int, int, int], num_threads: int,
+                 dtype_a: dtypes.DType, dtype_b: dtypes.DType,
+                 dtype_c: dtypes.DType, trans_a: bool, trans_b: bool,
+                 trans_c: bool):
         # TODO merge mma sync
-        super().__init__() 
-        self.shape = (shape[0], shape[1], shape[2]) 
-        self.shape = shape 
-        self.num_threads = num_threads 
+        super().__init__()
+        self.shape = (shape[0], shape[1], shape[2])
+        self.shape = shape
+        self.num_threads = num_threads
         if num_threads == 8:
             assert shape[0] == 8 and shape[1] == 8 and shape[2] == 4
-        self.dtype_a = dtype_a 
-        self.dtype_b = dtype_b 
-        self.dtype_c = dtype_c 
-        self.trans_a = trans_a 
-        self.trans_b = trans_b 
+        self.dtype_a = dtype_a
+        self.dtype_b = dtype_b
+        self.dtype_c = dtype_c
+        self.trans_a = trans_a
+        self.trans_b = trans_b
         self.trans_c = trans_c
         self.mn = shape[0] * shape[1]
         self.km = shape[2] * shape[0]
@@ -36,11 +39,12 @@ class InstMma(pccm.ParameterizedClass):
         self.fragment_b_t = core.array_type(str(dtype_b), element_count_b)
         self.fragment_c_t = core.array_type(str(dtype_c), element_count_c)
 
-
     def python_ctor(self):
-        return self 
+        return self
 
-    @pccm.cuda.member_function(name="operator()", device=True, forceinline=True)
+    @pccm.cuda.member_function(name="operator()",
+                               device=True,
+                               forceinline=True)
     def call_operator(self):
         code = pccm.FunctionCode()
         code.arg("d", f"{self.fragment_c_t}&")
@@ -176,29 +180,33 @@ class InstMma(pccm.ParameterizedClass):
             raise NotImplementedError
         return code
 
-     
     def __call__(self, d: ArrayPtr, a: ArrayPtr, b: ArrayPtr, c: ArrayPtr):
         if self.shape == (1, 1, 1):
             dabc = (self.dtype_a, self.dtype_b, self.dtype_c)
             if dabc == (dtypes.float16, dtypes.float16, dtypes.float32):
-                d.data.numpy_view()[0] = float(a.data.numpy_view()[0]) * float(b.data.numpy_view()[0]) + c.data.numpy_view()[0]
+                d.data.numpy_view()[0] = float(a.data.numpy_view()[0]) * float(
+                    b.data.numpy_view()[0]) + c.data.numpy_view()[0]
             else:
-                d.data.numpy_view()[0] = a.data.numpy_view()[0] * b.data.numpy_view()[0] + c.data.numpy_view()[0]
+                d.data.numpy_view()[0] = a.data.numpy_view(
+                )[0] * b.data.numpy_view()[0] + c.data.numpy_view()[0]
         elif self.shape == (1, 1, 4) or self.shape == (1, 1, 2):
             d.data.numpy_view()[0] = c.data.numpy_view()[0]
             for k in range(self.shape[2]):
-                d.data.numpy_view()[0] += a.data.numpy_view()[k] * b.data.numpy_view()[k]
+                d.data.numpy_view(
+                )[0] += a.data.numpy_view()[k] * b.data.numpy_view()[k]
         elif self.shape == (2, 1, 1):
             for i in range(2):
-                d.data.numpy_view()[i] = a.data.numpy_view()[i] * b.data.numpy_view()[0] + c.data.numpy_view()[i]
+                d.data.numpy_view()[i] = a.data.numpy_view(
+                )[i] * b.data.numpy_view()[0] + c.data.numpy_view()[i]
         elif self.shape == (1, 2, 1):
             for i in range(2):
-                d.data.numpy_view()[i] = a.data.numpy_view()[0] * b.data.numpy_view()[i] + c.data.numpy_view()[i]
+                d.data.numpy_view()[i] = a.data.numpy_view(
+                )[0] * b.data.numpy_view()[i] + c.data.numpy_view()[i]
         elif self.shape == (2, 2, 1):
             for j in range(2):
                 for i in range(2):
-                    d.data.numpy_view()[i + 2 * j] = a.data.numpy_view()[i] * b.data.numpy_view()[j] + c.data.numpy_view()[i + 2 * j]
+                    d.data.numpy_view()[i + 2 * j] = a.data.numpy_view(
+                    )[i] * b.data.numpy_view()[j] + c.data.numpy_view()[i +
+                                                                        2 * j]
         else:
             raise NotImplementedError
-
-

@@ -1,17 +1,18 @@
-import pccm
-import numpy as np
-from cumm import tensorview as tv 
 from typing import List, Tuple
-from cumm import cudasim 
-from cumm.gemm import constants
-from cumm.common import TensorView, GemmBasic
-from cumm import dtypes
-from cumm.gemm.core import metaseq, seq, MetaArray
 
+import numpy as np
+import pccm
+
+from cumm import cudasim, dtypes
+from cumm import tensorview as tv
+from cumm.common import GemmBasic, TensorView
+from cumm.gemm import constants
+from cumm.gemm.core import MetaArray, metaseq, seq
 
 
 def to_stride(shape: np.ndarray):
     return np.cumprod(shape[::-1])[::-1]
+
 
 def rowmajor_inverse(index: int, shape: np.ndarray) -> np.ndarray:
     res = np.zeros_like(shape)
@@ -21,7 +22,8 @@ def rowmajor_inverse(index: int, shape: np.ndarray) -> np.ndarray:
         if i > 0:
             index -= res[i]
             index /= shape[i]
-    return res 
+    return res
+
 
 class VoltaTensorOpCrosswise(pccm.ParameterizedClass):
     def __init__(self, element_size: int, kblock: int = 32):
@@ -233,11 +235,14 @@ class VoltaTensorOpCongruous(pccm.ParameterizedClass):
         vec_strided_idx = x
 
         #  Compute the fundamental tile being accessed
-        tile_contiguous_idx = vec_contiguous_idx // self.tile_shape[1] # type: int
-        tile_strided_idx = vec_strided_idx // self.tile_shape[0] # type: int
+        tile_contiguous_idx = vec_contiguous_idx // self.tile_shape[
+            1]  # type: int
+        tile_strided_idx = vec_strided_idx // self.tile_shape[0]  # type: int
 
-        tile_contiguous_residual = vec_contiguous_idx % self.tile_shape[1]# type: int
-        tile_strided_residual = vec_strided_idx % self.tile_shape[0] # type: int
+        tile_contiguous_residual = vec_contiguous_idx % self.tile_shape[
+            1]  # type: int
+        tile_strided_residual = vec_strided_idx % self.tile_shape[
+            0]  # type: int
 
         if self.operand_a:
             permuted_strided_within_tile = (tile_contiguous_residual >> 1)
@@ -265,11 +270,12 @@ class VoltaTensorOpCongruous(pccm.ParameterizedClass):
         # coord.contiguous())
         return res
 
+
 def count_set_bits(n):
     count = 0
     while (n):
-        n &= (n-1)
-        count+= 1
+        n &= (n - 1)
+        count += 1
     return count
 
 
@@ -290,7 +296,9 @@ def swizzle_increment(index: int, width: int):
     else:
         raise NotImplementedError
 
-def swizzle_increment_code(code: pccm.FunctionCode, offset_var: str, index_var: str, width: int):
+
+def swizzle_increment_code(code: pccm.FunctionCode, offset_var: str,
+                           index_var: str, width: int):
     assert count_set_bits(width) == 1, "width must be power of 2"
     with code.if_(f"{index_var} & 0b1 == 0"):
         code.raw(f"{offset_var} ^= 1 * {width};")
@@ -300,7 +308,6 @@ def swizzle_increment_code(code: pccm.FunctionCode, offset_var: str, index_var: 
         code.raw(f"{offset_var} ^= 0b111 * {width};")
     with code.else_if_(f"{index_var} == 0b111"):
         code.raw(f"{offset_var} ^= 0b1111 * {width};")
-    
 
 
 class TensorOpMultiplicand(pccm.ParameterizedClass):
@@ -349,10 +356,12 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
             self.tile_shape = metaseq(4, 8)
             self.part_shape = metaseq(4, 8)
 
-        self.part_count = self.tile_shape // self.part_shape 
+        self.part_count = self.tile_shape // self.part_shape
         # self.access_count = self.part_shape  # TODO
-        self.access_tensor_contig = metaseq(1, self.part_count[1], self.part_shape[1])
-        self.access_tensor_strided = metaseq(1, self.part_count[0], self.part_shape[0])
+        self.access_tensor_contig = metaseq(1, self.part_count[1],
+                                            self.part_shape[1])
+        self.access_tensor_strided = metaseq(1, self.part_count[0],
+                                             self.part_shape[0])
         # self.access_stride_contig = to_stride(self.access_tensor_contig)
         # self.access_stride_strided = to_stride(self.access_tensor_strided)
 
@@ -364,10 +373,8 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
         self.stride = 0
 
     def __repr__(self):
-        return (
-            f"TensorOpMultiplicand[ts={self.tile_shape}|"
-            f"ps={self.part_shape}|f={self.factor}|c={self.crosswise}]"
-        )
+        return (f"TensorOpMultiplicand[ts={self.tile_shape}|"
+                f"ps={self.part_shape}|f={self.factor}|c={self.crosswise}]")
 
     @pccm.cuda.constructor(host=True,
                            device=True,
@@ -388,7 +395,6 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
         l = TensorOpMultiplicand(self.element_size, self.crosswise)
         l.stride = shape[0]
         return l
-
 
     @pccm.cuda.static_function(host=True,
                                device=True,
@@ -473,29 +479,35 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
             c = (y % 32) // self.element_per_acc
             s = x % 4
             offset = ((c ^ (2 * s)) * self.element_per_acc + s * self.stride +
-                            tc * 32 + ts * self.stride * 4 + y % 4)
+                      tc * 32 + ts * self.stride * 4 + y % 4)
             return offset
         else:
             vec_contiguous_idx = y // self.element_per_acc
             # factor: interleave stride with factor to contiguous.
-            # for example, if factor == 4, for x=0,1,2,3, tile is put in contiguous. 
+            # for example, if factor == 4, for x=0,1,2,3, tile is put in contiguous.
             vec_strided_idx = x // self.factor
             # Compute the fundamental tile being accessed
             # equivalent to tile_contiguous_idx = vec_contiguous_idx // crosswise_size
-            tile_contiguous_idx = vec_contiguous_idx // (self.tile_shape[1] // self.factor)
+            tile_contiguous_idx = vec_contiguous_idx // (self.tile_shape[1] //
+                                                         self.factor)
 
-            tile_contiguous_residual = vec_contiguous_idx % (self.tile_shape[1] // self.factor)
+            tile_contiguous_residual = vec_contiguous_idx % (
+                self.tile_shape[1] // self.factor)
             # if x % factor != 0, tile_contiguous_residual move to right location.
-            tile_contiguous_residual += (x % self.factor) * (self.tile_shape[1] // self.factor)
+            tile_contiguous_residual += (x % self.factor) * (
+                self.tile_shape[1] // self.factor)
 
             tile_strided_residual = vec_strided_idx % self.tile_shape[0]
 
             # Compute the 'partition' within the fundamental tile
-            partition_contiguous_idx = tile_contiguous_residual // self.part_shape[1]
+            partition_contiguous_idx = tile_contiguous_residual // self.part_shape[
+                1]
             partition_strided_idx = tile_strided_residual // self.part_shape[0]
 
-            partition_contiguous_residual = tile_contiguous_residual % self.part_shape[1]
-            partition_strided_residual = tile_strided_residual % self.part_shape[0]
+            partition_contiguous_residual = tile_contiguous_residual % self.part_shape[
+                1]
+            partition_strided_residual = tile_strided_residual % self.part_shape[
+                0]
 
             # Then swizzle
             # indexes_contig = rowmajor_inverse(vec_contiguous_idx, self.access_tensor_contig)
@@ -505,24 +517,28 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
             #     print(indexes_strided, partition_strided_idx, partition_strided_residual, "FACTOR", self.factor)
 
             permuted_vec_contiguous_within_partition = (
-                partition_contiguous_residual ^ (partition_strided_residual % 4))
+                partition_contiguous_residual ^
+                (partition_strided_residual % 4))
             permuted_partition_contiguous_within_tile = (
                 partition_contiguous_idx ^ (partition_strided_idx % 2))
             # permuted_partition_contiguous_within_tile = partition_contiguous_idx
 
             # Compute final element location
-            element_contiguous = ((tile_contiguous_idx * self.tile_shape[1] +
-                                    permuted_partition_contiguous_within_tile *
-                                        self.part_shape[1] +
-                                    permuted_vec_contiguous_within_partition) *
-                                        self.element_per_acc +
-                                    (y % self.element_per_acc))
+            element_contiguous = (
+                (tile_contiguous_idx * self.tile_shape[1] +
+                 permuted_partition_contiguous_within_tile * self.part_shape[1]
+                 + permuted_vec_contiguous_within_partition) *
+                self.element_per_acc + (y % self.element_per_acc))
 
             element_strided = vec_strided_idx
 
             return element_contiguous + element_strided * self.factor * self.stride
 
-    def get_ldm_initial_offset_ref(self, lane_idx: int, ldm_count: MetaArray[int], transpose: bool = False, contig_offset: int = 0):
+    def get_ldm_initial_offset_ref(self,
+                                   lane_idx: int,
+                                   ldm_count: MetaArray[int],
+                                   transpose: bool = False,
+                                   contig_offset: int = 0):
         """ transpose (not operend A)
         if not transpose:
             Q0 Q1
@@ -540,21 +556,21 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
         elif ldm_count[1] == 1:
             # Q0
             # Q1
-            # Q2 
+            # Q2
             # Q3
             # stride: lane_id
             # contig: 0
             stride = lane_idx
             contig_vec = 0
         elif ldm_count == (2, 2):
-            if transpose: # operand B
+            if transpose:  # operand B
                 # Q0 Q1
                 # Q2 Q3
                 # stride: 01234567 01234567 89ABCDEF 89ABCDEF
                 # contig: 00000000 11111111 00000000 11111111
                 stride = lane_idx & 0b111 + ((lane_idx >> 4) << 3)
                 contig_vec = (lane_idx >> 4) & 1
-            else: # operand A
+            else:  # operand A
                 # Q0 Q2
                 # Q1 Q3
                 # stride: 01234567 89ABCDEF 01234567 89ABCDEF
@@ -563,7 +579,7 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
                 contig_vec = lane_idx >> 4
         else:
             raise NotImplementedError
-        return self(stride, contig_vec * self.element_per_acc + contig_offset) 
+        return self(stride, contig_vec * self.element_per_acc + contig_offset)
 
 
 class TensorOpMultiplicandColumnMajorInterleaved(pccm.ParameterizedClass):
@@ -590,17 +606,18 @@ class TensorOpMultiplicandColumnMajorInterleaved(pccm.ParameterizedClass):
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
-        
+
     def python_ctor(self, stride):
-        new_obj = TensorOpMultiplicandColumnMajorInterleaved(self.element_size, self.interleave)
+        new_obj = TensorOpMultiplicandColumnMajorInterleaved(
+            self.element_size, self.interleave)
         new_obj.stride = stride
         return new_obj
 
     def from_shape_python(self, shape):
-        l = TensorOpMultiplicandColumnMajorInterleaved(self.element_size, self.interleave)
+        l = TensorOpMultiplicandColumnMajorInterleaved(self.element_size,
+                                                       self.interleave)
         l.stride = shape[0] * self.interleave
         return l
-
 
     @pccm.cuda.static_function(host=True,
                                device=True,
@@ -684,6 +701,7 @@ class TensorOpMultiplicandRowMajorInterleaved(pccm.ParameterizedClass):
         """)
         code.arg("x,y", self.index_t)
         return code.ret(self.long_index_t)
+
 
 if __name__ == "__main__":
     l = TensorOpMultiplicand(16, 32).from_shape_python([32, 128])
