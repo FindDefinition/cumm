@@ -3,7 +3,7 @@ from typing import List
 
 import numpy as np
 import pccm
-
+from cumm import cudasim
 from cumm import dtypes
 from cumm.common import TensorView
 from cumm.gemm import constants
@@ -347,8 +347,9 @@ class Out5DLinear(pccm.ParameterizedClass):
                                   warp_part[1])
         self.iterations = metaseq(1, iterations[0], iterations[1], iters2d[0],
                                   iters2d[1])
-        print(self.remain, warp_count, self.warp_parts, part_shape, iterations,
-              self.iterations, iters2d, acc_shape)
+        if cudasim.enable_debug():
+            print(self.remain, warp_count, self.warp_parts, part_shape, iterations,
+                self.iterations, iters2d, acc_shape)
 
         self.delta = metaseq(1, delta[0], delta[1], delta2d[0], delta2d[1])
         self.acc_shape_2d = acc_shape

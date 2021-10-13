@@ -1,7 +1,9 @@
 from typing import List, Optional
 import os 
 import pccm
+from pccm.utils import project_is_editable, project_is_installed
 
+from .constants import PACKAGE_NAME
 from cumm.common import PyBind11, TensorView, TensorViewCPU
 from cumm.constants import PACKAGE_ROOT
 
@@ -14,7 +16,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
         cumm_cuda_ver = os.getenv("CUMM_CUDA_VERSION", "")
-        if cumm_cuda_ver:
+        if cumm_cuda_ver and project_is_installed(PACKAGE_NAME) and project_is_editable(PACKAGE_NAME):
             self.add_dependency(TensorView, PyBind11)
         else:
             self.add_dependency(TensorViewCPU, PyBind11)

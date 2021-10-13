@@ -132,8 +132,6 @@ class GemmParams(pccm.ParameterizedClass):
         gemm_k_iterations = mask_iters.div_up(total_gemm_k_iterations,
                                               new_obj.grid_dims.z)
         new_obj.gemm_k_size = gemm_k_iterations * new_obj.tile_shape[2]
-        print("gemm_k_iterations", k, new_obj.tile_shape[2],
-              new_obj.grid_dims.z, gemm_k_iterations, new_obj.gemm_k_size)
 
         new_obj.ptr_A = A
         new_obj.ptr_B = B
@@ -367,8 +365,9 @@ class GemmKernel(pccm.ParameterizedClass):
         # self.frag_per_iter = self.output_spec.frag_per_iter
         # self.out_num_tile = self.output_spec.frag_per_iter if self.output_spec.frag_per_iter > 1 else self.partk
         # self.out_tile_size = self.out_smem_storage.smem_size // dtype_acc.itemsize() // self.out_num_tile
-        print(self.out_smem_storage.smem_size,
-              self.gemm_smem_storage.smem_size)
+        if cudasim.enable_debug():
+            print(self.out_smem_storage.smem_size,
+                self.gemm_smem_storage.smem_size)
         self.smem_size = max(self.out_smem_storage.smem_size,
                              self.gemm_smem_storage.smem_size)
         self.add_param_class("gemm_smem_storage", self.gemm_smem_storage,
@@ -821,10 +820,6 @@ class GemmKernel(pccm.ParameterizedClass):
             thread_idx,
             tb_offset_B,
             is_left=False)
-        if cudasim.threadIdx().x == 0:
-            print(cudasim.blockIdx(), gemm_k_iterations, block_offset_A,
-                  block_offset_B)
-            print(extent_A, tb_offset_A, extent_B, tb_offset_B)
 
         warp_idx = cudasim.get_warp_id()
         lane_idx = thread_idx % 32

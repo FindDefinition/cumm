@@ -330,8 +330,6 @@ class OutSmemLoader(GemmOutSmemLoader):
 
     def add_pointer_offset_python(self, pointer_offset: int):
         self.pointer_ += pointer_offset
-        if self.pointer_.length < 0:
-            print(cudasim.threadIdx().x, self.pointer_)
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_pointer_offset(self):
