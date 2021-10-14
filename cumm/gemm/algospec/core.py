@@ -1,6 +1,5 @@
 import enum
-from typing import Tuple
-
+from typing import Dict, Tuple, List
 from cumm.gemm.core import MetaArray, metaseq, seq
 
 
@@ -12,6 +11,33 @@ class GemmAlgo(enum.Enum):
     Turing = "Turing"
     Ampere = "Ampere"
 
+_GEMM_MIN_ARCH_TO_ALGO : List[Tuple[Tuple[int, int], List[str]]] = [
+    ((5, 2), [GemmAlgo.Simt.value]),
+    ((6, 1), [GemmAlgo.SimtDP4A.value, GemmAlgo.SimtDP2A.value]),
+    ((7, 0), [GemmAlgo.Volta.value]),
+    ((7, 5), [GemmAlgo.Turing.value]),
+    ((8, 0), [GemmAlgo.Ampere.value]),
+]
+
+_GEMM_ALGO_TO_MIN_ARCH: Dict[str, Tuple[int, int]] = {}
+
+for min_arch, algos in _GEMM_MIN_ARCH_TO_ALGO:
+    for algo in algos:
+        _GEMM_ALGO_TO_MIN_ARCH[algo] = min_arch
+
+def get_min_arch_of_algo(algo: GemmAlgo):
+    return _GEMM_ALGO_TO_MIN_ARCH[algo.value]
+
+def get_min_arch_of_algo_str(algo_str: str):
+    return _GEMM_ALGO_TO_MIN_ARCH[algo_str]
+
+def get_available_algo_str_from_arch(arch: Tuple[int, int]):
+    res: List[str] = []
+    for i in range(len(_GEMM_MIN_ARCH_TO_ALGO) - 1, -1, -1):
+        arch_cur, algos = _GEMM_MIN_ARCH_TO_ALGO[i]
+        if arch >= arch_cur:
+            res.extend(algos)
+    return res
 
 class ShuffleStrideType(enum.Enum):
     NoShuffle = "NS"

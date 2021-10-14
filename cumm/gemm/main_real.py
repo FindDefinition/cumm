@@ -154,6 +154,8 @@ def _asdv_test_simt_shuffle():
         c_inds = np.arange(m, dtype=np.int32)
         np.random.shuffle(a_inds)
         np.random.shuffle(c_inds)
+        # a_inds = a_inds[:m // 2]
+        # c_inds = c_inds[:m // 2]
 
         if params.dtype_a == dtypes.int8:
             a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
@@ -161,7 +163,7 @@ def _asdv_test_simt_shuffle():
                 b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
                 c_tmp = (a[a_inds].astype(np.float32) @ b.astype(
                     np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
-                c = np.zeros_like(c_tmp)
+                c = np.zeros((m, n), dtype=a.dtype)
                 c[c_inds] = c_tmp
             else:
                 b = np.random.randint(-2, 2, size=[m, n]).astype(np.int8)
@@ -176,7 +178,7 @@ def _asdv_test_simt_shuffle():
                     dtypes.get_npdtype(params.dtype_b))
                 c_tmp = (a[a_inds].astype(np.float32) @ b.astype(
                     np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
-                c = np.zeros_like(c_tmp)
+                c = np.zeros((m, n), dtype=a.dtype)
                 c[c_inds] = c_tmp
             else:
                 b = np.random.uniform(-1, 1, size=[m, n]).astype(
@@ -215,7 +217,7 @@ def _asdv_test_simt_shuffle():
         params_cpp.a = a_tv
         params_cpp.b = b_tv
         params_cpp.c = c_tv
-
+        params_cpp.beta = 0.0
         for i in range(3):
             # gather_lib.gather(a_gout_tv, a_tv, a_inds_tv)
             # a_gout_tv_cpu = a_gout_tv.cpu().numpy()
@@ -225,20 +227,20 @@ def _asdv_test_simt_shuffle():
             if params.shuffle_stride == ShuffleStrideType.ShuffleAB:
                 params_cpp.a_inds = a_inds_tv
                 params_cpp.b_inds = c_inds_tv
-                c_tv.zero_()
+                # c_tv.zero_()
                 lib_object.matmul2(params_cpp)
             else:
-                c_tv.zero_()
+                # c_tv.zero_()
                 params_cpp.a_inds = a_inds_tv
                 params_cpp.c_inds = c_inds_tv
                 lib_object.matmul2(params_cpp)
-        assert params.get_algo_name() == ker.get_algo_name()
-        # print(a_tv.shape, b_tv.shape, c_tv.shape)
-        c_cpu = c_tv.cpu().numpy()
-        # cu_prof_stop()
+            assert params.get_algo_name() == ker.get_algo_name()
+            # print(a_tv.shape, b_tv.shape, c_tv.shape)
+            c_cpu = c_tv.cpu().numpy()
+            # cu_prof_stop()
 
-        print(params.dtype_c, params.get_algo_name(),
-              np.linalg.norm(c_cpu - c))
+            print(params.dtype_c, params.get_algo_name(),
+                np.linalg.norm(c_cpu - c))
 
 
 COUNTBIT_LOOKUP_TABLE = np.array([bin(i).count('1')

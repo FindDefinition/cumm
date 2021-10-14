@@ -180,6 +180,56 @@ template <typename T> constexpr const char *dtype_str(T t) {
     return TV_UNKNOWN_DTYPE_STRING;
   }
 }
+template <typename T> constexpr const char *dtype_short_str(T t) {
+  switch (t) {
+  case DType::bool_:
+    return "b1";
+  case DType::float32:
+    return "f32";
+  case DType::int8:
+    return "s8";
+  case DType::int16:
+    return "s16";
+  case DType::int32:
+    return "s32";
+  case DType::float64:
+    return "f64";
+  case DType::int64:
+    return "s64";
+  case DType::uint8:
+    return "u8";
+  case DType::uint16:
+    return "u16";
+  case DType::uint32:
+    return "u32";
+  case DType::uint64:
+    return "u64";
+  case DType::float16:
+    return "f16";
+  case DType::custom16:
+    return "x16";
+  case DType::custom32:
+    return "x32";
+  case DType::custom48:
+    return "x48";
+  case DType::custom64:
+    return "x64";
+  case DType::custom80:
+    return "x80";
+  case DType::custom96:
+    return "x96";
+  case DType::custom128:
+    return "x128";
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+  case DType::tf32:
+    return "tf32";
+  case DType::bfloat16:
+    return "bf16";
+#endif
+  default:
+    return TV_UNKNOWN_DTYPE_STRING;
+  }
+}
 
 // we can define template specs to extend detail::TypeToString.
 template <typename T>

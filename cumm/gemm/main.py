@@ -206,7 +206,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_dependency(TensorView)
         # why not std::optional?
         # c++17 requires cuda11. to support cuda 10.2, we can't use c++17 for now.
-        self.add_member("dtype_a,dtype_b,dtype_c", "int")  # -1 means unset
+        self.add_pybind_member("dtype_a,dtype_b,dtype_c", "int")  # -1 means unset
         self.add_member("trans_a_,trans_b_,trans_c_", "int")  # -1 means unset
         self.add_pybind_member("tile_shape,warp_tile_shape",
                                "std::array<int, 3>",
@@ -246,6 +246,29 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("split_k_parallel_", "0")
 
         return code
+
+    @pccm.pybind.mark
+    @pccm.member_function(name="__repr__")
+    def repr(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        check_valid();
+        std::stringstream ss;
+        ss << algo << "_" << tv::dtype_short_str(dtype_a) << tv::dtype_short_str(dtype_b)
+            << tv::dtype_short_str(dtype_c) << tv::dtype_short_str(dacc) << tv::dtype_short_str(dcomp);
+        ss << (trans_a() ? "n" : "t") << (trans_b() ? "n" : "t") << (trans_c() ? "n" : "t");
+        ss << "_m" << tile_shape[0] << "n" << tile_shape[1] << "k" << tile_shape[2];
+        ss << "m" << warp_tile_shape[0] << "n" << warp_tile_shape[1] << "k" << warp_tile_shape[2];
+        if (tensorop[0] != -1){{
+            ss << "T" << tensorop[0] << tensorop[1] << tensorop[2];
+        }}
+        if (shuffle_type != "{ShuffleStrideType.NoShuffle}"){{
+            ss << "_" << shuffle_type;
+        }}
+        ss << (split_k_serial() ? 1 : 0) << (split_k_parallel() ? 1 : 0);
+        return ss.str();
+        """)
+        return code.ret("std::string")
 
     @pccm.pybind.mark_prop_getter(prop_name="split_k_serial")
     @pccm.member_function
@@ -397,7 +420,8 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
                                "tv::Tensor",
                                "tv::Tensor()",
                                pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_member("alpha,beta", "float")
+        self.add_pybind_member("alpha,beta", "float")
+        self.add_pybind_member("stream", "std::uintptr_t", pyanno="int")
 
     @pccm.pybind.mark
     @pccm.constructor
@@ -413,6 +437,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("c_inds", "tv::Tensor()")
         code.ctor_init("alpha", "1.0")
         code.ctor_init("beta", "0.0")
+        code.ctor_init("stream", "0")
 
         return code
 
@@ -885,7 +910,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                                         yield dabc_kers[0]
 
     @pccm.pybind.mark
-    @pccm.cuda.static_function
+    @pccm.static_function
     def get_all_algo_desp(self):
         code = pccm.FunctionCode()
         code.raw(f"""
@@ -905,7 +930,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             desp.trans_b_set({pccm.boolean(ker.trans_b)});
             desp.trans_c_set({pccm.boolean(ker.trans_c)});
             desp.tile_shape = {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}};
-            desp.warp_tile_shape = {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}};
+            desp.warp_tile_shape = {{{ker.warp_tile_shape[0]}, {ker.warp_tile_shape[1]}, {ker.warp_tile_shape[2]}}};
             """)
             if ker.tensorop is not None:
                 code.raw(
@@ -927,6 +952,139 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         return desps;
         """)
         return code.ret("std::vector<GemmAlgoDesp>")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def extract_mnk(self):
+        code = pccm.FunctionCode()
+        code.arg("a,b,c", "tv::Tensor")
+        code.arg("trans_a,trans_b,trans_c", "bool")
+        code.arg("shuffle_type", "std::string", f"\"{ShuffleStrideType.NoShuffle.value}\"")
+
+        code.arg("a_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("b_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+        code.arg("c_inds", "tv::Tensor", "tv::Tensor()", pyanno="cumm.tensorview.Tensor = Tensor()")
+
+        # TODO spatial sparse conv (implicit gemm)
+        code.raw(f"""
+        if (trans_c) {{
+            trans_a = !trans_a;
+            trans_b = !trans_b;
+            std::swap(trans_a, trans_b);
+            std::swap(a, b);
+        }}
+        int m, n, k, k2;
+        if (shuffle_type == "{ShuffleStrideType.ShuffleAC.value}"){{
+            TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
+            TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "a_inds and c_inds must not empty");
+            m = a_inds.dim(0);
+            k = a.dim(int(!trans_a));
+            k2 = b.dim(int(trans_b));
+            n = b.dim(int(!trans_b) );
+        }}
+        else if (shuffle_type == "{ShuffleStrideType.ShuffleAB.value}"){{
+            TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "a_inds and c_inds must not empty");
+            TV_ASSERT_RT_ERR(trans_a && !trans_b, "shuffle AB must be nt, i.e. backward weight");
+            m = a.dim(int(trans_a));
+            k = a_inds.dim(0);
+            k2 = b_inds.dim(0);
+            n = b.dim(int(!trans_b) );
+        }}
+        else{{
+            m = a.dim(int(trans_a));
+            k = a.dim(int(!trans_a));
+            k2 = b.dim(int(trans_b));
+            n = b.dim(int(!trans_b) );
+        }}
+        return std::make_tuple(m, n, k);
+        """)
+        return code.ret("std::tuple<int, int, int>")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def align_to_power2(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "int")
+        code.raw(f"""
+        size_t r = 0;
+        size_t num_1_bit = val & 1 ? 1 : 0;
+        while (val >>= 1) {{
+            r++;
+            if (val & 1) {{
+                ++num_1_bit;
+            }}
+        }}
+        if (num_1_bit == 1) {{
+            return 1 << r;
+        }} else {{
+            return 1 << (r + 1);
+        }}
+        """)
+        return code.ret("int")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def simple_select_tile_shape(self):
+        code = pccm.FunctionCode()
+        code.arg("m,n,k", "int")
+        code.arg("tile_ms", "std::vector<int>")
+        code.arg("tile_ns", "std::vector<int>")
+        code.arg("tile_ks", "std::vector<int>")
+
+        code.arg("tile_shape_to_algos", "std::unordered_map<int64_t, std::vector<int>>")
+        code.arg("large_k_first", "bool")
+
+        code.raw(f"""
+        auto iter_m_target = std::lower_bound(tile_ms.begin(), tile_ms.end(), m);
+        auto iter_n_target = std::lower_bound(tile_ns.begin(), tile_ns.end(), n);
+        auto iter_k_target = std::lower_bound(tile_ks.begin(), tile_ks.end(), k);
+        if (iter_m_target == tile_ms.end()){{
+            iter_m_target = tile_ms.end() - 1;
+        }}
+        if (iter_n_target == tile_ns.end()){{
+            iter_n_target = tile_ns.end() - 1;
+        }}
+        if (iter_k_target == tile_ks.end()){{
+            iter_k_target = tile_ks.end() - 1;
+        }}
+        // tv::ssprint(*iter_m_target, *iter_n_target, *iter_k_target);
+        // try to find a valid configuration
+        if (large_k_first){{
+            for (auto iter_k = iter_k_target; iter_k != tile_ks.begin() - 1; --iter_k){{
+                for (auto iter_n = iter_n_target; iter_n != tile_ns.begin() - 1; --iter_n){{
+                    for (auto iter_m = iter_m_target; iter_m != tile_ms.begin() - 1; --iter_m){{
+                        int64_t tm = *iter_m;
+                        int64_t tn = *iter_n;
+                        int64_t tk = *iter_k;
+                        int64_t tile_key = tm | (tn << 20) | (tk << 40);
+                        auto target_iter = tile_shape_to_algos.find(tile_key);
+                        if (target_iter != tile_shape_to_algos.end()){{
+                            return target_iter->second;
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        else{{
+            for (auto iter_m = iter_m_target; iter_m != tile_ms.begin() - 1; --iter_m){{
+                for (auto iter_n = iter_n_target; iter_n != tile_ns.begin() - 1; --iter_n){{
+                    for (auto iter_k = iter_k_target; iter_k != tile_ks.begin() - 1; --iter_k){{
+                        int64_t tm = *iter_m;
+                        int64_t tn = *iter_n;
+                        int64_t tk = *iter_k;
+                        int64_t tile_key = tm | (tn << 20) | (tk << 40);
+                        auto target_iter = tile_shape_to_algos.find(tile_key);
+                        if (target_iter != tile_shape_to_algos.end()){{
+                            return target_iter->second;
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        return {{}};
+        """)
+        return code.ret("std::vector<int>")
+
 
     @pccm.pybind.mark
     @pccm.cuda.static_function(name="matmul2")
@@ -1097,7 +1255,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
 
                 code.raw(f"""
                 tv::cuda::Launch launcher(kernel_params.grid_dims, dim3({ker.num_threads}),
-                                            {ker.smem_size});
+                                            {ker.smem_size}, reinterpret_cast<cudaStream_t>(params.stream));
                 cudaError_t result;
                 if ({ker.smem_size} >= (48 << 10)) {{
                     result = cudaFuncSetAttribute({ker.get_algo_name()}::gemm_kernel,
@@ -1109,14 +1267,24 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                         cudaFuncAttributePreferredSharedMemoryCarveout, 100);
                     TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
                 }}
-                auto timer = tv::CudaContextTimer<>();
+                """)
+                if cudasim.enable_debug():
+                    code.raw(f"""
+                    auto timer = tv::CudaContextTimer<>();
+                    """)
+
+                code.raw(f"""
                 launcher({ker.get_algo_name()}::gemm_kernel, kernel_params);
                 cudaFuncAttributes attr;
                 checkCudaErrors(
                     cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::gemm_kernel));
-                tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
-                return;
+                
                 """)
+                if cudasim.enable_debug():
+                    code.raw(f"""
+                    tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
+                    """)
+                code.raw(f"return;")
         code.raw("""
         if (!found){
             TV_THROW_INVALID_ARG("Can't Found Algorithm for params:", algo_desp.tile_shape, algo_desp.warp_tile_shape, 

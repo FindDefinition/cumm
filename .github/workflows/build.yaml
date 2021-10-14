@@ -31,11 +31,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Install pep build
-        run: >-
-          python -m
-          pip install
-          build
-          --user
+        run: |
+          python -m pip install build --user
+          python -m pip install --upgrade pip twine wheel
+          python -m pip install pytest setuptools
 
       - name: Build a windows binary wheel
         env:
@@ -46,7 +45,7 @@ jobs:
           $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
           $Env:CUMM_CUDA_ARCH_LIST = "all"
           $Env:CUMM_DISABLE_JIT = "1"
-          pip install pccm pybind11 setuptools
+          pip install pccm pybind11
           python -m build --wheel --outdir dist/ .
         shell: powershell
 
@@ -74,22 +73,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install pep build
-        run: >-
-          python -m
-          pip install
-          build
-          --user
-
-      - name: Build a source tarball
-        env:
-          CUDA_VERSION: ${{ matrix.cuda-version }}
-        if: env.CUDA_VERSION == ''
-        run: >-
-          python -m
-          build
-          --sdist
-          --outdir dist/
-          .
+        run: |
+          python -m pip install build --user
+          python -m pip install --upgrade pip twine wheel
+          python -m pip install pytest setuptools
 
       - name: Build a cuda wheel
         env:
@@ -100,8 +87,6 @@ jobs:
         if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags')) && (env.CUDA_VERSION != '') ) || env.CUDA_VERSION == '114'
         run: |
           docker run --rm -e PLAT=$PLAT -e CUMM_CUDA_VERSION=${{ matrix.cuda-version }} -v `pwd`:/io $DOCKER_IMAGE bash -c "/io/tools/build-wheels.sh"
-          python -m pip install --upgrade pip twine wheel
-          python -m pip install pytest
           # python -m pip install myclang -f ./dist
           # pytest ./test
 

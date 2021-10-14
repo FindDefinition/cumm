@@ -428,19 +428,19 @@ class TensorGeneric(pccm.ParameterizedClass):
     """
     def __init__(self, ndim: int, fast_divmod: bool = False):
         super().__init__()
-        assert ndim > 1
         self.add_dependency(TensorView)
         self.fast_divmod = fast_divmod
         self.ndim = ndim
         self.index_t = str(dtypes.int32)
         self.long_index_t = str(dtypes.int64)
         # we only need contiguous stride here.
-        self.add_member("strides", f"tv::array<int, {ndim - 1}>")
-        if fast_divmod:
-            self.add_member("multipliers",
-                            f"tv::array<unsigned int, {ndim - 1}>")
-            self.add_member("shift_rights",
-                            f"tv::array<unsigned int, {ndim - 1}>")
+        if ndim > 1:
+            self.add_member("strides", f"tv::array<int, {ndim - 1}>")
+            if fast_divmod:
+                self.add_member("multipliers",
+                                f"tv::array<unsigned int, {ndim - 1}>")
+                self.add_member("shift_rights",
+                                f"tv::array<unsigned int, {ndim - 1}>")
 
         self.add_include("tensorview/math/fastmath.h")
 
@@ -448,6 +448,7 @@ class TensorGeneric(pccm.ParameterizedClass):
         self.strides = [0] * ndim
 
     def python_ctor(self, stride: List[int]):
+        assert self.ndim > 1
         new_obj = TensorGeneric(self.ndim)
         assert len(stride) == self.ndim - 1
         new_obj.strides = stride
@@ -469,8 +470,9 @@ class TensorGeneric(pccm.ParameterizedClass):
     @pccm.cuda.constructor(host=True, device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
-        code.arg("strides", f"tv::array<int, {self.ndim - 1}> const&")
-        code.ctor_init("strides", "strides")
+        if self.ndim > 1:
+            code.arg("strides", f"tv::array<int, {self.ndim - 1}> const&")
+            code.ctor_init("strides", "strides")
         if self.fast_divmod:
             for i in range(self.ndim - 1):
                 code.raw(f"""
@@ -482,15 +484,20 @@ class TensorGeneric(pccm.ParameterizedClass):
     def from_shape(self):
         code = pccm.FunctionCode()
         code.arg("shape", f"const tv::array<int, {self.ndim}> &")
-        code.raw(f"return {self.class_name}({{")
-        lines: List[str] = []
-        stmts: List[str] = []
-        for i in range(self.ndim - 1):
-            lines.append(f"shape[{i + 1}]")
-        for i in range(self.ndim - 1):
-            stmts.append("  " + " * ".join(lines[self.ndim - 2 - i:]))
-        code.raw(",\n".join(stmts[::-1]))
-        code.raw("});")
+        if self.ndim == 1:
+            code.raw(f"""
+            return {self.class_name}();
+            """)
+        else:
+            code.raw(f"return {self.class_name}({{")
+            lines: List[str] = []
+            stmts: List[str] = []
+            for i in range(self.ndim - 1):
+                lines.append(f"shape[{i + 1}]")
+            for i in range(self.ndim - 1):
+                stmts.append("  " + " * ".join(lines[self.ndim - 2 - i:]))
+            code.raw(",\n".join(stmts[::-1]))
+            code.raw("});")
         code.ret(self.class_name)
         return code
 
@@ -548,7 +555,6 @@ class TensorGeneric(pccm.ParameterizedClass):
                 code.arg("out", f"int*")
             else:
                 code.arg("out", f"tv::array<int, {self.ndim}>&")
-        assert self.ndim >= 2
         output_names = [f"out[{i}]" for i in range(self.ndim)]
         if unpack:
             output_names = [f"idx_{i}" for i in range(self.ndim)]
@@ -556,6 +562,20 @@ class TensorGeneric(pccm.ParameterizedClass):
             code.raw(f"""
             tv::array<int, {self.ndim}> out;
             """)
+
+        if self.ndim == 1:
+            if not external_out:
+                code.raw(f"""
+                out[0] = index;
+                return out;
+                """)
+                code.ret(f"tv::array<int, {self.ndim}>")
+            else:
+                code.raw(f"""
+                {output_names[0]} = index;
+                """)
+            return code
+        assert self.ndim >= 2
         if self.fast_divmod:
             if self.ndim > 2:
                 code.raw(f"""

@@ -15,7 +15,7 @@ from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import (constants, layout, mask_iters, out_iters, thread_map,
                        volta_iters, volta_out_iters, wmma)
 from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases, get_algo_spec
-from cumm.gemm.algospec.core import ShuffleStrideType
+from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.outputs import Output, OutputSmemStorage
@@ -154,7 +154,7 @@ class GemmParams(pccm.ParameterizedClass):
         new_obj.out_params_ = self.out_params.python_ctor(n)
         return new_obj
 
-    @pccm.cuda.constructor
+    @pccm.cuda.constructor(inline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         if CUTLASS_MODE:
@@ -249,7 +249,7 @@ class GemmParams(pccm.ParameterizedClass):
             code.ctor_init("workspace", "workspace")
         return code
 
-    @pccm.cuda.static_function
+    @pccm.cuda.static_function(inline=True)
     def get_logical_tile_count(self):
         code = pccm.FunctionCode()
         code.arg("m,n,k,split_k_slice", "int")
@@ -438,300 +438,309 @@ class GemmKernel(pccm.ParameterizedClass):
             code.arg("params", "CutlassGemm::GemmKernel::Params")
         else:
             code.arg("params", "GemmParams")
-        # code.targ("T")
-        # code.arg("params", "T")
-        if CUTLASS_MODE:
-            code.raw(f"""
-            CutlassGemm::ThreadblockSwizzle threadblock_swizzle;
-            extern __shared__ uint8_t SharedStorage[];
-            typename CutlassGemm::GemmKernel::SharedStorage *shared_storage =
-                reinterpret_cast<typename CutlassGemm::GemmKernel::SharedStorage *>(SharedStorage);
-
-            constexpr bool kSplitKSerial = {pccm.boolean(self.splitk_serial)};
-
-            cutlass::gemm::GemmCoord threadblock_tile_offset =
-                threadblock_swizzle.get_tile_offset(params.grid_tiled_shape);
-
-            // Early exit if CTA is out of range
-            if (params.grid_tiled_shape.m() <= threadblock_tile_offset.m() ||
-            params.grid_tiled_shape.n() <= threadblock_tile_offset.n()) {{
-                return;
-            }}
-            // Compute initial location in logical coordinates
-            cutlass::MatrixCoord tb_offset_A{{
-                threadblock_tile_offset.m() * {self.tile_shape[0]},
-                threadblock_tile_offset.k() * params.gemm_k_size,
-            }};
-
-            cutlass::MatrixCoord tb_offset_B{{
-                threadblock_tile_offset.k() * params.gemm_k_size,
-                threadblock_tile_offset.n() * {self.tile_shape[1]}
-            }};
-            int problem_size_k = min(params.problem_size.k(), (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
-            int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + {self.tile_shape[2]} - 1) / {self.tile_shape[2]};
-
-            """)
-        else:
-            code.raw(f"""
-            constexpr bool kSplitKSerial = {pccm.boolean(self.splitk_serial)};
-            extern __shared__ uint8_t SharedStorage[];
-            auto gemm_shared_mem =
-                reinterpret_cast<BlockMmaStorage *>(SharedStorage);
-            auto out_shared_mem =
-                reinterpret_cast<OutputSmemStorage *>(SharedStorage);
-
-            int tile_offset_m = blockIdx.x;
-            int tile_offset_n = blockIdx.y;
-            int tile_offset_k = blockIdx.z;
-            if (tile_offset_m >= params.grid_dims.x ||
-                tile_offset_n >= params.grid_dims.y) {{
-                return;
-            }}
-            """)
-            code.raw(f"""
-            tv::array<int, 2> block_offset_A{{tile_offset_m * {self.tile_shape[0]},
-                                              tile_offset_k * params.gemm_k_size_per_split}};
-            tv::array<int, 2> block_offset_B{{tile_offset_k * params.gemm_k_size_per_split,
-                                              tile_offset_n * {self.tile_shape[1]}}};
-            // Gemm::InputIteratorA::Params params_A(params.k);
-            // Gemm::InputIteratorB::Params params_B(params.n);
-            // refine gemm iteration for split-k
-            auto problem_size_k = GemmUtils::get_gemm_k_bound(params.k, params.gemm_k_size_per_split, tile_offset_k);
-            auto gemm_k_iterations = GemmUtils::get_gemm_iterations(problem_size_k, params.gemm_k_size_per_split, tile_offset_k);
-            // int problem_size_k = min(params.k, (tile_offset_k + 1) * params.gemm_k_size_per_split);
-            // int gemm_k_iterations =
-            //     tv::div_up(problem_size_k - block_offset_A[1], {self.tile_shape[2]});
-            """)
-        code.raw(f"""
-        int thread_idx = threadIdx.x;
-        """)
-        if CUTLASS_INPUT_ITER:
-            code.raw(f"""
-            {self.gemm_params.cutlass_a_type} input_iter_A(
-                params.params_A,
-                params.ref_A.data(),
-                {{params.problem_size.m(), problem_size_k}},
-                thread_idx,
-                tb_offset_A);
-            {self.gemm_params.cutlass_b_type} input_iter_B(
-                params.params_B,
-                params.ref_B.data(),
-                {{problem_size_k, params.problem_size.n()}},
-                thread_idx,
-                tb_offset_B);
-            """)
-        else:
-            if self.trans_a:
-                a_extent = "tv::array<int, 2>{problem_size_k, params.m}"
-                a_offset = "tv::array<int, 2>{block_offset_A[1], block_offset_A[0]}"
-            else:
-                a_extent = "tv::array<int, 2>{params.m, problem_size_k}"
-                a_offset = "block_offset_A"
-
-            if not self.trans_b:
-                b_extent = "tv::array<int, 2>{problem_size_k, params.n}"
-                b_offset = "block_offset_B"
-            else:
-                b_extent = "tv::array<int, 2>{params.n, problem_size_k}"
-                b_offset = "tv::array<int, 2>{block_offset_B[1], block_offset_B[0]}"
-
-            code.raw(f"""
-            InputIteratorA input_iter_A(
-                params.itera_params_, params.ptr_A,
-                {a_extent},
-                thread_idx,
-                {a_offset});
-            InputIteratorB input_iter_B(
-                params.iterb_params_, params.ptr_B,
-                {b_extent},
-                thread_idx,
-                {b_offset});
-            """)
-        code.raw(f"""
-        int warp_idx = __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
-        int lane_idx = threadIdx.x % 32;
-        """)
-        if CUTLASS_SMEM_WARP_ITER:
-            if not CUTLASS_DEBUG:
-                # code.raw(f"""
-                # DebugMma mma(shared_storage->main_loop, thread_idx, warp_idx, lane_idx);
-
-                # {self.cutlass_warp_a_type} warp_iter_A(shared_storage->main_loop.operand_A_ref(), lane_idx);
-                # {self.cutlass_warp_b_type} warp_iter_B(shared_storage->main_loop.operand_B_ref(), lane_idx);
-                # {self.cutlass_smem_a_type} smem_iter_A(shared_storage->main_loop.operand_A_ref(), thread_idx);
-                # {self.cutlass_smem_b_type} smem_iter_B(shared_storage->main_loop.operand_B_ref(), thread_idx);
-                # int warp_mn =
-                #     warp_idx % ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
-                # int warp_idx_k =
-                #     warp_idx / ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
-                # int warp_m = warp_mn % {self.warp_count_shape[0]};
-                # int warp_n = warp_mn / {self.warp_count_shape[0]};
-
-                # warp_iter_A.add_tile_offset({{warp_m, {self.warp_gemm_iters} * warp_idx_k}});
-                # warp_iter_B.add_tile_offset({{{self.warp_gemm_iters} * warp_idx_k, warp_n}});
-                # """)
+        min_arch = get_min_arch_of_algo(self.algo)
+        arch_num = min_arch[0] * 100 + min_arch[1] * 10
+        # use __CUDA_ARCH__ macro to reduce binary size
+        # TODO this macro can't reduce compile time
+        with code.macro_if_(f"defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= {arch_num})"):
+            if CUTLASS_MODE:
                 code.raw(f"""
-                DebugMma mma(shared_storage->main_loop, thread_idx, warp_idx, lane_idx);
-                auto& smem_iter_A = mma.smem_iter_A;
-                auto& smem_iter_B = mma.smem_iter_B;
+                CutlassGemm::ThreadblockSwizzle threadblock_swizzle;
+                extern __shared__ uint8_t SharedStorage[];
+                typename CutlassGemm::GemmKernel::SharedStorage *shared_storage =
+                    reinterpret_cast<typename CutlassGemm::GemmKernel::SharedStorage *>(SharedStorage);
 
-                auto& warp_iter_A = mma.warp_iter_A;
-                auto& warp_iter_B = mma.warp_iter_B;
-                Mma mma(shared_storage->main_loop, thread_idx, warp_idx, lane_idx);
+                constexpr bool kSplitKSerial = {pccm.boolean(self.splitk_serial)};
 
-                """)
+                cutlass::gemm::GemmCoord threadblock_tile_offset =
+                    threadblock_swizzle.get_tile_offset(params.grid_tiled_shape);
 
-        else:
-            code.raw(f"""
-            int warp_mn =
-                warp_idx % ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
-            int warp_idx_k =
-                warp_idx / ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
-            int warp_m = warp_mn % {self.warp_count_shape[0]};
-            int warp_n = warp_mn / {self.warp_count_shape[0]};
-            Mma mma(gemm_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);
-            """)
-        code.raw(f"""
-        {self.fragment_c_t} accumulators;
-        accumulators.clear();
-        """)
-        with code.if_("!kSplitKSerial || gemm_k_iterations > 0"):
-            if CUTLASS_DEBUG:
-                code.raw(f"""
-                mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
+                // Early exit if CTA is out of range
+                if (params.grid_tiled_shape.m() <= threadblock_tile_offset.m() ||
+                params.grid_tiled_shape.n() <= threadblock_tile_offset.n()) {{
+                    return;
+                }}
+                // Compute initial location in logical coordinates
+                cutlass::MatrixCoord tb_offset_A{{
+                    threadblock_tile_offset.m() * {self.tile_shape[0]},
+                    threadblock_tile_offset.k() * params.gemm_k_size,
+                }};
+
+                cutlass::MatrixCoord tb_offset_B{{
+                    threadblock_tile_offset.k() * params.gemm_k_size,
+                    threadblock_tile_offset.n() * {self.tile_shape[1]}
+                }};
+                int problem_size_k = min(params.problem_size.k(), (threadblock_tile_offset.k() + 1) * params.gemm_k_size);
+                int gemm_k_iterations = (problem_size_k - tb_offset_A.column() + {self.tile_shape[2]} - 1) / {self.tile_shape[2]};
+
                 """)
             else:
                 code.raw(f"""
-                mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
-                """)
-        if cudasim.enable_debug():
-            code.raw(f"""
-            tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(accumulators, "accumulator");
-            // tv::print_fragment_once<int, 0, 16, {cudasim.debug_tx()}>(accumulators);
+                constexpr bool kSplitKSerial = {pccm.boolean(self.splitk_serial)};
+                extern __shared__ uint8_t SharedStorage[];
+                auto gemm_shared_mem =
+                    reinterpret_cast<BlockMmaStorage *>(SharedStorage);
+                auto out_shared_mem =
+                    reinterpret_cast<OutputSmemStorage *>(SharedStorage);
 
-            """)
-        if CUTLASS_OUTPUT_ITER:
-            code.raw(f"""
-
-            // // C = alpha * A@B + beta * D, D can be C
-            Epilogue::OutputOp oop(params.output_op);
-            cutlass::MatrixCoord threadblock_offset(
-                threadblock_tile_offset.m() * {self.tile_shape[0]},
-                threadblock_tile_offset.n() * {self.tile_shape[1]}
-            );
-            int block_idx = threadblock_tile_offset.m() + threadblock_tile_offset.n() * params.grid_tiled_shape.m();
-
-            // Construct the semaphore.
-            cutlass::Semaphore semaphore(params.semaphore + block_idx, thread_idx);
-
-            typename Epilogue::OutputTileIterator iterator_C(
-                params.params_C,
-                params.ref_C.data(),
-                params.problem_size.mn(),
-                thread_idx,
-                threadblock_offset
-            );
-
-            // Tile iterator writing to destination tensor.
-            typename Epilogue::OutputTileIterator iterator_D(
-                params.params_D,
-                params.ref_D.data(),
-                params.problem_size.mn(),
-                thread_idx,
-                threadblock_offset
-            );
-
-            Epilogue epilogue(
-                shared_storage->epilogue, 
-                thread_idx, 
-                warp_idx, 
-                lane_idx);
-
-            
-            epilogue(oop, iterator_D, accumulators, iterator_C); 
-
-            """)
-
-        else:
-            code.raw(f"""
-            // // C = alpha * A@B + beta * D, D can be C
-            OutputOp output_op(params.alpha, params.beta);
-            """)
-            if self.splitk_serial:
-                code.raw(f"""
-                int block_idx = tile_offset_m + tile_offset_n * params.grid_dims.x;
-                tv::Semaphore semaphore(reinterpret_cast<int*>(params.workspace) + block_idx, thread_idx);
-                if (params.grid_dims.z > 1){{
-                    semaphore.fetch();
-                    output_op.set_k_partition(tile_offset_k, params.grid_dims.z);
+                int tile_offset_m = blockIdx.x;
+                int tile_offset_n = blockIdx.y;
+                int tile_offset_k = blockIdx.z;
+                if (tile_offset_m >= params.grid_dims.x ||
+                    tile_offset_n >= params.grid_dims.y) {{
+                    return;
                 }}
                 """)
-            code.raw(f"""
-            tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
-                                            tile_offset_n * {self.tile_shape[1]}}};
-
-            OutIter out_iter_C(params.out_params_, params.ptr_C, {{params.m, params.n}},
-                                    {{block_offset_C[0], block_offset_C[1]}},
-                                    thread_idx);
-            """)
-            if self.splitk_serial:
-                # we reuse iter_c for splitk_serial to save some time.
                 code.raw(f"""
-                bool need_self_reduce = false;
-                if (params.grid_dims.z > 1){{
-                    if (tile_offset_k){{
-                        need_self_reduce = true;
+                tv::array<int, 2> block_offset_A{{tile_offset_m * {self.tile_shape[0]},
+                                                tile_offset_k * params.gemm_k_size_per_split}};
+                tv::array<int, 2> block_offset_B{{tile_offset_k * params.gemm_k_size_per_split,
+                                                tile_offset_n * {self.tile_shape[1]}}};
+                // Gemm::InputIteratorA::Params params_A(params.k);
+                // Gemm::InputIteratorB::Params params_B(params.n);
+                // refine gemm iteration for split-k
+                auto problem_size_k = GemmUtils::get_gemm_k_bound(params.k, params.gemm_k_size_per_split, tile_offset_k);
+                auto gemm_k_iterations = GemmUtils::get_gemm_iterations(problem_size_k, params.gemm_k_size_per_split, tile_offset_k);
+                // int problem_size_k = min(params.k, (tile_offset_k + 1) * params.gemm_k_size_per_split);
+                // int gemm_k_iterations =
+                //     tv::div_up(problem_size_k - block_offset_A[1], {self.tile_shape[2]});
+                """)
+            code.raw(f"""
+            int thread_idx = threadIdx.x;
+            """)
+            if CUTLASS_INPUT_ITER:
+                code.raw(f"""
+                {self.gemm_params.cutlass_a_type} input_iter_A(
+                    params.params_A,
+                    params.ref_A.data(),
+                    {{params.problem_size.m(), problem_size_k}},
+                    thread_idx,
+                    tb_offset_A);
+                {self.gemm_params.cutlass_b_type} input_iter_B(
+                    params.params_B,
+                    params.ref_B.data(),
+                    {{problem_size_k, params.problem_size.n()}},
+                    thread_idx,
+                    tb_offset_B);
+                """)
+            else:
+                if self.trans_a:
+                    a_extent = "tv::array<int, 2>{problem_size_k, params.m}"
+                    a_offset = "tv::array<int, 2>{block_offset_A[1], block_offset_A[0]}"
+                else:
+                    a_extent = "tv::array<int, 2>{params.m, problem_size_k}"
+                    a_offset = "block_offset_A"
+
+                if not self.trans_b:
+                    b_extent = "tv::array<int, 2>{problem_size_k, params.n}"
+                    b_offset = "block_offset_B"
+                else:
+                    b_extent = "tv::array<int, 2>{params.n, problem_size_k}"
+                    b_offset = "tv::array<int, 2>{block_offset_B[1], block_offset_B[0]}"
+
+                code.raw(f"""
+                InputIteratorA input_iter_A(
+                    params.itera_params_, params.ptr_A,
+                    {a_extent},
+                    thread_idx,
+                    {a_offset});
+                InputIteratorB input_iter_B(
+                    params.iterb_params_, params.ptr_B,
+                    {b_extent},
+                    thread_idx,
+                    {b_offset});
+                """)
+            code.raw(f"""
+            int warp_idx = __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
+            int lane_idx = threadIdx.x % 32;
+            """)
+            if CUTLASS_SMEM_WARP_ITER:
+                if not CUTLASS_DEBUG:
+                    # code.raw(f"""
+                    # DebugMma mma(shared_storage->main_loop, thread_idx, warp_idx, lane_idx);
+
+                    # {self.cutlass_warp_a_type} warp_iter_A(shared_storage->main_loop.operand_A_ref(), lane_idx);
+                    # {self.cutlass_warp_b_type} warp_iter_B(shared_storage->main_loop.operand_B_ref(), lane_idx);
+                    # {self.cutlass_smem_a_type} smem_iter_A(shared_storage->main_loop.operand_A_ref(), thread_idx);
+                    # {self.cutlass_smem_b_type} smem_iter_B(shared_storage->main_loop.operand_B_ref(), thread_idx);
+                    # int warp_mn =
+                    #     warp_idx % ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
+                    # int warp_idx_k =
+                    #     warp_idx / ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
+                    # int warp_m = warp_mn % {self.warp_count_shape[0]};
+                    # int warp_n = warp_mn / {self.warp_count_shape[0]};
+
+                    # warp_iter_A.add_tile_offset({{warp_m, {self.warp_gemm_iters} * warp_idx_k}});
+                    # warp_iter_B.add_tile_offset({{{self.warp_gemm_iters} * warp_idx_k, warp_n}});
+                    # """)
+                    code.raw(f"""
+                    DebugMma mma(shared_storage->main_loop, thread_idx, warp_idx, lane_idx);
+                    auto& smem_iter_A = mma.smem_iter_A;
+                    auto& smem_iter_B = mma.smem_iter_B;
+
+                    auto& warp_iter_A = mma.warp_iter_A;
+                    auto& warp_iter_B = mma.warp_iter_B;
+                    Mma mma(shared_storage->main_loop, thread_idx, warp_idx, lane_idx);
+
+                    """)
+
+            else:
+                code.raw(f"""
+                int warp_mn =
+                    warp_idx % ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
+                int warp_idx_k =
+                    warp_idx / ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
+                int warp_m = warp_mn % {self.warp_count_shape[0]};
+                int warp_n = warp_mn / {self.warp_count_shape[0]};
+                Mma mma(gemm_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);
+                """)
+            code.raw(f"""
+            {self.fragment_c_t} accumulators;
+            accumulators.clear();
+            """)
+            with code.if_("!kSplitKSerial || gemm_k_iterations > 0"):
+                if CUTLASS_DEBUG:
+                    code.raw(f"""
+                    mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
+                    """)
+                else:
+                    code.raw(f"""
+                    mma(gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
+                    """)
+            if cudasim.enable_debug():
+                code.raw(f"""
+                tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(accumulators, "accumulator");
+                // tv::print_fragment_once<int, 0, 16, {cudasim.debug_tx()}>(accumulators);
+
+                """)
+            if CUTLASS_OUTPUT_ITER:
+                code.raw(f"""
+
+                // // C = alpha * A@B + beta * D, D can be C
+                Epilogue::OutputOp oop(params.output_op);
+                cutlass::MatrixCoord threadblock_offset(
+                    threadblock_tile_offset.m() * {self.tile_shape[0]},
+                    threadblock_tile_offset.n() * {self.tile_shape[1]}
+                );
+                int block_idx = threadblock_tile_offset.m() + threadblock_tile_offset.n() * params.grid_tiled_shape.m();
+
+                // Construct the semaphore.
+                cutlass::Semaphore semaphore(params.semaphore + block_idx, thread_idx);
+
+                typename Epilogue::OutputTileIterator iterator_C(
+                    params.params_C,
+                    params.ref_C.data(),
+                    params.problem_size.mn(),
+                    thread_idx,
+                    threadblock_offset
+                );
+
+                // Tile iterator writing to destination tensor.
+                typename Epilogue::OutputTileIterator iterator_D(
+                    params.params_D,
+                    params.ref_D.data(),
+                    params.problem_size.mn(),
+                    thread_idx,
+                    threadblock_offset
+                );
+
+                Epilogue epilogue(
+                    shared_storage->epilogue, 
+                    thread_idx, 
+                    warp_idx, 
+                    lane_idx);
+
+                
+                epilogue(oop, iterator_D, accumulators, iterator_C); 
+
+                """)
+
+            else:
+                code.raw(f"""
+                // // C = alpha * A@B + beta * D, D can be C
+                OutputOp output_op(params.alpha, params.beta);
+                """)
+                if self.splitk_serial:
+                    code.raw(f"""
+                    int block_idx = tile_offset_m + tile_offset_n * params.grid_dims.x;
+                    tv::Semaphore semaphore(reinterpret_cast<int*>(params.workspace) + block_idx, thread_idx);
+                    if (params.grid_dims.z > 1){{
+                        semaphore.fetch();
+                        output_op.set_k_partition(tile_offset_k, params.grid_dims.z);
                     }}
-                    semaphore.wait(tile_offset_k);
-                    __threadfence();
-                }}
-                """)
-            if self.need_source:
+                    """)
                 code.raw(f"""
-                ConstOutIter out_iter_D(params.out_params_, params.ptr_D, {{params.m, params.n}},
-                                    {{block_offset_C[0], block_offset_C[1]}},
-                                    thread_idx);
+                tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
+                                                tile_offset_n * {self.tile_shape[1]}}};
+
+                OutIter out_iter_C(params.out_params_, params.ptr_C, {{params.m, params.n}},
+                                        {{block_offset_C[0], block_offset_C[1]}},
+                                        thread_idx);
                 """)
-            code.raw(
-                f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
-            )
-            if self.splitk_serial:
-                with code.if_("need_self_reduce"):
-                    code.raw(
-                        f"out.run_self_reduce(output_op, accumulators, out_iter_C);"
-                    )
-                with code.else_():
+                if self.splitk_serial:
+                    # we reuse iter_c for splitk_serial to save some time.
+                    code.raw(f"""
+                    bool need_self_reduce = false;
+                    if (params.grid_dims.z > 1){{
+                        if (tile_offset_k){{
+                            need_self_reduce = true;
+                        }}
+                        semaphore.wait(tile_offset_k);
+                        __threadfence();
+                    }}
+                    """)
+                if self.need_source:
+                    code.raw(f"""
+                    ConstOutIter out_iter_D(params.out_params_, params.ptr_D, {{params.m, params.n}},
+                                        {{block_offset_C[0], block_offset_C[1]}},
+                                        thread_idx);
+                    """)
+                code.raw(
+                    f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
+                )
+                if self.splitk_serial:
+                    with code.if_("need_self_reduce"):
+                        code.raw(
+                            f"out.run_self_reduce(output_op, accumulators, out_iter_C);"
+                        )
+                    with code.else_():
+                        if self.need_source:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
+                            )
+                        else:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C);")
+                else:
                     if self.need_source:
                         code.raw(
                             f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
                         )
                     else:
-                        code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C);")
-            else:
-                if self.need_source:
-                    code.raw(
-                        f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
-                    )
-                else:
-                    code.raw(f"out.run(output_op, accumulators, out_iter_C);")
+                        code.raw(f"out.run(output_op, accumulators, out_iter_C);")
 
-            if self.splitk_serial:
-                code.raw(f"""
-                if (params.grid_dims.z > 1){{
-                    int lock = 0;
-                    if (params.grid_dims.z == tile_offset_k + 1) {{
-                        // The final threadblock resets the semaphore for subsequent grids.
-                        lock = 0;
+                if self.splitk_serial:
+                    code.raw(f"""
+                    if (params.grid_dims.z > 1){{
+                        int lock = 0;
+                        if (params.grid_dims.z == tile_offset_k + 1) {{
+                            // The final threadblock resets the semaphore for subsequent grids.
+                            lock = 0;
+                        }}
+                        else {{
+                            // Otherwise, the semaphore is incremented
+                            lock = tile_offset_k + 1;
+                        }}
+                        
+                        semaphore.release(lock);
                     }}
-                    else {{
-                        // Otherwise, the semaphore is incremented
-                        lock = tile_offset_k + 1;
-                    }}
-                    
-                    semaphore.release(lock);
-                }}
-                """)
+                    """)
+        with code.macro_else_():
+            code.raw(f"""
+            tv::printf2_once("this arch isn't supported!");
+            assert(0);
+            """)
+        code.macro_endif_()
         return code
 
     # @lineprof.lineprof_wrapper
