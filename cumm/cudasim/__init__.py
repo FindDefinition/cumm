@@ -22,8 +22,12 @@ import numpy as np
 
 from .debug import debug_print, debug_tx, enable_debug, enter_debug_context
 
-CUDA_SIMULATION_VARS = contextvars.ContextVar("CUDA")
+CUDA_SIMULATION_VARS: Optional[contextvars.ContextVar["CudaExecutionContext"]] = None
 
+def _lazy_init_contextvars():
+    global CUDA_SIMULATION_VARS
+    if CUDA_SIMULATION_VARS is None:
+        CUDA_SIMULATION_VARS = contextvars.ContextVar("CUDA")
 
 def _div_up(x, y):
     return (x + y - 1) // y
@@ -134,12 +138,14 @@ def enter_cuda_context(ctx: CudaExecutionContext):
     """dont need async manager here because ContextVar support asyncio
     natively.
     """
+    _lazy_init_contextvars()
     token = CUDA_SIMULATION_VARS.set(ctx)
     yield ctx
     CUDA_SIMULATION_VARS.reset(token)
 
 
 def get_cuda_context() -> Optional[CudaExecutionContext]:
+    _lazy_init_contextvars()
     return CUDA_SIMULATION_VARS.get(None)
 
 

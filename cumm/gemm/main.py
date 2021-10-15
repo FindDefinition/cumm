@@ -551,6 +551,18 @@ SHUFFLE_SIMT_PARAMS: List[GemmAlgoParams] = [
         (64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
         2, kernel.GemmAlgo.SimtDP4A, None),
     *gen_shuffle_params(
+        (64, 256, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 256, 8),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 128, 16),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 512, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
         (128, 128, 8),
         (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
@@ -674,7 +686,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             is_debug = os.getenv("CUMM_DEBUG", None)
             if is_debug is not None and is_debug == "1":
                 simt_params = [
-                    # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
+                    *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", kernel.GemmAlgo.SimtDP4A, None),
                     # *gen_gemm_params((64, 64, 16),
                     #                  (32, 32, 16), 2, "f16,f16,f16,f16,f16",
                     #                  kernel.GemmAlgo.Simt, None),
@@ -724,12 +736,12 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
                 ]
                 turing_params = [
-                    *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32),
-                                                2,
-                                                "f16,f16,f16,f32,f32",
-                                                kernel.GemmAlgo.Turing,
-                                                TensorOpParams((16, 8, 8)),
-                                                splitk_serial=True),
+                    # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32),
+                    #                             2,
+                    #                             "f16,f16,f16,f32,f32",
+                    #                             kernel.GemmAlgo.Turing,
+                    #                             TensorOpParams((16, 8, 8)),
+                    #                             splitk_serial=True),
                     # *gen_gemm_params(
                     #     (64, 64, 32),
                     #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
@@ -1035,6 +1047,25 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         }}
         """)
         return code.ret("int")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def device_synchronize(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        checkCudaErrors(cudaDeviceSynchronize());
+        """)
+        return code
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def stream_synchronize(self):
+        code = pccm.FunctionCode()
+        code.arg("stream", "std::uintptr_t", pyanno="int")
+        code.raw(f"""
+        checkCudaErrors(cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream)));
+        """)
+        return code
 
     @pccm.pybind.mark
     @pccm.static_function

@@ -90,7 +90,7 @@ class GatherKernel(pccm.ParameterizedClass):
         // input_frag.clear();
         for (; k_iterations > 0; --k_iterations){{
             input_iter.load(input_frag);
-            output_iter.store(input_frag);
+            input_iter.store(input_frag);
             ++input_iter;
             ++output_iter;
         }}

@@ -995,7 +995,8 @@ class MaskTileIterator(bases.GemmInputIterator):
                  transpose_load: bool = False,
                  last_residual: bool = True,
                  shuffle_in_stride: bool = False,
-                 read_only: bool = True):
+                 read_only: bool = True,
+                 have_output_ptr: bool = False):
         self.thread_access_shape = tmap.iterations
         self.iteration_delta = tmap.delta
         self.access_per_vector = sub_tile_shape[1] // num_sub_access
@@ -1041,11 +1042,15 @@ class MaskTileIterator(bases.GemmInputIterator):
         self.global_load = memory.GlobalLoad(self.element_per_acc *
                                              self.dtype.itemsize())
         self.add_param_class("maskiter", self.global_load, "GlobalLoad")
-
+        self.have_output_ptr = have_output_ptr
+        if have_output_ptr:
+            assert shuffle_in_stride, "output ptr only used for gather kernel"
         self.add_member("pointer_", self.const_byte_pointer
-                        if read_only else self.byte_pointer)  # 2 registers
-        # self.add_member("pointer_bkp_", self.const_byte_pointer)
+                        if read_only else self.byte_pointer)
+        if have_output_ptr:
+            self.add_member("out_pointer_", self.byte_pointer)
 
+        # self.add_member("pointer_bkp_", self.const_byte_pointer)
         self.add_member("params_", "Params const &")
 
         self.add_member("extent_", "tv::array<int, 2>")
@@ -1148,6 +1153,12 @@ class MaskTileIterator(bases.GemmInputIterator):
             update_indices();
             add_pointer_offset(thread_offset_[1]);
             """)
+            if self.have_output_ptr:
+                code.raw(f"""
+                // here we can't use extent_[1] because splitk may split stride.
+                add_output_pointer_offset(thread_offset_[0] * params.stride_ + thread_offset_[1]);
+                """)
+
             # if self.advance_axis == 0:
             #     code.raw(f"""
             #     params_.indice_ptr_ += thread_offset_[0];
@@ -1160,6 +1171,9 @@ class MaskTileIterator(bases.GemmInputIterator):
         code.arg("params", f"Params const &")
         code.arg("ptr",
                  f"{self.const_pointer if self.read_only else self.pointer}")
+        if self.have_output_ptr:
+            code.arg("output_ptr", f"{self.pointer}")
+
         code.arg("extent", "tv::array<int, 2>")
         code.arg("thread_id", "int")
         code.arg("threadblock_offset", "const tv::array<int, 2>&")
@@ -1271,6 +1285,16 @@ class MaskTileIterator(bases.GemmInputIterator):
         """)
         return code.arg("offset", str(self.long_index_t))
 
+    @pccm.cuda.member_function(device=True, forceinline=True)
+    def add_output_pointer_offset(self):
+        code = pccm.FunctionCode()
+        if self.have_output_ptr:
+            code.raw(f"""
+            out_pointer_ += sizeof({self.dtype}) * offset;
+            """)
+        return code.arg("offset", str(self.long_index_t))
+
+
     def add_pointer_offset_python(self, offset: int):
         self.pointer_ += self.dtype.itemsize() * offset
 
@@ -1292,6 +1316,11 @@ class MaskTileIterator(bases.GemmInputIterator):
                         code.raw(f"""
                         pointer_ += sizeof({self.dtype}) * extent_[1] * residue_offset_;
                         """)
+                    if self.shuffle_in_stride and self.have_output_ptr:
+                        code.raw(f"""
+                        out_pointer_ += sizeof({self.dtype}) * extent_[1] * residue_offset_;
+                        """)
+
 
             else:
                 if self.advance_axis == 1:
@@ -1307,6 +1336,10 @@ class MaskTileIterator(bases.GemmInputIterator):
                         code.raw(f"""
                         pointer_ -= sizeof({self.dtype}) * extent_[1] * residue_offset_;
                         """)
+                    if self.shuffle_in_stride and self.have_output_ptr:
+                        code.raw(f"""
+                        out_pointer_ -= sizeof({self.dtype}) * extent_[1] * residue_offset_;
+                        """)
 
             if self.advance_axis == 1:
                 code.raw(f"""
@@ -1321,6 +1354,10 @@ class MaskTileIterator(bases.GemmInputIterator):
                     code.raw(f"""
                     pointer_ += params_.inc_advance_ * (num_tile - 1);
                     """)
+                if self.shuffle_in_stride and self.have_output_ptr:
+                    code.raw(f"""
+                    out_pointer_ += params_.inc_advance_ * (num_tile - 1);
+                    """)
 
         with code.else_():
             if self.advance_axis == 1:
@@ -1332,6 +1369,10 @@ class MaskTileIterator(bases.GemmInputIterator):
                     code.raw(f"""
                     thread_offset_[0] += {self.tile_shape[0]} * num_tile;
                     """)
+                    if self.have_output_ptr:
+                        code.raw(f"""
+                        out_pointer_ += params_.inc_advance_ * num_tile;
+                        """)
                 else:
                     code.raw(f"""
                     pointer_ += params_.inc_advance_ * num_tile;
@@ -1406,6 +1447,28 @@ class MaskTileIterator(bases.GemmInputIterator):
                 """)
         return code.ret(f"{const} {self.access_t} *")
 
+    @pccm.cuda.member_function(name="get",
+                               device=True,
+                               const=True,
+                               forceinline=True)
+    def get_output(self):
+        contig = 1
+        strided = 0
+        code = pccm.FunctionCode()
+        const = "const" if self.read_only else ""
+        if not self.have_output_ptr:
+            return code.ret(f"{const} {self.access_t} *")
+        assert self.sub_tile_shape[strided] == 1
+        code.raw(f"""
+        return reinterpret_cast<{const} {self.access_t} *>(
+                out_pointer_ + 
+                (c * {self.iteration_delta[contig]}) *
+                    sizeof({self.dtype})) +
+            v;
+        """).arg("s,c,v", "int")
+        return code.ret(f"{const} {self.access_t} *")
+
+
     def get_python(self, c: int, ss: int, v: int) -> ArrayPtr:
         contig = 1
         strided = 0
@@ -1416,7 +1479,10 @@ class MaskTileIterator(bases.GemmInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def inc_stride(self):
-        return pccm.FunctionCode(f"pointer_ += params_.inc_strided_; ")
+        if self.have_output_ptr and self.shuffle_in_stride:
+            return pccm.FunctionCode(f"out_pointer_ += params_.inc_strided_; ")
+        else:
+            return pccm.FunctionCode(f"pointer_ += params_.inc_strided_; ")
 
     def inc_stride_python(self):
         self.pointer_ += self.params_.inc_strided_
@@ -1424,15 +1490,27 @@ class MaskTileIterator(bases.GemmInputIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def end_iter(self):
         # back to initial location?
-        if self.advance_axis == 1:
-            return pccm.FunctionCode(f"""
-            pointer_ += params_.inc_next_ - {self.param_class.inc_advance_static};
-            """)
+        if self.have_output_ptr and self.shuffle_in_stride:
+            if self.advance_axis == 1:
+                return pccm.FunctionCode(f"""
+                out_pointer_ += params_.inc_next_ - {self.param_class.inc_advance_static};
+                """)
+            else:
+                return pccm.FunctionCode(f"""
+                out_pointer_ += params_.inc_next_;
+                out_pointer_ -= params_.inc_advance_;
+                """)
         else:
-            return pccm.FunctionCode(f"""
-            pointer_ += params_.inc_next_;
-            pointer_ -= params_.inc_advance_;
-            """)
+            if self.advance_axis == 1:
+                return pccm.FunctionCode(f"""
+                pointer_ += params_.inc_next_ - {self.param_class.inc_advance_static};
+                """)
+            else:
+                return pccm.FunctionCode(f"""
+                pointer_ += params_.inc_next_;
+                pointer_ -= params_.inc_advance_;
+                """)
+
 
     def end_iter_python(self):
         self.pointer_ += self.params_.inc_next_

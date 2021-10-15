@@ -285,10 +285,6 @@ class GemmBasicKernel(pccm.Class):
         self.add_include("tensorview/gemm/arch/transpose.h")
         self.add_include("tensorview/gemm/arch/semaphore.h")
 
-        self.add_include("tensorview/gemm/wmma/thread_mma.h")
-        self.add_include("tensorview/gemm/output_op/all.h")
-        self.add_include("tensorview/gemm/wmma/mma_volta.h")
-
 
 class PyBind11(pccm.Class):
     def __init__(self):

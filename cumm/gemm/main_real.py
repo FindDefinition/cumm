@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-os.environ["CUMM_DEBUG"] = "0"
+os.environ["CUMM_DEBUG"] = "1"
 # _cudart = ctypes.CDLL('libcudart.so')
 
 import pickle
@@ -420,5 +420,5 @@ def _asdv_test_turing():
 
 
 if __name__ == "__main__":
-    _asdv_test_simt_shuffle()
-    # _asdv_test_regular_gemm()
+    # _asdv_test_simt_shuffle()
+    _asdv_test_regular_gemm()

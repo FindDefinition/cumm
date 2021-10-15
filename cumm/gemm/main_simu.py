@@ -31,7 +31,7 @@ VIS_IP = "127.0.0.1:50073"
 GEMM_VIS_GLOBAL_SCALE = 10
 import os
 
-os.environ["CUMM_DEBUG"] = "0"
+os.environ["CUMM_DEBUG"] = "1"
 
 
 def vis_in_relay(figs):
@@ -672,7 +672,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
     np.random.seed(12315)
     with cudasim.enter_debug_context(True, 3):
         main_cu = GemmMainUnitTest()
-        print(len(main_cu.turing_params))
+        print(len(main_cu.all_params))
 
         for params in main_cu.all_params[:1]:
             print(params.get_algo_name())
@@ -693,7 +693,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
                 a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
                 b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
                 dtype_c = params.dtype_c.npdtype()
-                c = (a.astype(dtype_c) @ b.astype(dtype_c)).astype(
+                c = (a.astype(np.float32) @ b.astype(np.float32)).astype(
                     dtypes.get_npdtype(params.dtype_c))
 
             else:
