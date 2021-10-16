@@ -48,7 +48,8 @@ def _asdv_test_simt_python():
                                     build_dir=Path(__file__).parent / "build" /
                                     "build_unittest_conv",
                                     pybind_file_suffix=".cc",
-                                    verbose=False)
+                                    verbose=False,
+                                    disable_anno=True)
 
     lib_object = lib.cumm.conv.main.ConvMainUnitTest()
     for params in main_cu.simt_params[:6]:

@@ -59,14 +59,6 @@ class ShuffleStrideType(enum.Enum):
     ShuffleAC = "SAC"
     # A and B have indices, for spatial spconv backward weight
     ShuffleAB = "SAB"
-    # shuffle C only, for spatial spconv forward and backward input.
-    # shuffle stride gemm need to maximum tile k if possible.
-    # for large channel size, we can't increase tile k due to limit of smem size,
-    # so we need external gather to perform large-tile-k access.
-
-    # for backward weight, we need to maximum tile mn instead of k, so we don't need
-    # shuffle-c here.
-    ShuffleC = "SC"
 
 
 class TensorOpParams(object):

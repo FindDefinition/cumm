@@ -37,7 +37,7 @@ from cumm import tensorview as tv
 from cumm.gemm import kernel
 from cumm.gemm.algospec.core import ShuffleStrideType
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
-from cumm.gemm.gather import GatherKernel
+from cumm.gemm.gather import GatherKernel, Gather, GatherAll
 from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
 
 # def cu_prof_start():
@@ -61,10 +61,21 @@ def build_gemm_lib(cus: List[pccm.Class]):
                                     build_dir=Path(__file__).parent / "build" /
                                     "build_unittest",
                                     pybind_file_suffix=".cc",
-                                    verbose=False)
+                                    verbose=False,
+                                    disable_anno=True)
 
     return lib
 
+def build_gather_lib(cus: List[pccm.Class]):
+    lib = pccm.builder.build_pybind(cus,
+                                    Path(__file__).parent / "gather_test",
+                                    build_dir=Path(__file__).parent / "build" /
+                                    "build_gather",
+                                    pybind_file_suffix=".cc",
+                                    verbose=False,
+                                    disable_anno=True)
+
+    return lib
 
 def _asdv_test_simt():
     # /usr/local/cuda/bin/nvprof -o out_lidardet.nvvp --profile-from-start off --analysis-metrics -f --csv python /home/yy/OneDrive/dev/spconv/spconv/gemm/main_real.py
@@ -418,7 +429,93 @@ def _asdv_test_turing():
         c_cpu = c_tv.cpu().numpy()
         print(params.get_algo_name(), np.linalg.norm(c_cpu - c))
 
+def _test_gather1():
+    import torch 
+
+    np.random.seed(12315)
+    main_cu = Gather(seq(4, 128 * 4), 8, 256)
+    main_cu.namespace = "cumm.gemm.gather"
+    lib = build_gather_lib([main_cu])
+    lib_object = lib.cumm.gemm.gather.Gather()
+    m = 64000
+    k = 126
+    a = np.random.uniform(-2, 2, size=[m, k]).astype(np.float32)
+    a_tv = tv.from_numpy(a).cuda()
+    c_tv = a_tv.clone().zero_()
+    inds = np.arange(m, dtype=np.int32)
+    np.random.shuffle(inds)
+    c_ref = a[inds]
+
+    inds_tv = tv.from_numpy(inds).cuda()
+    for i in range(5):
+        t = time.time()
+        lib_object.gather(c_tv, a_tv, inds_tv)
+        # lib_object.stream_synchronize()
+        torch.cuda.synchronize()
+        print(time.time() - t)
+    c_cpu = c_tv.cpu().numpy()
+    print(np.linalg.norm(c_ref - c_cpu))
+
+
+def _test_gather():
+    np.random.seed(12315)
+    main_cu = GatherAll()
+    # main_cu = GatherV2(seq(8, 128 * 4), 16, 256)
+    # main_cu.namespace = "cumm.gemm.gather"
+    lib = build_gemm_lib([main_cu])
+    lib_object = lib.cumm.gemm.gather.GatherAll()
+    m = 125562
+    k = 32
+    a = np.random.uniform(-2, 2, size=[m, k]).astype(np.float32)
+    a_tv = tv.from_numpy(a).cuda()
+    c_tv = a_tv.clone().zero_()
+    inds = np.arange(m, dtype=np.int32)
+    np.random.shuffle(inds)
+    c_ref = a[inds]
+
+    inds_tv = tv.from_numpy(inds).cuda()
+    times = []
+    all_params = lib_object.get_all_gather_params()
+    for p in all_params:
+        if lib_object.supported(p[2], a_tv.dim(1), a_tv.dtype):
+            t = time.time()
+            lib_object.gather(c_tv, a_tv, inds_tv, *p)
+            lib_object.stream_synchronize()
+            times.append(time.time() - t)
+    print(times)
+    best_params = all_params[np.argmin(times)]
+    print(best_params)
+    for i in range(5):
+        t = time.time()
+        lib_object.gather(c_tv, a_tv, inds_tv, 8, 32, 4, 64)
+        lib_object.stream_synchronize()
+
+        print(time.time() - t)
+    c_cpu = c_tv.cpu().numpy()
+    print(np.linalg.norm(c_ref - c_cpu))
+
+def _test_gather_pth():
+    import torch 
+    np.random.seed(12315)
+    m = 64000
+    k = 126
+    a = np.random.uniform(-2, 2, size=[m, k]).astype(np.float32)
+    inds = np.arange(m, dtype=np.int64)
+    np.random.shuffle(inds)
+
+    a_th = torch.from_numpy(a).cuda()
+    inds_th = torch.from_numpy(inds).cuda()
+
+    for i in range(10):
+        t = time.time()
+        x = a_th[inds_th]
+        torch.cuda.synchronize()
+
+        print(time.time() - t)
+
+
 
 if __name__ == "__main__":
     # _asdv_test_simt_shuffle()
-    _asdv_test_regular_gemm()
+    # _asdv_test_regular_gemm()
+    _test_gather()

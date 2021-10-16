@@ -464,7 +464,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         TV_ASSERT_RT_ERR(!a.empty() && !b.empty() && !c.empty(), 
             "a,b,c must not empty");
         if (algo_desp.shuffle_type == "{ShuffleStrideType.ShuffleAC.value}"){{
-            TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "a_inds,c_inds tensor must not empty");
+            TV_ASSERT_RT_ERR(!c_inds.empty(), "a_inds,c_inds tensor must not empty");
         }}else if (algo_desp.shuffle_type == "{ShuffleStrideType.ShuffleAB.value}"){{
             TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "a_inds,b_inds tensor must not empty");
         }}
@@ -1002,8 +1002,13 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         int m, n, k, k2;
         if (shuffle_type == "{ShuffleStrideType.ShuffleAC.value}"){{
             TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
-            TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "a_inds and c_inds must not empty");
-            m = a_inds.dim(0);
+            TV_ASSERT_RT_ERR(!c_inds.empty(), "c_inds must not empty");
+            int m;
+            if (!a_inds.empty()){{
+                m = a_inds.dim(0);
+            }}else{{
+                m = a.dim(0);
+            }}
             k = a.dim(int(!trans_a));
             k2 = b.dim(int(trans_b));
             n = b.dim(int(!trans_b) );
@@ -1063,7 +1068,10 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         code = pccm.FunctionCode()
         code.arg("stream", "std::uintptr_t", pyanno="int")
         code.raw(f"""
-        checkCudaErrors(cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream)));
+        auto res = cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream));
+        if (res){{
+            TV_THROW_RT_ERR("CUDA error", int(res));
+        }}
         """)
         return code
 
@@ -1190,10 +1198,15 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
                 code.raw(f"""
                 TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
-                auto m = a_inds.dim(0);
-                auto k = a_ten.dim(int(!trans_a));
-                auto k2 = b_ten.dim(int(trans_b));
-                auto n = b_ten.dim(int(!trans_b) );
+                int m;
+                if (!a_inds.empty()){{
+                    m = a_inds.dim(0);
+                }}else{{
+                    m = a.dim(0);
+                }}
+                int k = a_ten.dim(int(!trans_a));
+                int k2 = b_ten.dim(int(trans_b));
+                int n = b_ten.dim(int(!trans_b) );
                 """)
             elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
                 code.raw(f"""
@@ -1274,11 +1287,15 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             else:
                 if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
                     code.raw(f"""
-                    TV_ASSERT_RT_ERR(!a_inds.empty() && !c_inds.empty(), "error");
+                    const int* a_ptr = nullptr;
+                    if (!a_inds.empty()){{
+                        a_ptr = a_inds.data_ptr<const int>();
+                    }}
+                    TV_ASSERT_RT_ERR(!c_inds.empty(), "c must not empty");
                     {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                        a_inds.data_ptr<const int>(), c_inds.data_ptr<const int>(),
+                        a_ptr, c_inds.data_ptr<const int>(),
                         {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
                 elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
