@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-os.environ["CUMM_DEBUG"] = "1"
+os.environ["CUMM_DEBUG"] = "0"
 # _cudart = ctypes.CDLL('libcudart.so')
 
 import pickle
@@ -170,8 +170,9 @@ def _asdv_test_simt_shuffle():
     main_cu.namespace = "cumm.gemm.main"
     # gather_cu = GatherKernel(dtypes.float32, seq(32, 128), 1, 512)
     # gather_cu.namespace = "rtx"
-    print("BUILD FINISHTED")
     lib = build_gemm_lib([main_cu])
+    print("BUILD FINISHTED")
+
     lib_object = lib.cumm.gemm.main.GemmMainUnitTest()
     params_cls = lib.cumm.gemm.main.GemmParams
     algo_cls = lib.cumm.gemm.main.GemmAlgoDesp
@@ -182,16 +183,14 @@ def _asdv_test_simt_shuffle():
             continue
         print("RTX", params.shuffle_stride, params.trans_a, params.trans_b,
               params.trans_c)
-        for kk in range(100):
-            m = 100
-            n = 64
-            k = 64
+        for kk in range(1):
+            m = 64000
+            n = 128
+            k = 128
             a_inds = np.arange(m, dtype=np.int32)
             c_inds = np.arange(m, dtype=np.int32)
             np.random.shuffle(a_inds)
             np.random.shuffle(c_inds)
-            a_inds = a_inds[:8]
-            c_inds = c_inds[:8]
 
             if params.dtype_a == dtypes.int8:
                 a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
@@ -245,6 +244,11 @@ def _asdv_test_simt_shuffle():
             algo.trans_a = params.trans_a
             algo.trans_b = params.trans_b
             algo.trans_c = params.trans_c
+            algo.element_per_access_a = ker.input_spec.input_sub_tile_shape_a[1]
+            algo.element_per_access_b = ker.input_spec.input_sub_tile_shape_b[1]
+            algo.element_per_access_c = ker.output_spec.out_iter.element_per_acc
+            algo.split_k_serial = params.splitk_serial
+
             if params.tensorop is not None:
                 algo.tensorop = params.tensorop.shape
             params_cpp = params_cls()
@@ -254,7 +258,7 @@ def _asdv_test_simt_shuffle():
             params_cpp.b = b_tv
             params_cpp.c = c_tv
             params_cpp.beta = 0.0
-            for i in range(1):
+            for i in range(3):
                 # gather_lib.gather(a_gout_tv, a_tv, a_inds_tv)
                 # a_gout_tv_cpu = a_gout_tv.cpu().numpy()
                 # print(np.linalg.norm(a_gout_tv_cpu - a[a_inds]))
@@ -274,7 +278,6 @@ def _asdv_test_simt_shuffle():
                 # print(a_tv.shape, b_tv.shape, c_tv.shape)
                 c_cpu = c_tv.cpu().numpy()
                 # cu_prof_stop()
-
                 print(ksplit, params.dtype_c, params.get_algo_name(),
                     np.linalg.norm(c_cpu - c))
 
@@ -731,8 +734,8 @@ def _test_scatter():
 
 
 if __name__ == "__main__":
-    # _asdv_test_simt_shuffle_debug()
-    _asdv_test_simt_debug()
+    _asdv_test_simt_shuffle()
+    # _asdv_test_simt_debug()
     # _asdv_test_regular_gemm()
     # _test_gather()
     # _test_scatter()
