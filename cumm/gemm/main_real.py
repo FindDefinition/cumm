@@ -37,7 +37,6 @@ from cumm import tensorview as tv
 from cumm.gemm import kernel
 from cumm.gemm.algospec.core import ShuffleStrideType
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
-from cumm.gemm.gather import GatherKernel, Gather, GatherAll
 from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
 
 # def cu_prof_start():
@@ -71,6 +70,17 @@ def build_gather_lib(cus: List[pccm.Class]):
                                     Path(__file__).parent / "gather_test",
                                     build_dir=Path(__file__).parent / "build" /
                                     "build_gather",
+                                    pybind_file_suffix=".cc",
+                                    verbose=False,
+                                    disable_anno=True)
+
+    return lib
+
+def build_scatter_lib(cus: List[pccm.Class]):
+    lib = pccm.builder.build_pybind(cus,
+                                    Path(__file__).parent / "scatter_test",
+                                    build_dir=Path(__file__).parent / "build" /
+                                    "build_scatter",
                                     pybind_file_suffix=".cc",
                                     verbose=False,
                                     disable_anno=True)
@@ -158,8 +168,8 @@ def _asdv_test_simt_shuffle():
     np.random.seed(12315)
     main_cu = GemmMainUnitTest()
     main_cu.namespace = "cumm.gemm.main"
-    gather_cu = GatherKernel(dtypes.float32, seq(32, 128), 1, 512)
-    gather_cu.namespace = "rtx"
+    # gather_cu = GatherKernel(dtypes.float32, seq(32, 128), 1, 512)
+    # gather_cu.namespace = "rtx"
     print("BUILD FINISHTED")
     lib = build_gemm_lib([main_cu])
     lib_object = lib.cumm.gemm.main.GemmMainUnitTest()
@@ -172,101 +182,246 @@ def _asdv_test_simt_shuffle():
             continue
         print("RTX", params.shuffle_stride, params.trans_a, params.trans_b,
               params.trans_c)
-        m = 64000
-        n = 128
-        k = 128
-        a_inds = np.arange(m, dtype=np.int32)
-        c_inds = np.arange(m, dtype=np.int32)
-        np.random.shuffle(a_inds)
-        np.random.shuffle(c_inds)
-        # a_inds = a_inds[:m // 2]
-        # c_inds = c_inds[:m // 2]
+        for kk in range(100):
+            m = 100
+            n = 64
+            k = 64
+            a_inds = np.arange(m, dtype=np.int32)
+            c_inds = np.arange(m, dtype=np.int32)
+            np.random.shuffle(a_inds)
+            np.random.shuffle(c_inds)
+            a_inds = a_inds[:8]
+            c_inds = c_inds[:8]
 
-        if params.dtype_a == dtypes.int8:
-            a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
-            if params.shuffle_stride != ShuffleStrideType.ShuffleAB:
-                b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
-                c_tmp = (a[a_inds].astype(np.float32) @ b.astype(
-                    np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
-                c = np.zeros((m, n), dtype=a.dtype)
-                c[c_inds] = c_tmp
-            else:
-                b = np.random.randint(-2, 2, size=[m, n]).astype(np.int8)
-                c = (a[a_inds].T.astype(np.float32) @ b[c_inds].astype(
-                    np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
+            if params.dtype_a == dtypes.int8:
+                a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
+                if params.shuffle_stride != ShuffleStrideType.ShuffleAB:
+                    b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
+                    c_tmp = (a[a_inds].astype(np.float32) @ b.astype(
+                        np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
+                    c = np.zeros((m, n), dtype=a.dtype)
+                    c[c_inds] = c_tmp
+                else:
+                    b = np.random.randint(-2, 2, size=[m, n]).astype(np.int8)
+                    c = (a[a_inds].T.astype(np.float32) @ b[c_inds].astype(
+                        np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
 
-        else:
-            a = np.random.uniform(-1, 1, size=[m, k]).astype(
-                dtypes.get_npdtype(params.dtype_a))
-            if params.shuffle_stride != ShuffleStrideType.ShuffleAB:
-                b = np.random.uniform(-1, 1, size=[k, n]).astype(
-                    dtypes.get_npdtype(params.dtype_b))
-                c_tmp = (a[a_inds].astype(np.float32) @ b.astype(
-                    np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
-                c = np.zeros((m, n), dtype=a.dtype)
-                c[c_inds] = c_tmp
             else:
-                b = np.random.uniform(-1, 1, size=[m, n]).astype(
-                    dtypes.get_npdtype(params.dtype_b))
-                c = (a[a_inds].T.astype(np.float32) @ b[c_inds].astype(
-                    np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
-        if params.trans_b:
-            b = np.ascontiguousarray(b.T)
+                a = np.random.uniform(-1, 1, size=[m, k]).astype(
+                    dtypes.get_npdtype(params.dtype_a))
+                if params.shuffle_stride != ShuffleStrideType.ShuffleAB:
+                    b = np.random.uniform(-1, 1, size=[k, n]).astype(
+                        dtypes.get_npdtype(params.dtype_b))
+                    c_tmp = (a[a_inds].astype(np.float32) @ b.astype(
+                        np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
+                    c = np.zeros((m, n), dtype=a.dtype)
+                    c[c_inds] = c_tmp
+                else:
+                    b = np.random.uniform(-1, 1, size=[m, n]).astype(
+                        dtypes.get_npdtype(params.dtype_b))
+                    c = (a[a_inds].T.astype(np.float32) @ b[c_inds].astype(
+                        np.float32)).astype(dtypes.get_npdtype(params.dtype_c))
+            if params.trans_b:
+                b = np.ascontiguousarray(b.T)
+
+            a_tv = tv.from_numpy(a).cuda()
+            b_tv = tv.from_numpy(b).cuda()
+            c_tv = tv.from_numpy(c).cuda()
+            a_inds_tv = tv.from_numpy(a_inds).cuda()
+            c_inds_tv = tv.from_numpy(c_inds).cuda()
+            if params.splitk_serial:
+                ksplit = 32
+            else:
+                ksplit = 1
+            # print("CUDA PREPARED")
+            algo = algo_cls()
+            algo.tile_shape = params.ts
+            algo.warp_tile_shape = params.wts
+            algo.num_stage = params.num_stage
+            algo.dacc = params.dtype_acc.tv_dtype
+            algo.dcomp = params.dtype_comp.tv_dtype
+            algo.algo = params.algo.value
+            algo.shuffle_type = params.shuffle_stride.value
+            algo.trans_a = params.trans_a
+            algo.trans_b = params.trans_b
+            algo.trans_c = params.trans_c
+            if params.tensorop is not None:
+                algo.tensorop = params.tensorop.shape
+            params_cpp = params_cls()
+            params_cpp.algo_desp = algo
+            params_cpp.split_k_slices = ksplit
+            params_cpp.a = a_tv
+            params_cpp.b = b_tv
+            params_cpp.c = c_tv
+            params_cpp.beta = 0.0
+            for i in range(1):
+                # gather_lib.gather(a_gout_tv, a_tv, a_inds_tv)
+                # a_gout_tv_cpu = a_gout_tv.cpu().numpy()
+                # print(np.linalg.norm(a_gout_tv_cpu - a[a_inds]))
+                # c_tv.zero_()
+                # lib_object.shuffle_matmul_ref(c_tv_f32, a_tv_f32, b_tv_transposed, a_inds_tv, c_inds_tv, a_inds_tv.dim(0))
+                if params.shuffle_stride == ShuffleStrideType.ShuffleAB:
+                    params_cpp.a_inds = a_inds_tv
+                    params_cpp.b_inds = c_inds_tv
+                    # c_tv.zero_()
+                    lib_object.matmul2(params_cpp)
+                else:
+                    # c_tv.zero_()
+                    params_cpp.a_inds = a_inds_tv
+                    params_cpp.c_inds = c_inds_tv
+                    lib_object.matmul2(params_cpp)
+                assert params.get_algo_name() == ker.get_algo_name()
+                # print(a_tv.shape, b_tv.shape, c_tv.shape)
+                c_cpu = c_tv.cpu().numpy()
+                # cu_prof_stop()
+
+                print(ksplit, params.dtype_c, params.get_algo_name(),
+                    np.linalg.norm(c_cpu - c))
+
+def _asdv_test_simt_shuffle_debug():
+    np.random.seed(12315)
+    main_cu = GemmMainUnitTest()
+    main_cu.namespace = "cumm.gemm.main"
+    lib = build_gemm_lib([main_cu])
+    lib_object = lib.cumm.gemm.main.GemmMainUnitTest()
+    params_cls = lib.cumm.gemm.main.GemmParams
+    algo_cls = lib.cumm.gemm.main.GemmAlgoDesp
+    # gather_lib = lib_object.rtx.GatherKernel()
+    with open("/home/yy/test_debug.pkl", "rb") as f:
+        import pickle 
+        a, b, c, a_inds, b_inds = pickle.load(f)
+        a_inds = np.arange(a_inds.shape[0]).astype(np.int32)
+        b_inds = np.arange(b_inds.shape[0]).astype(np.int32)
 
         a_tv = tv.from_numpy(a).cuda()
         b_tv = tv.from_numpy(b).cuda()
         c_tv = tv.from_numpy(c).cuda()
         a_inds_tv = tv.from_numpy(a_inds).cuda()
-        c_inds_tv = tv.from_numpy(c_inds).cuda()
-        if params.splitk_serial:
-            ksplit = 16
-        else:
-            ksplit = 1
-        # print("CUDA PREPARED")
-        algo = algo_cls()
-        algo.tile_shape = params.ts
-        algo.warp_tile_shape = params.wts
-        algo.num_stage = params.num_stage
-        algo.dacc = params.dtype_acc.tv_dtype
-        algo.dcomp = params.dtype_comp.tv_dtype
-        algo.algo = params.algo.value
-        algo.shuffle_type = params.shuffle_stride.value
-        algo.trans_a = params.trans_a
-        algo.trans_b = params.trans_b
-        algo.trans_c = params.trans_c
-        if params.tensorop is not None:
-            algo.tensorop = params.tensorop.shape
-        params_cpp = params_cls()
-        params_cpp.algo_desp = algo
-        params_cpp.split_k_slices = ksplit
-        params_cpp.a = a_tv
-        params_cpp.b = b_tv
-        params_cpp.c = c_tv
-        params_cpp.beta = 0.0
-        for i in range(3):
-            # gather_lib.gather(a_gout_tv, a_tv, a_inds_tv)
-            # a_gout_tv_cpu = a_gout_tv.cpu().numpy()
-            # print(np.linalg.norm(a_gout_tv_cpu - a[a_inds]))
-            # c_tv.zero_()
-            # lib_object.shuffle_matmul_ref(c_tv_f32, a_tv_f32, b_tv_transposed, a_inds_tv, c_inds_tv, a_inds_tv.dim(0))
-            if params.shuffle_stride == ShuffleStrideType.ShuffleAB:
-                params_cpp.a_inds = a_inds_tv
-                params_cpp.b_inds = c_inds_tv
-                # c_tv.zero_()
-                lib_object.matmul2(params_cpp)
+        b_inds_tv = tv.from_numpy(b_inds).cuda()
+        print(a_inds, b_inds)
+
+
+    for params, ker in zip(main_cu.all_params, main_cu.all_kernels):
+        if params.shuffle_stride == ShuffleStrideType.NoShuffle:
+            continue
+        print("RTX", params.shuffle_stride, params.trans_a, params.trans_b,
+              params.trans_c)
+        
+        for kk in range(100):
+            if params.splitk_serial:
+                ksplit = 32
             else:
-                # c_tv.zero_()
-                params_cpp.a_inds = a_inds_tv
-                params_cpp.c_inds = c_inds_tv
-                lib_object.matmul2(params_cpp)
-            assert params.get_algo_name() == ker.get_algo_name()
+                continue
+                ksplit = 1
+            c_ = c_tv.clone()
+
+            # print("CUDA PREPARED")
+            algo = algo_cls()
+            algo.tile_shape = params.ts
+            algo.warp_tile_shape = params.wts
+            algo.num_stage = params.num_stage
+            algo.dacc = params.dtype_acc.tv_dtype
+            algo.dcomp = params.dtype_comp.tv_dtype
+            algo.algo = params.algo.value
+            algo.shuffle_type = params.shuffle_stride.value
+            algo.trans_a = params.trans_a
+            algo.trans_b = params.trans_b
+            algo.trans_c = params.trans_c
+            if params.tensorop is not None:
+                algo.tensorop = params.tensorop.shape
+            params_cpp = params_cls()
+            params_cpp.algo_desp = algo
+            params_cpp.split_k_slices = ksplit
+            params_cpp.a = a_tv
+            params_cpp.b = b_tv
+            params_cpp.c = c_
+            params_cpp.beta = 0.0
+            params_cpp.a_inds = a_inds_tv
+            params_cpp.b_inds = b_inds_tv
+            # c_tv.zero_()
+            lib_object.matmul2(params_cpp)
             # print(a_tv.shape, b_tv.shape, c_tv.shape)
             c_cpu = c_tv.cpu().numpy()
             # cu_prof_stop()
 
-            print(params.dtype_c, params.get_algo_name(),
+            print(ksplit, params.dtype_c, params.get_algo_name(),
                 np.linalg.norm(c_cpu - c))
 
+def _asdv_test_simt_debug():
+    np.random.seed(12315)
+    main_cu = GemmMainUnitTest()
+    main_cu.namespace = "cumm.gemm.main"
+    lib = build_gemm_lib([main_cu])
+    lib_object = lib.cumm.gemm.main.GemmMainUnitTest()
+    params_cls = lib.cumm.gemm.main.GemmParams
+    algo_cls = lib.cumm.gemm.main.GemmAlgoDesp
+    # gather_lib = lib_object.rtx.GatherKernel()
+    with open("/home/yy/test_debug.pkl", "rb") as f:
+        import pickle 
+        a, b, c, a_inds, b_inds = pickle.load(f)
+        nhot  = len(a_inds)
+        a_inds = np.arange(a_inds.shape[0]).astype(np.int32)
+        b_inds = np.arange(b_inds.shape[0]).astype(np.int32)
+        a = a[:nhot]
+        b = b[:nhot]
+        print(a.shape, b.shape, c.shape)
+        a_tv = tv.from_numpy(a).cuda()
+        b_tv = tv.from_numpy(b).cuda()
+        _asd = tv.zeros([5000], device=0)
+        c_tv = tv.from_numpy(c).cuda()
+        print(c.shape)
+        raise NotImplementedError
+        a_inds_tv = tv.from_numpy(a_inds).cuda()
+        b_inds_tv = tv.from_numpy(b_inds).cuda()
+
+        print(a_inds, b_inds)
+
+
+    for params, ker in zip(main_cu.all_params, main_cu.all_kernels):
+        if params.shuffle_stride != ShuffleStrideType.NoShuffle:
+            continue
+        print("RTX", params.shuffle_stride, params.trans_a, params.trans_b,
+              params.trans_c)
+        
+        for kk in range(100):
+            if params.splitk_serial:
+                ksplit = 32
+            else:
+                continue
+                ksplit = 1
+            # c_ = c_tv.clone()
+
+            # print("CUDA PREPARED")
+            algo = algo_cls()
+            algo.tile_shape = params.ts
+            algo.warp_tile_shape = params.wts
+            algo.num_stage = params.num_stage
+            algo.dacc = params.dtype_acc.tv_dtype
+            algo.dcomp = params.dtype_comp.tv_dtype
+            algo.algo = params.algo.value
+            algo.shuffle_type = params.shuffle_stride.value
+            algo.trans_a = params.trans_a
+            algo.trans_b = params.trans_b
+            algo.trans_c = params.trans_c
+            if params.tensorop is not None:
+                algo.tensorop = params.tensorop.shape
+            params_cpp = params_cls()
+            params_cpp.algo_desp = algo
+            params_cpp.split_k_slices = ksplit
+            params_cpp.a = a_tv
+            params_cpp.b = b_tv
+            params_cpp.c = c_tv
+            params_cpp.beta = 0.0
+            params_cpp.a_inds = a_inds_tv
+            params_cpp.b_inds = b_inds_tv
+            # c_tv.zero_()
+            lib_object.matmul2(params_cpp)
+            # print(a_tv.shape, b_tv.shape, c_tv.shape)
+            c_cpu = c_tv.cpu().numpy()
+            # cu_prof_stop()
+
+            print(ksplit, params.dtype_c, params.get_algo_name(),
+                np.linalg.norm(c_cpu - c))
 
 COUNTBIT_LOOKUP_TABLE = np.array([bin(i).count('1')
                                   for i in range(256)]).astype(np.int32)
@@ -302,10 +457,10 @@ def _asdv_test_regular_gemm():
         k *= 2
         m = 64
         n = 64
-        k = 64
-        m = max(params.ts[0], m)
-        n = max(params.ts[1], n)
-        k = max(params.ts[2], k)
+        k = 43329
+        # m = max(params.ts[0], m)
+        # n = max(params.ts[1], n)
+        # k = max(params.ts[2], k)
 
         if params.dtype_a == dtypes.int8:
             a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
@@ -331,7 +486,7 @@ def _asdv_test_regular_gemm():
             c = np.ascontiguousarray(c.transpose(1, 0))
         # print("WTF PREPARED")
         if params.splitk_serial:
-            ksplit = 2
+            ksplit = 16
         else:
             ksplit = 1
         # print("CUDA PREPARED")
@@ -458,14 +613,16 @@ def _test_gather1():
 
 
 def _test_gather():
+    from cumm.gemm.gather import GatherKernel, Gather, GatherAll, ScatterAll
+
     np.random.seed(12315)
     main_cu = GatherAll()
     # main_cu = GatherV2(seq(8, 128 * 4), 16, 256)
     # main_cu.namespace = "cumm.gemm.gather"
     lib = build_gemm_lib([main_cu])
     lib_object = lib.cumm.gemm.gather.GatherAll()
-    m = 125562
-    k = 32
+    m = 64000
+    k = 128
     a = np.random.uniform(-2, 2, size=[m, k]).astype(np.float32)
     a_tv = tv.from_numpy(a).cuda()
     c_tv = a_tv.clone().zero_()
@@ -486,11 +643,20 @@ def _test_gather():
     best_params = all_params[np.argmin(times)]
     print(best_params)
     for i in range(5):
-        t = time.time()
-        lib_object.gather(c_tv, a_tv, inds_tv, 8, 32, 4, 64)
         lib_object.stream_synchronize()
 
-        print(time.time() - t)
+        t = time.time()
+        # lib_object.gather2(c_tv, a_tv, inds_tv)
+        lib_object.gather(c_tv, a_tv, inds_tv, *best_params)
+        lib_object.stream_synchronize()
+
+        print("G1", time.time() - t)
+        lib_object.stream_synchronize()
+        t = time.time()
+        lib_object.gather2(c_tv, a_tv, inds_tv)
+        lib_object.stream_synchronize()
+        print("G2", time.time() - t)
+
     c_cpu = c_tv.cpu().numpy()
     print(np.linalg.norm(c_ref - c_cpu))
 
@@ -498,7 +664,7 @@ def _test_gather_pth():
     import torch 
     np.random.seed(12315)
     m = 64000
-    k = 126
+    k = 128
     a = np.random.uniform(-2, 2, size=[m, k]).astype(np.float32)
     inds = np.arange(m, dtype=np.int64)
     np.random.shuffle(inds)
@@ -513,9 +679,60 @@ def _test_gather_pth():
 
         print(time.time() - t)
 
+def _test_scatter():
+    np.random.seed(12315)
+    main_cu = ScatterAll()
+    # main_cu = GatherV2(seq(8, 128 * 4), 16, 256)
+    # main_cu.namespace = "cumm.gemm.gather"
+    lib = build_scatter_lib([main_cu])
+    lib_object = lib.cumm.gemm.gather.ScatterAll()
+    m = 64000
+    k = 256
+    a = np.random.uniform(-2, 2, size=[m, k]).astype(np.float32)
+    a_tv = tv.from_numpy(a).cuda()
+    c_tv = a_tv.clone().zero_()
+    inds = np.arange(m, dtype=np.int32)
+    np.random.shuffle(inds)
+    c_ref = np.zeros_like(a)
+    c_ref[inds] = a
+
+    inds_tv = tv.from_numpy(inds).cuda()
+    times = []
+    all_params = lib_object.get_all_scatter_params()
+    for p in all_params:
+        if lib_object.supported_scatter(*p, a_tv.dim(1), a_tv.dtype):
+            t = time.time()
+            lib_object.scatter(c_tv, a_tv, inds_tv, *p)
+            lib_object.stream_synchronize()
+            times.append(time.time() - t)
+    print(times)
+    best_params = all_params[np.argmin(times)]
+    print(best_params)
+    for i in range(5):
+        c_tv.zero_()
+        lib_object.stream_synchronize()
+
+        t = time.time()
+        # lib_object.gather2(c_tv, a_tv, inds_tv)
+        lib_object.scatter(c_tv, a_tv, inds_tv, *best_params)
+        lib_object.stream_synchronize()
+        print("G1", time.time() - t)
+        c_tv.zero_()
+        lib_object.stream_synchronize()
+        t = time.time()
+        lib_object.scatter2(c_tv, a_tv, inds_tv)
+        lib_object.stream_synchronize()
+        print("G2", time.time() - t)
+
+    c_cpu = c_tv.cpu().numpy()
+    # print(c_cpu)
+    # print(c_ref)
+    print(np.linalg.norm(c_ref - c_cpu))
 
 
 if __name__ == "__main__":
-    # _asdv_test_simt_shuffle()
+    # _asdv_test_simt_shuffle_debug()
+    _asdv_test_simt_debug()
     # _asdv_test_regular_gemm()
-    _test_gather()
+    # _test_gather()
+    # _test_scatter()

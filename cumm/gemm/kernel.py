@@ -33,7 +33,7 @@ from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.outputs import Output, OutputSmemStorage
-from cumm.gemm.utils import GemmUtils
+from cumm.gemm.utils import GemmUtils, GemmUtilsCPU
 from cumm.gemm.wmma.simt import WarpMmaSimt
 
 
@@ -58,7 +58,7 @@ class GemmParams(pccm.ParameterizedClass):
             have_workspace: bool = False,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic)
+        self.add_dependency(TensorView, GemmBasic, GemmUtilsCPU)
         self.add_param_class("gemmutils", GemmUtils(tile_shape), "GemmUtils")
         self.itera_params = itera_params
         self.iterb_params = iterb_params
@@ -184,8 +184,12 @@ class GemmParams(pccm.ParameterizedClass):
             grid_dims.z = grid_shape.k();
             """)
         else:
-            code.raw(
-                "grid_dims = get_logical_tile_count(m, n, k, split_k_slice);")
+            code.raw(f"""
+            auto grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(m, n, k, {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slice);
+            grid_dims.x = grid_dims_arr[0];
+            grid_dims.y = grid_dims_arr[1];
+            grid_dims.z = grid_dims_arr[2];
+            """)
         code.raw(f"""
         // int total_gemm_k_iterations = tv::div_up(k, {self.tile_shape[2]}); // 160, 16 = 10
         // int gemm_k_iterations_per_split =
@@ -261,20 +265,6 @@ class GemmParams(pccm.ParameterizedClass):
         code.ctor_init("beta", "beta")
         if self.have_workspace:
             code.ctor_init("workspace", "workspace")
-        return code
-
-    @pccm.cuda.static_function(inline=True)
-    def get_logical_tile_count(self):
-        code = pccm.FunctionCode()
-        code.arg("m,n,k,split_k_slice", "int")
-        code.ret("dim3")
-        code.raw(f"""
-        dim3 grid_dims;
-        grid_dims.x = tv::div_up(m, {self.tile_shape[0]});
-        grid_dims.y = tv::div_up(n, {self.tile_shape[1]});
-        grid_dims.z = split_k_slice;
-        return grid_dims;
-        """)
         return code
 
 
@@ -500,11 +490,9 @@ class GemmKernel(pccm.ParameterizedClass):
                 int tile_offset_m = blockIdx.x;
                 int tile_offset_n = blockIdx.y;
                 int tile_offset_k = blockIdx.z;
-                if (tile_offset_m >= params.grid_dims.x ||
-                    tile_offset_n >= params.grid_dims.y) {{
-                    return;
-                }}
                 """)
+                with code.if_("tile_offset_m >= params.grid_dims.x || tile_offset_n >= params.grid_dims.y"):
+                    code.raw(f"return;")
                 code.raw(f"""
                 tv::array<int, 2> block_offset_A{{tile_offset_m * {self.tile_shape[0]},
                                                 tile_offset_k * params.gemm_k_size_per_split}};
@@ -627,6 +615,7 @@ class GemmKernel(pccm.ParameterizedClass):
                 // tv::print_fragment_once<int, 0, 16, {cudasim.debug_tx()}>(accumulators);
 
                 """)
+
             if CUTLASS_OUTPUT_ITER:
                 code.raw(f"""
 
@@ -671,6 +660,8 @@ class GemmKernel(pccm.ParameterizedClass):
 
             else:
                 code.raw(f"""
+                // tv::printf2_once("HERE 0", threadIdx.x, blockIdx.x, blockIdx.y, blockIdx.z);
+
                 // // C = alpha * A@B + beta * D, D can be C
                 OutputOp output_op(params.alpha, params.beta);
                 """)
@@ -745,7 +736,7 @@ class GemmKernel(pccm.ParameterizedClass):
                             // Otherwise, the semaphore is incremented
                             lock = tile_offset_k + 1;
                         }}
-                        
+                        __threadfence();
                         semaphore.release(lock);
                     }}
                     """)

@@ -17,6 +17,25 @@ import pccm
 from cumm.common import TensorView
 from cumm.gemm.core.metaarray import MetaArray
 
+class GemmUtilsCPU(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorView)
+
+    @pccm.static_function
+    def get_logical_tile_count(self):
+        code = pccm.FunctionCode()
+        code.arg("m,n,k,tile_m, tile_n, split_k_slice", "int")
+        code.ret("tv::array<int, 3>")
+        code.raw(f"""
+        tv::array<int, 3> grid_dims;
+        grid_dims[0] = tv::div_up(m, tile_m);
+        grid_dims[1] = tv::div_up(n, tile_n);
+        grid_dims[2] = split_k_slice;
+        return grid_dims;
+        """)
+        return code
+
 
 class GemmUtils(pccm.ParameterizedClass):
     def __init__(self, tile_shape: MetaArray[int]):

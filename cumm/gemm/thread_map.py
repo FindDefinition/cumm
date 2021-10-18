@@ -325,6 +325,7 @@ def get_1d_access_iter_delta(shape: MetaArray[int], warp_remain: int, epa: int,
     warp_remain_col = warp_remain // warp_remain_row
     deltas = metaseq(1, warp_size * epa)
     iters = metaseq(1, shape[4] // deltas[1] // warp_remain_col)
+    # iters = metaseq(1, shape[4] // constants.WARP_SIZE // epa)
     acc_shape = metaseq(1, warp_size)
     # divide warp to
     warp_part_stride = metaseq(warp_remain // shape[3], 1)
