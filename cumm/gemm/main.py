@@ -442,7 +442,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         bool res = true;
         auto lda = trans_a() ? m : k;
         auto ldb = trans_b() ? k : n;
-        auto ldc = trans_c() ? n : m;
+        auto ldc = trans_c() ? m : n;
         if (element_per_access_a > 0){{
             res &= lda % element_per_access_a == 0;
         }}
@@ -603,73 +603,84 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
 
 
 SHUFFLE_SIMT_PARAMS: List[GemmAlgoParams] = [
-    # *gen_shuffle_params(
-    #     (64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
-    #     2, kernel.GemmAlgo.SimtDP4A, None),
-    # *gen_shuffle_params(
-    #     (128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
-    #     2, kernel.GemmAlgo.SimtDP4A, None),
-    # *gen_shuffle_params(
-    #     (128, 128, 32),
-    #     (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
-    #     kernel.GemmAlgo.SimtDP4A, None),
-    # *gen_shuffle_params(
-    #     (128, 128, 32),
-    #     (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
-    #     kernel.GemmAlgo.SimtDP4A, None),
-    # *gen_shuffle_params(
-    #     (64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
-    #     2, kernel.GemmAlgo.SimtDP4A, None),
-    # *gen_shuffle_params(
-    #     (64, 256, 8),
-    #     (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (64, 256, 8),
-    #     (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (32, 128, 16),
-    #     (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (32, 512, 8),
-    #     (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (128, 128, 8),
-    #     (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (128, 128, 8),
-    #     (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (64, 128, 8),
-    #     (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (64, 128, 8),
-    #     (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (128, 64, 8),
-    #     (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (128, 64, 8),
-    #     (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (64, 64, 8),
-    #     (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (32, 64, 16),
-    #     (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (64, 32, 16),
-    #     (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-    # *gen_shuffle_params(
-    #     (32, 32, 32),
-    #     (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-
+    *gen_shuffle_params(
+        (64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (128, 128, 32),
+        (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
+        kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
+        2, kernel.GemmAlgo.SimtDP4A, None),
+    *gen_shuffle_params(
+        (64, 256, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 256, 8),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 128, 16),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 512, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
         (128, 128, 8),
-        (32, 64, 8), ["f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (128, 128, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 128, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 128, 8),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (128, 64, 8),
+        (32, 64, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (128, 64, 8),
+        (64, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 64, 8),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 64, 16),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 32, 16),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 32, 32),
+        (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    # fall back kernels if mat is misaligned for half
+    *gen_shuffle_params(
+        (128, 128, 8),
+        (32, 64, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
         (32, 64, 32),
-        (32, 64, 8), ["f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (32, 32, 32),
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 64, 16),
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 128, 16),
+        (32, 64, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+    *gen_shuffle_params(
+        (64, 64, 8),
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
 ]
 
 SHUFFLE_VOLTA_PARAMS: List[GemmAlgoParams] = [
@@ -698,7 +709,7 @@ SHUFFLE_VOLTA_PARAMS: List[GemmAlgoParams] = [
         (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
         kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
 ]
-SHUFFLE_VOLTA_PARAMS = []
+# SHUFFLE_VOLTA_PARAMS = []
 SHUFFLE_TURING_PARAMS: List[GemmAlgoParams] = [
     *gen_shuffle_params(
         (64, 64, 32),
@@ -711,6 +722,14 @@ SHUFFLE_TURING_PARAMS: List[GemmAlgoParams] = [
     *gen_shuffle_params(
         (128, 128, 32),
         (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (64, 64, 64),
+        (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+    *gen_shuffle_params(
+        (64, 128, 64),
+        (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
         kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
     *gen_shuffle_params(
         (128, 256, 32),
@@ -754,7 +773,7 @@ SHUFFLE_TURING_PARAMS: List[GemmAlgoParams] = [
         (64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
         2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
 ]
-SHUFFLE_TURING_PARAMS = []
+# SHUFFLE_TURING_PARAMS = []
 
 class GemmMainUnitTest(pccm.ParameterizedClass):
     def __init__(self, gemm_params: Optional[List[GemmAlgoParams]] = None):
@@ -1099,7 +1118,6 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         if (shuffle_type == "{ShuffleStrideType.ShuffleAC.value}"){{
             TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
             TV_ASSERT_RT_ERR(!c_inds_shape.empty(), "c_inds must not empty");
-            int m;
             if (!a_inds_shape.empty()){{
                 m = a_inds_shape[0];
             }}else{{

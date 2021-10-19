@@ -264,6 +264,7 @@ def _asdv_test_simt_shuffle():
                 # print(np.linalg.norm(a_gout_tv_cpu - a[a_inds]))
                 # c_tv.zero_()
                 # lib_object.shuffle_matmul_ref(c_tv_f32, a_tv_f32, b_tv_transposed, a_inds_tv, c_inds_tv, a_inds_tv.dim(0))
+                t = time.time()
                 if params.shuffle_stride == ShuffleStrideType.ShuffleAB:
                     params_cpp.a_inds = a_inds_tv
                     params_cpp.b_inds = c_inds_tv
@@ -276,9 +277,11 @@ def _asdv_test_simt_shuffle():
                     lib_object.matmul2(params_cpp)
                 assert params.get_algo_name() == ker.get_algo_name()
                 # print(a_tv.shape, b_tv.shape, c_tv.shape)
+                lib_object.device_synchronize()
+                duration = time.time() - t
                 c_cpu = c_tv.cpu().numpy()
                 # cu_prof_stop()
-                print(ksplit, params.dtype_c, params.get_algo_name(),
+                print(ksplit, params.dtype_c, params.get_algo_name(), duration,
                     np.linalg.norm(c_cpu - c))
 
 def _asdv_test_simt_shuffle_debug():
