@@ -15,6 +15,7 @@
 #pragma once
 #include "hash.cu.h"
 #include "hash_functions.h"
+#include <tensorview/core/defs.h>
 
 namespace tv {
 
@@ -40,14 +41,14 @@ private:
   Hash hash_ftor_ = Hash();
 
 public:
-  explicit TV_HOST_DEVICE LinearHashTable(value_type *table,
+  TV_HOST_DEVICE explicit LinearHashTable(value_type *table,
                                           size_type hash_size)
       : table_(table), hash_size_(hash_size) {
     auto eky = empty_key;
     empty_key_uint = *(reinterpret_cast<const key_type_uint *>(&eky));
   }
 
-  key_type_uint TV_DEVICE_INLINE hash(K key) const {
+  TV_DEVICE_INLINE key_type_uint hash(K key) const {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     return hash_ftor_(key_u);
   }
@@ -58,7 +59,7 @@ public:
 
   TV_HOST_DEVICE_INLINE const value_type *data() const { return table_; }
 
-  void TV_DEVICE insert(const K &key, const V &value) {
+  TV_DEVICE_INLINE void insert(const K &key, const V &value) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     key_type_uint slot;
     if (Power2) {
@@ -82,7 +83,7 @@ public:
     }
   }
 
-  void TV_DEVICE insert_add(const K &key, const V &value) {
+  TV_DEVICE_INLINE void insert_add(const K &key, const V &value) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     key_type_uint slot;
     if (Power2) {
@@ -106,7 +107,7 @@ public:
     }
   }
 
-  value_type TV_DEVICE lookup(K key) {
+  TV_DEVICE_INLINE value_type lookup(K key) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     key_type_uint slot;
     if (Power2) {
@@ -114,7 +115,7 @@ public:
     } else {
       slot = hash_ftor_(key_u) % hash_size_;
     }
-    const __restrict__ value_type *table_ptr = table_;
+    const value_type *table_ptr = table_;
     while (true) {
       auto val = table_ptr[slot];
       if (val.first == key) {
@@ -132,7 +133,7 @@ public:
     return {empty_key, V()};
   }
 
-  value_type *TV_DEVICE lookup_ptr(K key) {
+  TV_DEVICE_INLINE value_type *lookup_ptr(K key) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     key_type_uint slot;
     if (Power2) {
@@ -158,7 +159,7 @@ public:
     return nullptr;
   }
 
-  void TV_DEVICE delete_item(K key, V empty_value) {
+  TV_DEVICE_INLINE void delete_item(K key, V empty_value) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     key_type_uint slot;
     if (Power2) {
@@ -243,13 +244,13 @@ private:
   key_type_uint empty_key_uint;
 
 public:
-  explicit TV_HOST_DEVICE LinearHashSet(value_type *table, size_type hash_size)
+  TV_HOST_DEVICE explicit LinearHashSet(value_type *table, size_type hash_size)
       : table_(table), hash_size_(hash_size) {
     auto eky = empty_key;
     empty_key_uint = *(reinterpret_cast<const key_type_uint *>(&eky));
   }
 
-  K TV_DEVICE_INLINE hash(K key) const {
+  TV_DEVICE_INLINE K hash(K key) const {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     return hash_ftor_(key_u);
   }
@@ -260,7 +261,7 @@ public:
 
   TV_HOST_DEVICE_INLINE const value_type *data() const { return table_; }
 
-  void TV_DEVICE insert(const K &key) {
+  TV_DEVICE void insert(const K &key) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     key_type_uint slot;
     if (Power2) {
@@ -283,7 +284,7 @@ public:
     }
   }
 
-  value_type *TV_DEVICE lookup_ptr(K key) {
+  TV_DEVICE value_type *lookup_ptr(K key) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
     key_type_uint slot;
     if (Power2) {

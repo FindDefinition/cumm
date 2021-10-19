@@ -53,7 +53,9 @@ template <> struct FNVInternal<uint64_t> {
   constexpr static uint64_t prime = 0x100000001b3;
 };
 
-template <> struct FNVInternal<unsigned long long> {
+static constexpr bool kIsUint64SameAsULL = std::is_same<uint64_t, unsigned long long>::value;
+
+template <> struct FNVInternal<std::conditional<kIsUint64SameAsULL, int64_t, unsigned long long>::type> {
   constexpr static unsigned long long defaultOffsetBasis = 0xcbf29ce484222325;
   constexpr static unsigned long long prime = 0x100000001b3;
 };
