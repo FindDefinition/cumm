@@ -456,7 +456,7 @@ struct DispatchIntNoexcept<T<Args...>> {
   }
 };
 
-constexpr size_t kTensorMaxDim = 12;
+constexpr size_t kTensorMaxDim = 10;
 using TensorShape = ShapeBase<kTensorMaxDim, int64_t>;
 
 struct Tensor {
@@ -654,7 +654,7 @@ struct Tensor {
     res.dtype_ = dtype_;
     res.storage_ = storage_;
     res.shape_ = shape_.subshape(1);
-    res.offset_ = offset_ + index * stride_[0];
+    res.offset_ = offset_ + index * stride_[0] * itemsize();
     res.stride_ = stride_.subshape(1);
     res.writeable_ = writeable_;
     return res;
@@ -690,7 +690,7 @@ struct Tensor {
     TV_ASSERT_INVALID_ARG(start < shape_[0], "start must small than dim 0",
                           shape_[0]);
     TV_ASSERT_INVALID_ARG(start < end, "start must small than end");
-    size_t new_offset = offset_ + start * shape_.prod(1);
+    size_t new_offset = offset_ + start * shape_.prod(1) * itemsize();
     Tensor res(*this);
     TensorShape newshape(shape_);
     newshape[0] = std::min(end - start, shape_[0]);
@@ -743,7 +743,7 @@ struct Tensor {
   size_t storage_size() const { return storage_->size(); }
 
   size_t itemsize() const { return detail::sizeof_dtype(dtype_); }
-  size_t byte_offset() const { return offset_ * itemsize(); }
+  size_t byte_offset() const { return offset_; }
   Tensor &zero_(Context ctx = Context()) {
     writable_check();
     storage_->zero_(byte_offset(), raw_size(), ctx);
@@ -835,21 +835,25 @@ struct Tensor {
                      dtype_str(this->dtype()), dtype_str(tensor.dtype()));
     if (this->device() == -1 && tensor.device() == -1) {
 #ifdef TV_CUDA
-      if (ctx.has_cuda_stream()) {
-        host2host(this->raw_data(), tensor.raw_data(),
-                  this->size() * detail::sizeof_dtype(dtype_),
-                  ctx.cuda_stream());
+      // use memcpy instead to avoid cuda context init
+      // host2host(raw_data(), tensor.raw_data(),
+      //           size() * detail::sizeof_dtype(dtype_));
+      std::copy(tensor.raw_data(),
+                tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
+                raw_data());
+      // if (ctx.has_cuda_stream()) {
+      //   host2host(this->raw_data(), tensor.raw_data(),
+      //             this->size() * detail::sizeof_dtype(dtype_),
+      //             ctx.cuda_stream());
 
-      } else {
-        host2host(this->raw_data(), tensor.raw_data(),
-                  this->size() * detail::sizeof_dtype(dtype_));
-      }
+      // } else {
+      //   host2host(this->raw_data(), tensor.raw_data(),
+      //             this->size() * detail::sizeof_dtype(dtype_));
+      // }
 #else
-      Dispatch<detail::all_tensor_types_t>()(tensor.dtype(), [&](auto I) {
-        using T = TV_DECLTYPE(I);
-        std::copy(tensor.data<T>(), tensor.data<T>() + tensor.size(),
-                  this->data<T>());
-      });
+      std::copy(tensor.raw_data(),
+                tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
+                raw_data());
 #endif
     }
 #ifdef TV_CUDA
