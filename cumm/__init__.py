@@ -27,4 +27,5 @@ if project_is_installed(PACKAGE_NAME) and project_is_editable(PACKAGE_NAME):
     pccm.builder.build_pybind([ArrayPtr(), TensorViewBind()],
                               PACKAGE_ROOT / "core_cc",
                               namespace_root=PACKAGE_ROOT,
-                              load_library=False)
+                              load_library=False,
+                              verbose=True)

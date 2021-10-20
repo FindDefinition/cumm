@@ -69,11 +69,14 @@ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 */
+
 #pragma once
 #include "defs.h"
 #include <type_traits>
 #include <utility>
-
+// disable weird warning if use tv::if_constexpr in c++17 in nvcc.
+// other compiler don't have this problem.
+#pragma GCC diagnostic ignored "-Wreturn-type"
 namespace tv {
 
 #ifdef __cpp_lib_void_t
@@ -390,3 +393,4 @@ if_constexpr_cuda(ThenCallback &&thenCallback) {
 }
 
 } // namespace tv
+#pragma GCC diagnostic pop

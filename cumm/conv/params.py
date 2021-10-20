@@ -55,6 +55,15 @@ def conv_iwo_to_gemm_abc_indices(op_type: bases.ConvOpType):
     else:
         raise NotImplementedError
 
+def get_gemm_trans_abc(op_type: bases.ConvOpType):
+    if op_type == bases.ConvOpType.kForward:
+        return (False, True, False)
+    elif op_type == bases.ConvOpType.kBackwardInput:
+        return (False, False, False)
+    elif op_type == bases.ConvOpType.kBackwardWeight:
+        return (True, False, False)
+    else:
+        raise NotImplementedError
 
 class ConvProblem(pccm.ParameterizedClass):
     def __init__(self,
@@ -363,11 +372,4 @@ class ConvProblem(pccm.ParameterizedClass):
             raise NotImplementedError
 
     def get_gemm_trans_abc(self):
-        if self.op_type == bases.ConvOpType.kForward:
-            return (False, True, False)
-        elif self.op_type == bases.ConvOpType.kBackwardInput:
-            return (False, False, False)
-        elif self.op_type == bases.ConvOpType.kBackwardWeight:
-            return (True, False, False)
-        else:
-            raise NotImplementedError
+        return get_gemm_trans_abc(self.op_type)

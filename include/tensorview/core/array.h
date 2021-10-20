@@ -583,3 +583,4 @@ TV_HOST_DEVICE_INLINE bool operator!=(const vecarray<T, N> &lfs, const vecarray<
 }
 
 } // namespace tv
+#pragma GCC diagnostic pop

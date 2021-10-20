@@ -39,8 +39,8 @@ class ConvIterAlgo(enum.Enum):
 
 
 class ConvLayoutType(enum.Enum):
-    ChannelFirst = 0
-    ChannelLast = 1
+    ChannelFirst = "F"
+    ChannelLast = "L"
 
 
 class ConvOpType(enum.Enum):

@@ -32,18 +32,227 @@ from cumm.conv import kernel
 from cumm.conv.bases import (NCHW, NHWC, ConvEnum, ConvIterAlgo, ConvLayout,
                              ConvLayoutType, ConvMode, ConvOpType)
 from cumm.conv.params import (ConvProblem, conv_iwo_to_gemm_abc_indices,
-                              gemm_abc_to_conv_iwo_indices)
+                              gemm_abc_to_conv_iwo_indices, get_gemm_trans_abc)
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm.algospec import GemmAlgo
 from cumm.gemm.algospec.core import TensorOpParams
 from cumm.gemm.core.metaarray import MetaArray
+from cumm.gemm.main import GemmAlgoParams, GemmAlgoDesp, GemmParams
+import os 
 
+
+class ConvAlgoDesp(GemmAlgoDesp):
+    def __init__(self):
+        super().__init__()
+        self.add_pybind_member("op_type", "int")
+        self.add_pybind_member("iter_algo", "int")
+        self.add_pybind_member("layout_i, layout_w, layout_o", "std::string")
+        self.add_pybind_member("interleave_i, interleave_w, interleave_o", "int")
+        self.add_pybind_member("mask_sparse", "bool", "false")
+        self.add_pybind_member("increment_k_first", "bool", "false")
+        self.add_pybind_member("mask_width", "int", "-1")
+
+        self.add_member("gemm2conv_inds", "std::array<int, 3>", "gemm_abc_to_conv_iwo_indices()")
+        self.add_member("conv2gemm_inds", "std::array<int, 3>", "conv_iwo_to_gemm_abc_indices()")
+
+    @pccm.pybind.mark
+    @pccm.constructor
+    def default_ctor(self):
+        code = pccm.FunctionCode()
+        code.ctor_init("GemmAlgoDesp", "")
+        return code
+
+    @pccm.pybind.mark
+    @pccm.member_function(name="__repr__")
+    def repr(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        check_valid();
+        std::stringstream ss;
+        ss << GemmAlgoDesp::__repr__();
+        ss << "_C" << ndim << "_" << op_type << iter_algo;
+        ss << layout_i << interleave_i << layout_w << interleave_w << layout_o << interleave_o;
+        if (mask_sparse){{
+            ss << "_" << increment_k_first ? "SF" : "SK";
+        }}
+        return ss.str();
+        """)
+        return code.ret("std::string")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def gemm_abc_to_conv_iwo_indices(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        if (op_type == {ConvOpType.kForward.value}){{
+            return {{0, 1, 2}};
+        }}
+        if (op_type == {ConvOpType.kBackwardInput.value}){{
+            return {{2, 1, 0}};
+        }}
+        if (op_type == {ConvOpType.kBackwardWeight.value}){{
+            return {{1, 2, 0}};
+        }}
+        TV_THROW_RT_ERR("unknown op type",op_type);
+        """)
+        return code.ret("std::array<int, 3>")
+
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def conv_iwo_to_gemm_abc_indices(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        if (op_type == {ConvOpType.kForward.value}){{
+            return {{0, 1, 2}};
+        }}
+        if (op_type == {ConvOpType.kBackwardInput.value}){{
+            return {{2, 1, 0}};
+        }}
+        if (op_type == {ConvOpType.kBackwardWeight.value}){{
+            return {{2, 0, 1}};
+        }}
+        TV_THROW_RT_ERR("unknown op type",op_type);
+        """)
+        return code.ret("std::array<int, 3>")
+
+
+    @pccm.pybind.mark_prop_getter(prop_name="dtype_input")
+    @pccm.member_function
+    def dtype_input(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
+        return dtypes[gemm2conv_inds[0]];
+        """)
+        return code.ret("int")
+
+    @pccm.pybind.mark_prop_getter(prop_name="dtype_weight")
+    @pccm.member_function
+    def dtype_weight(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        auto indices = gemm_abc_to_conv_iwo_indices();
+        std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
+        return dtypes[gemm2conv_inds[1]];
+        """)
+        return code.ret("int")
+    
+    @pccm.pybind.mark_prop_getter(prop_name="dtype_output")
+    @pccm.member_function
+    def dtype_output(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
+        return dtypes[gemm2conv_inds[2]];
+        """)
+        return code.ret("int")
+
+class ConvParams(GemmParams):
+    def __init__(self):
+        super().__init__()
+        self.add_pybind_member("padding,stride,dilation", "std::vector<int>")
+        self.add_pybind_member("mask",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("mask_argsort",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("indices",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("mask_output",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
+
+    @pccm.pybind.mark
+    @pccm.constructor
+    def default_ctor(self):
+        code = pccm.FunctionCode()
+        code.ctor_init("GemmParams", "")
+        code.ctor_init("padding", "")
+        code.ctor_init("stride", "")
+        code.ctor_init("dilation", "")
+        return code
+
+    @pccm.pybind.mark_prop_getter(prop_name="inp")
+    @pccm.member_function
+    def input_get(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        auto index = algo_spec.conv2gemm_inds[0];
+        return index == 0 ? a : index == 1 ? b : c;
+        """)
+        return code.ret("tv::Tensor")
+    
+    @pccm.pybind.mark_prop_setter(prop_name="inp")
+    @pccm.member_function
+    def input_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "tv::Tensor")
+        code.raw(f"""
+        auto index = algo_spec.conv2gemm_inds[0];
+        if (index == 0){{
+            a = val;
+        }}
+        """)
+        return code
+
+    @pccm.pybind.mark_prop_getter(prop_name="weight")
+    @pccm.member_function
+    def weight_get(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        auto index = algo_spec.conv2gemm_inds[0];
+        return index == 0 ? a : index == 1 ? b : c;
+        """)
+        return code.ret("tv::Tensor")
+    
+    @pccm.pybind.mark_prop_setter(prop_name="weight")
+    @pccm.member_function
+    def weight_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "tv::Tensor")
+        code.raw(f"""
+        auto index = algo_spec.conv2gemm_inds[0];
+        if (index == 0){{
+            a = val;
+        }}
+        """)
+        return code
+
+    @pccm.pybind.mark_prop_getter(prop_name="inp")
+    @pccm.member_function
+    def input_get(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        auto index = algo_spec.conv2gemm_inds[0];
+        return index == 0 ? a : index == 1 ? b : c;
+        """)
+        return code.ret("tv::Tensor")
+    
+    @pccm.pybind.mark_prop_setter(prop_name="inp")
+    @pccm.member_function
+    def input_set(self):
+        code = pccm.FunctionCode()
+        code.arg("val", "tv::Tensor")
+        code.raw(f"""
+        auto index = algo_spec.conv2gemm_inds[0];
+        if (index == 0){{
+            a = val;
+        }}
+        """)
+        return code
 
 def seq(*vals):
     return np.array([*vals], dtype=np.int64)
 
 
-class ConvAlgoParams(object):
+class ConvAlgoParams(GemmAlgoParams):
     def __init__(self,
                  ndim: int,
                  op_type: ConvOpType,
@@ -62,23 +271,12 @@ class ConvAlgoParams(object):
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
                  mask_width: int = -1):
-        self.ts = MetaArray(*ts)
-        self.wts = MetaArray(*wts)
-        self.num_stage = num_stage
+        trans_a, trans_b, trans_c = get_gemm_trans_abc(op_type)
+        super().__init__(ts, wts, num_stage, dtype_shorts, trans_a, trans_b, 
+            trans_c, algo, tensorop, splitk_serial, splitk_parallel)
         self.ndim = ndim
-        dtype_abcac = [
-            dtypes.get_dtype_by_shortcut(s.strip())
-            for s in dtype_shorts.split(",")
-        ]
-        assert len(dtype_abcac) == 5
         self.op_type = op_type
         self.iter_algo = iter_algo
-        self.dtype_a = dtype_abcac[0]
-        self.dtype_b = dtype_abcac[1]
-        self.dtype_c = dtype_abcac[2]
-
-        self.dtype_acc = dtype_abcac[3]
-        self.dtype_comp = dtype_abcac[4]
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
 
@@ -91,34 +289,21 @@ class ConvAlgoParams(object):
         self.layout_desp_input = layout_desp_input
         self.layout_desp_weight = layout_desp_weight
         self.layout_desp_output = layout_desp_output
-        self.algo = algo
-        self.tensorop = tensorop
-        self.splitk_serial = splitk_serial
-        self.splitk_parallel = splitk_parallel
         self.mask_width = mask_width
-
-    def support_splitk(self):
-        return self.splitk_serial or self.splitk_parallel
 
     def skipped(self):
         if self.op_type != ConvOpType.kForward and self.dtype_a.itemsize(
-        ) == 1:
+            ) == 1:
             return True
-        return False
+            
+        return super().skipped()
 
     def get_algo_name(self):
-        res = f"{self.algo.value}_{self.dtype_a.shortcut()}{self.dtype_b.shortcut()}{self.dtype_c.shortcut()}"
-        res += f"{self.dtype_acc.shortcut()}{self.dtype_comp.shortcut()}"
-        res += f"_m{self.ts[0]}n{self.ts[1]}k{self.ts[2]}"
-        res += f"m{self.wts[0]}n{self.wts[1]}k{self.wts[2]}"
-        if self.tensorop is not None:
-            tss = self.tensorop.shape
-            res += f"T{tss[0]}{tss[1]}{tss[2]}"
-        res += f"_{self.num_stage}"
-        res += f"_C{self.ndim}_{self.op_type.value}{self.iter_algo.value}"
+        res = super().get_algo_name()
+        res += f"_C{self.ndim}{self.op_type.value}{self.iter_algo.value}"
+        res += f"{self.layout_desp_input}{self.layout_desp_weight}{self.layout_desp_output}"
         if self.mask_sparse:
-            res += "_F" if not self.increment_k_first else "_K"
-
+            res += "SF" if not self.increment_k_first else "SK"
         return res
 
 
@@ -245,86 +430,74 @@ def gen_gemm_kernels(params: ConvAlgoParams):
                              increment_k_first=params.increment_k_first,
                              mask_width=params.mask_width)
 
+SHUFFLE_SIMT_PARAMS = []
 
+SHUFFLE_VOLTA_PARAMS = []
+SHUFFLE_TURING_PARAMS = []
 class ConvMainUnitTest(pccm.Class):
-    def __init__(self):
+    def __init__(self, conv_params: Optional[List[ConvAlgoParams]] = None):
         super().__init__()
         self.add_dependency(TensorView, GemmBasic, ConvEnum)
         # unit test params: [ts, wts, stage, dtypes, trans, algo, tensorop]
-        self.simt_params = [
-            # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, ConvIterAlgo.Optimized, 2, "s8,s8,s32,s32,s32",
-            #     NHWC, NHWC, NHWC, GemmAlgo.SimtDP4A, None),
-            # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
-            #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-            # *gen_spwgrad_params((128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
-            #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
-            # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
-            #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
-            *gen_gemm_params(
-                (32, 32, 32), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2,
-                "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((8, 64, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 16, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((64, 128, 8), (32, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f16,f16", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", GemmAlgo.Simt, None),
-            # *gen_gemm_params((128, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", GemmAlgo.SimtDP4A, None),
-        ]  # type: List[ConvAlgoParams]
-        self.volta_params = [
-            # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params((64, 64, 32),
-            #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
-            #                  GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-        ]
-        self.turing_params = [
-            # interleave = 4:
-            # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
+        if conv_params is None:
+            is_debug = os.getenv("CUMM_DEBUG", None)
+            if is_debug is not None and is_debug == "1":
+                simt_params: List[ConvAlgoParams] = [
+                    # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, ConvIterAlgo.Optimized, 2, "s8,s8,s32,s32,s32",
+                    #     NHWC, NHWC, NHWC, GemmAlgo.SimtDP4A, None),
+                    # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
+                    # *gen_spwgrad_params((128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
+                    # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
+                    *gen_gemm_params(
+                        (32, 32, 32), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2,
+                        "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((8, 64, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 16, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((64, 128, 8), (32, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f16,f16", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 8), (32, 64, 8), 2, "f16,f16,f16,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", GemmAlgo.Simt, None),
+                    # *gen_gemm_params((128, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", GemmAlgo.SimtDP4A, None),
+                ]  # type: List[ConvAlgoParams]
+                volta_params: List[ConvAlgoParams] = [
+                ]
+                turing_params: List[ConvAlgoParams] = [
+                ]
+            else:
+                simt_params: List[ConvAlgoParams] = [
+                    *SHUFFLE_SIMT_PARAMS,
+                ] 
+                volta_params: List[ConvAlgoParams] = [
+                    *SHUFFLE_VOLTA_PARAMS,
+                ]
+                turing_params: List[ConvAlgoParams] = [
+                    *SHUFFLE_TURING_PARAMS,
+                ]
+            self.all_params = simt_params + volta_params + turing_params
+            self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
 
-            # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
-
-            # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-            # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Volta, None),
-        ]
-        # self.turing_s8_params = [
-        #     *gen_gemm_params((128, 128, 64), (64, 64, 64), 2, "s8,s8,s8,s32,f32", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-        #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", GemmAlgo.Volta, None),
-        # ]
-        # print(self.simt_params[0].dtype_b)
-        # raise NotImplementedError
-        self.all_params = self.simt_params + self.volta_params + self.turing_params
-        self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
-        for p, ker in zip(self.all_params, self.all_kernels):
-            self.add_impl_only_param_class(self.implicit_gemm,
-                                           "cp" + p.get_algo_name(),
-                                           ker.gemm_params,
-                                           "ConvParams" + p.get_algo_name())
-
-            self.add_impl_only_param_class(self.implicit_gemm,
-                                           p.get_algo_name(), ker,
-                                           "Conv" + p.get_algo_name())
+        else:
+            assert len(conv_params) > 0
+            self.all_params = conv_params
+            self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
 
     @pccm.pybind.mark
     @pccm.cuda.static_function
     def implicit_gemm(self):
         code = pccm.FunctionCode()
+        for p, ker in zip(self.all_params, self.all_kernels):
+            code.add_param_class("cp" + ker.get_algo_name(), ker.gemm_params,
+                                 "ConvParams" + ker.get_algo_name())
+            code.add_param_class(ker.get_algo_name(), ker,
+                                 "Conv" + ker.get_algo_name())
+
         code.arg("input,weight,output",
                  "tv::Tensor",
                  pyanno="cumm.tensorview.Tensor")

@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-os.environ["CUMM_DEBUG"] = "0"
+os.environ["CUMM_DEBUG"] = "1"
 # _cudart = ctypes.CDLL('libcudart.so')
 
 import pickle
@@ -61,7 +61,8 @@ def build_gemm_lib(cus: List[pccm.Class]):
                                     "build_unittest",
                                     pybind_file_suffix=".cc",
                                     verbose=False,
-                                    disable_anno=True)
+                                    disable_anno=True,
+                                    std="c++17")
 
     return lib
 
