@@ -197,6 +197,8 @@ class CUDALibs(pccm.Class):
         # else:
         self.build_meta.libpaths.append(lib64)
         # self.build_meta.compiler_to_cflags["nvcc"] += ["-keep", "-lineinfo", "--source-in-ptx"]
+        # http://www.ssl.berkeley.edu/~jimm/grizzly_docs/SSL/opt/intel/cc/9.0/lib/locale/en_US/mcpcom.msg
+        self.build_meta.compiler_to_cflags["nvcc"] = ["-Xcudafe", "\"--diag_suppress=implicit_return_from_non_void_function\""]
 
 
 class TensorViewCPU(pccm.Class):
@@ -210,6 +212,7 @@ class TensorViewCPU(pccm.Class):
         self.add_include("tensorview/check.h")
 
 
+
 class ThrustLib(pccm.Class):
     def __init__(self):
         super().__init__()
@@ -217,6 +220,10 @@ class ThrustLib(pccm.Class):
         self.add_include("thrust/device_ptr.h")
         self.add_include("thrust/sort.h")
         self.add_include("thrust/unique.h")
+        # workaround for windows CI, thrust may not exist in windows CUDA
+        thrust_include = os.getenv("CUMM_THRUST_INCLUDE", "")
+        if thrust_include:
+            self.build_meta.includes.append(thrust_include)
 
 
 class PyTorchLib(pccm.Class):

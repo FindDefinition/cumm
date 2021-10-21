@@ -76,7 +76,6 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <utility>
 // disable weird warning if use tv::if_constexpr in c++17 in nvcc.
 // other compiler don't have this problem.
-#pragma GCC diagnostic ignored "-Wreturn-type"
 namespace tv {
 
 #ifdef __cpp_lib_void_t
@@ -393,4 +392,3 @@ if_constexpr_cuda(ThenCallback &&thenCallback) {
 }
 
 } // namespace tv
-#pragma GCC diagnostic pop
