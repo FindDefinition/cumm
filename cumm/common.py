@@ -198,7 +198,7 @@ class CUDALibs(pccm.Class):
         self.build_meta.libpaths.append(lib64)
         # self.build_meta.compiler_to_cflags["nvcc"] += ["-keep", "-lineinfo", "--source-in-ptx"]
         # http://www.ssl.berkeley.edu/~jimm/grizzly_docs/SSL/opt/intel/cc/9.0/lib/locale/en_US/mcpcom.msg
-        self.build_meta.compiler_to_cflags["nvcc"] = ["-Xcudafe", "\"--diag_suppress=implicit_return_from_non_void_function\""]
+        self.build_meta.compiler_to_cflags["nvcc"].extend(["-Xcudafe", "\"--diag_suppress=implicit_return_from_non_void_function\""])
 
 
 class TensorViewCPU(pccm.Class):
