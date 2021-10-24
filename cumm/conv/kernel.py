@@ -35,6 +35,7 @@ from cumm.gemm import (codeops, constants, gemmmath, layout, mask_iters,
                        out_iters, output_op, thread_map, volta_iters,
                        volta_out_iters)
 from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases
+from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.outputs import Output, OutputSmemStorage
@@ -103,7 +104,8 @@ class ConvParams(pccm.ParameterizedClass):
             self.add_member("mask_ptr", f"const uint32_t*")
             if problem.op_type == ConvOpType.kForward:
                 self.add_member("mask_out_ptr", f"uint32_t*")
-            self.add_member("RS", f"int")
+        if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
+            self.add_member("mask_width", "int")
 
         self.add_member("alpha, beta", f"{dtype_comp}")
         self.add_member("grid_dims", f"dim3")
@@ -187,7 +189,6 @@ class ConvParams(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor
     def ctor(self):
-        print(self.tile_shape)
         code = pccm.FunctionCode()
         code.arg("problem", "ConvProblem")
         code.arg("A", f"const {self.dtype_a}*")
@@ -200,12 +201,16 @@ class ConvParams(pccm.ParameterizedClass):
             code.arg("indice_ptr", f"const int*")
             if self.op_type == ConvOpType.kForward:
                 code.arg("mask_out_ptr", f"uint32_t*")
+        if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
+            code.arg("mask_width", "int")
 
         code.arg("alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(1)")
         code.arg("beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
         code.arg("split_k_slice", "int", "1")
         if self.have_workspace:
             code.arg("workspace", "void*", "nullptr")
+
+
         code.ctor_init("problem", "problem")
         if self.op_type == ConvOpType.kForward:
             if self.mask_sparse:
@@ -253,6 +258,8 @@ class ConvParams(pccm.ParameterizedClass):
         code.ctor_init("ptr_D", "D")
         if self.mask_sparse:
             code.ctor_init("mask_ptr", "mask_ptr")
+        if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
+            code.ctor_init("mask_width", "mask_width")
 
         code.ctor_init("alpha", "alpha")
         code.ctor_init("beta", "beta")
@@ -276,7 +283,6 @@ class ConvParams(pccm.ParameterizedClass):
         if self.mask_sparse:
             # assert self.op_type == ConvOpType.kForward
             C_or_K = "C" if self.op_type == ConvOpType.kForward else "K"
-            code.raw(f"RS = tv::arrayops::prod(problem.ksize);")
             if self.op_type == ConvOpType.kBackwardWeight:
                 # for backward weight, we need to ensure the whole block is inside only one filter offset.
                 # output is A, input is B (row major), so the block contiguous is tile_shape[1]
@@ -286,17 +292,18 @@ class ConvParams(pccm.ParameterizedClass):
                 )
             else:
                 code.raw(
-                    f"TV_ASSERT_INVALID_ARG(gemm_k_iterations % RS == 0, \"error\");"
+                    f"TV_ASSERT_INVALID_ARG(gemm_k_iterations % problem.kernel_volume == 0, \"error\");"
                 )
                 code.raw(
                     f"TV_ASSERT_RT_ERR(problem.{C_or_K} % (split_k_slice * {self.tile_shape[2]}) == 0, \"error\");"
                 )
         code.raw("grid_dims = get_logical_tile_count(m, n, k, split_k_slice);")
         code.raw(f"""
-        tv::ssprint("gemm_k_size", m, n, k, split_k_slice, gemm_k_iterations, grid_dims.x, grid_dims.y, grid_dims.z);
+        tv::ssprint("gemm_k_size", m, n, k, split_k_slice, gemm_k_iterations, 
+            "GX", grid_dims.x, "GY", grid_dims.y, "GZ", grid_dims.z);
         """)
         if self.mask_sparse and not self.op_type == ConvOpType.kBackwardWeight:
-            code.raw(f"gemm_k_iterations /= RS;")
+            code.raw(f"gemm_k_iterations /= problem.kernel_volume;")
             code.raw("out_params_ = OutIterParams(n, mask_argsort_ptr);")
         else:
             # code.raw(f"""
@@ -342,8 +349,7 @@ class ConvKernel(pccm.ParameterizedClass):
                  splitk_parallel: bool = False,
                  need_source: bool = True,
                  mask_sparse: bool = False,
-                 increment_k_first: bool = False,
-                 mask_width: int = -1):
+                 increment_k_first: bool = False):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -375,7 +381,6 @@ class ConvKernel(pccm.ParameterizedClass):
         transpose_gemm = trans_c
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
-        self.mask_width = mask_width
         if transpose_gemm:
             self.dtype_a = dtype_b
             self.dtype_b = dtype_a
@@ -398,6 +403,7 @@ class ConvKernel(pccm.ParameterizedClass):
         self.trans_b = trans_b
         self.trans_c = trans_c
         self.algo = algo
+        self.shuffle_stride = ShuffleStrideType.NoShuffle
         algo_spec = get_algo_spec(self.algo)(problem, tile_shape,
                                              warp_tile_shape, num_stage,
                                              dtype_a, dtype_b, dtype_c,
@@ -442,8 +448,8 @@ class ConvKernel(pccm.ParameterizedClass):
         # self.frag_per_iter = self.output_spec.frag_per_iter
         # self.out_num_tile = self.output_spec.frag_per_iter if self.output_spec.frag_per_iter > 1 else self.partk
         # self.out_tile_size = self.out_smem_storage.smem_size // dtype_acc.itemsize() // self.out_num_tile
-        print(self.out_smem_storage.smem_size,
-              self.gemm_smem_storage.smem_size)
+        # print(self.out_smem_storage.smem_size,
+        #       self.gemm_smem_storage.smem_size)
         self.smem_size = max(self.out_smem_storage.smem_size,
                              self.gemm_smem_storage.smem_size)
         self.add_param_class("gemm_smem_storage", self.gemm_smem_storage,
@@ -474,7 +480,6 @@ class ConvKernel(pccm.ParameterizedClass):
             clear_mask=False,
             mask_sparse=self.mask_sparse,
             increment_k_first=increment_k_first,
-            mask_width=mask_width,
             is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight)
         self.output = Output(dtype_acc, self.warp_count_shape, self.partk,
                              self.output_spec, self.out_smem_storage)
@@ -485,6 +490,9 @@ class ConvKernel(pccm.ParameterizedClass):
 
         self.add_param_class("mma", self.mma_container, "Mma")
         self.add_param_class("output", self.output, "Output")
+        
+    def support_splitk(self):
+        return self.splitk_serial or self.splitk_parallel
 
     def get_algo_name(self):
         res = f"{self.algo.value}_{self.dtype_a.shortcut()}{self.dtype_b.shortcut()}{self.dtype_c.shortcut()}"
@@ -499,9 +507,20 @@ class ConvKernel(pccm.ParameterizedClass):
             tes = self.tensorop.shape
             res += f"T{tes[0]}{tes[1]}{tes[2]}"
         res += f"_{self.num_stage}"
-        res += f"_C{self.problem.ndim}_{self.problem.op_type.value}{self.iter_algo.value}"
+        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
+            res += f"_{self.shuffle_stride.value}"
+        if self.splitk_serial:
+            res += "1"
+        else:
+            res += "0"
+        if self.splitk_parallel:
+            res += "1"
+        else:
+            res += "0"
+        res += f"_C{self.problem.ndim}{self.problem.op_type.value}{self.iter_algo.value}"
+        res += f"{self.problem.layout_desp_input}{self.problem.layout_desp_weight}{self.problem.layout_desp_output}"
         if self.mask_sparse:
-            res += "_F" if not self.increment_k_first else "_K"
+            res += "_SF" if not self.increment_k_first else "_SK"
         return res
 
     @pccm.cuda.cuda_global_function  # (inline=True)
@@ -509,238 +528,250 @@ class ConvKernel(pccm.ParameterizedClass):
         code = pccm.cuda.PTXCode()
         # code.add_pre_attr(f"__launch_bounds__({self.num_threads}, 4)")
         code.arg("params", "ConvParams")
-        code.raw(f"""
-        constexpr bool kSplitKSerial = {pccm.boolean(self.splitk_serial)};
-        extern __shared__ uint8_t SharedStorage[];
-        auto gemm_shared_mem =
-            reinterpret_cast<BlockMmaStorage *>(SharedStorage);
-        auto out_shared_mem =
-            reinterpret_cast<OutputSmemStorage *>(SharedStorage);
+        min_arch = get_min_arch_of_algo(self.algo)
+        arch_num = min_arch[0] * 100 + min_arch[1] * 10
+        # use __CUDA_ARCH__ macro to reduce binary size
+        # TODO this macro can't reduce compile time
+        with code.macro_if_(f"defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= {arch_num})"):
 
-        int tile_offset_m = blockIdx.x;
-        int tile_offset_n = blockIdx.y;
-        int tile_offset_k = blockIdx.z;
-        if (tile_offset_m >= params.grid_dims.x ||
-            tile_offset_n >= params.grid_dims.y) {{
-            return;
-        }}
-        """)
-        k_offset = f"tile_offset_k * {self.tile_shape[2]}"
-        m_offset = f"tile_offset_m * {self.tile_shape[0]}"
-        n_offset = f"tile_offset_n * {self.tile_shape[1]}"
-        if self.trans_a:
-            a_offset = f"{k_offset}, {m_offset}"
-        else:
-            a_offset = f"{m_offset}, {k_offset}"
-        if self.trans_b:
-            b_offset = f"{n_offset}, {k_offset}"
-        else:
-            if self.mask_sparse and self.problem.op_type == ConvOpType.kBackwardWeight:
-                code.raw(
-                    f"int num_block_in_C = tv::div_up(params.problem.C, {self.tile_shape[1]});"
-                )
-                b_offset = f"{k_offset}, (tile_offset_n % num_block_in_C) * {self.tile_shape[1]}"
+            code.raw(f"""
+            constexpr bool kSplitKSerial = {pccm.boolean(self.splitk_serial)};
+            extern __shared__ uint8_t SharedStorage[];
+            auto gemm_shared_mem =
+                reinterpret_cast<BlockMmaStorage *>(SharedStorage);
+            auto out_shared_mem =
+                reinterpret_cast<OutputSmemStorage *>(SharedStorage);
+
+            int tile_offset_m = blockIdx.x;
+            int tile_offset_n = blockIdx.y;
+            int tile_offset_k = blockIdx.z;
+            if (tile_offset_m >= params.grid_dims.x ||
+                tile_offset_n >= params.grid_dims.y) {{
+                return;
+            }}
+            """)
+            k_offset = f"tile_offset_k * {self.tile_shape[2]}"
+            m_offset = f"tile_offset_m * {self.tile_shape[0]}"
+            n_offset = f"tile_offset_n * {self.tile_shape[1]}"
+            if self.trans_a:
+                a_offset = f"{k_offset}, {m_offset}"
             else:
-                b_offset = f"{k_offset}, {n_offset}"
-        code.raw(f"""
-        tv::array<int, 2> block_offset_A{{{a_offset}}};
-        tv::array<int, 2> block_offset_B{{{b_offset}}};
-        """)
-        # if self.trans_a:
-        #     code.raw(f"""
-        #     tv::array<int, 2> block_offset_A{{tile_offset_k * {self.tile_shape[2]},
-        #                                     tile_offset_m * {self.tile_shape[0]}}};
-        #     """)
-        # else:
-        #     code.raw(f"""
-        #     tv::array<int, 2> block_offset_A{{tile_offset_m * {self.tile_shape[0]},
-        #                                     tile_offset_k * {self.tile_shape[2]}}};
-        #     """)
-        # if self.trans_b:
-        #     code.raw(f"""
-        #     tv::array<int, 2> block_offset_B{{tile_offset_n * {self.tile_shape[1]},
-        #                                     tile_offset_k * {self.tile_shape[2]}}};
-        #     """)
-        # else:
-        #     if self.mask_sparse and self.problem.op_type == ConvOpType.kBackwardWeight:
-        #         # for pre comp convs, we can't add offset to input with implicit filter dims because
-        #         # it's handled by indices.
-        #         code.raw(f"""
-        #         tv::array<int, 2> block_offset_B{{tile_offset_k * {self.tile_shape[2]}, 0}};
-        #         """)
-        #     else:
-        #         code.raw(f"""
-        #         tv::array<int, 2> block_offset_B{{tile_offset_k * {self.tile_shape[2]},
-        #                                         tile_offset_n * {self.tile_shape[1]}}};
-        #         """)
-        code.raw(f"""
-        int thread_idx = threadIdx.x;
-        """)
-        code.raw(f"""
-        InputIteratorA input_iter_A(
-            params.itera_params_, params.problem, params.ptr_A,
-            thread_idx,
-            block_offset_A);
-        InputIteratorB input_iter_B(
-            params.iterb_params_, params.problem, params.ptr_B,
-            thread_idx,
-            block_offset_B);
-        """)
-        code.raw(f"""
-        int warp_idx = __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
-        int lane_idx = threadIdx.x % 32;
-        int warp_mn =
-            warp_idx % ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
-        int warp_idx_k =
-            warp_idx / ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
-        int warp_m = warp_mn % {self.warp_count_shape[0]};
-        int warp_n = warp_mn / {self.warp_count_shape[0]};
-        """)
-        if self.mask_sparse:
-            if not self.problem.op_type == ConvOpType.kBackwardWeight:
-                num_mask_per_thread = self.tile_shape[0] // constants.WARP_SIZE
-                assert num_mask_per_thread > 0
-                code.raw(f"""
-                uint32_t kmask = 0;
-                tv::array<uint32_t, {num_mask_per_thread}> masks;
-                masks.clear();
-                TV_PRAGMA_UNROLL
-                for (int i = 0; i < {num_mask_per_thread}; ++i){{
-                    if (tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx < params.m){{
-                        masks[i] = params.mask_ptr[tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx];
-                    }}
-                }}
-                TV_PRAGMA_UNROLL
-                for (int i = 0; i < {num_mask_per_thread}; ++i){{
-                    kmask |= masks[i];
-                }}
-                // perform a warp reduce to get block mask
-                TV_PRAGMA_UNROLL
-                for (int mask = {constants.WARP_SIZE // 2}; mask > 0; mask /= 2) {{
-                    kmask |= __shfl_xor_sync(0xffffffff, kmask, mask, 32);
-                }}
-                """)
-                if self.problem.op_type == ConvOpType.kForward:
-                    # we need to save mask which will be used in backward weight.
-                    code.raw(f"params.mask_out_ptr[tile_offset_m] = kmask;")
-                code.raw(f"""
-                if (kmask == 0){{
-                    return;
-                }}
-                """)
-                if self.problem.op_type == ConvOpType.kBackwardInput:
-                    # reverse kmask
+                a_offset = f"{m_offset}, {k_offset}"
+            if self.trans_b:
+                b_offset = f"{n_offset}, {k_offset}"
+            else:
+                if self.mask_sparse and self.problem.op_type == ConvOpType.kBackwardWeight:
                     code.raw(
-                        f"""kmask = __brev(kmask) >> ({32} - params.RS);""")
-            else:
-                # read mask of last residual  tile
-                code.raw(f"""
-                uint32_t kmask = params.mask_ptr[(tv::div_up(params.problem.N, {self.mask_width})) - 1];
-                int filter_offset = tile_offset_n / (params.problem.C / {self.tile_shape[1]});
-                """)
-        code.raw(f"""
-        Mma mma(gemm_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);
-        {self.fragment_c_t} accumulators;
-        accumulators.clear();
-        """)
-        with code.if_("!kSplitKSerial || params.gemm_k_iterations > 0"):
+                        f"int num_block_in_C = tv::div_up(params.problem.C, {self.tile_shape[1]});"
+                    )
+                    b_offset = f"{k_offset}, (tile_offset_n % num_block_in_C) * {self.tile_shape[1]}"
+                else:
+                    b_offset = f"{k_offset}, {n_offset}"
+            code.raw(f"""
+            tv::array<int, 2> block_offset_A{{{a_offset}}};
+            tv::array<int, 2> block_offset_B{{{b_offset}}};
+            """)
+            # if self.trans_a:
+            #     code.raw(f"""
+            #     tv::array<int, 2> block_offset_A{{tile_offset_k * {self.tile_shape[2]},
+            #                                     tile_offset_m * {self.tile_shape[0]}}};
+            #     """)
+            # else:
+            #     code.raw(f"""
+            #     tv::array<int, 2> block_offset_A{{tile_offset_m * {self.tile_shape[0]},
+            #                                     tile_offset_k * {self.tile_shape[2]}}};
+            #     """)
+            # if self.trans_b:
+            #     code.raw(f"""
+            #     tv::array<int, 2> block_offset_B{{tile_offset_n * {self.tile_shape[1]},
+            #                                     tile_offset_k * {self.tile_shape[2]}}};
+            #     """)
+            # else:
+            #     if self.mask_sparse and self.problem.op_type == ConvOpType.kBackwardWeight:
+            #         # for pre comp convs, we can't add offset to input with implicit filter dims because
+            #         # it's handled by indices.
+            #         code.raw(f"""
+            #         tv::array<int, 2> block_offset_B{{tile_offset_k * {self.tile_shape[2]}, 0}};
+            #         """)
+            #     else:
+            #         code.raw(f"""
+            #         tv::array<int, 2> block_offset_B{{tile_offset_k * {self.tile_shape[2]},
+            #                                         tile_offset_n * {self.tile_shape[1]}}};
+            #         """)
+            code.raw(f"""
+            int thread_idx = threadIdx.x;
+            """)
+            code.raw(f"""
+            InputIteratorA input_iter_A(
+                params.itera_params_, params.problem, params.ptr_A,
+                thread_idx,
+                block_offset_A);
+            InputIteratorB input_iter_B(
+                params.iterb_params_, params.problem, params.ptr_B,
+                thread_idx,
+                block_offset_B);
+            """)
+            code.raw(f"""
+            int warp_idx = __shfl_sync(0xffffffff, threadIdx.x / 32, 0);
+            int lane_idx = threadIdx.x % 32;
+            int warp_mn =
+                warp_idx % ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
+            int warp_idx_k =
+                warp_idx / ({self.warp_count_shape[0]} * {self.warp_count_shape[1]});
+            int warp_m = warp_mn % {self.warp_count_shape[0]};
+            int warp_n = warp_mn / {self.warp_count_shape[0]};
+            """)
             if self.mask_sparse:
                 if not self.problem.op_type == ConvOpType.kBackwardWeight:
+                    num_mask_per_thread = self.tile_shape[0] // constants.WARP_SIZE
+                    assert num_mask_per_thread > 0
                     code.raw(f"""
-                    mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask, params.RS);
+                    uint32_t kmask = 0;
+                    tv::array<uint32_t, {num_mask_per_thread}> masks;
+                    masks.clear();
+                    TV_PRAGMA_UNROLL
+                    for (int i = 0; i < {num_mask_per_thread}; ++i){{
+                        if (tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx < params.m){{
+                            masks[i] = params.mask_ptr[tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx];
+                        }}
+                    }}
+                    TV_PRAGMA_UNROLL
+                    for (int i = 0; i < {num_mask_per_thread}; ++i){{
+                        kmask |= masks[i];
+                    }}
+                    // perform a warp reduce to get block mask
+                    TV_PRAGMA_UNROLL
+                    for (int mask = {constants.WARP_SIZE // 2}; mask > 0; mask /= 2) {{
+                        kmask |= __shfl_xor_sync(0xffffffff, kmask, mask, 32);
+                    }}
                     """)
+                    if self.problem.op_type == ConvOpType.kForward:
+                        # we need to save mask which will be used in backward weight.
+                        code.raw(f"params.mask_out_ptr[tile_offset_m] = kmask;")
+                    code.raw(f"""
+                    if (kmask == 0){{
+                        return;
+                    }}
+                    """)
+                    if self.problem.op_type == ConvOpType.kBackwardInput:
+                        # reverse kmask
+                        code.raw(
+                            f"""kmask = __brev(kmask) >> ({32} - params.problem.kernel_volume);""")
                 else:
                     code.raw(f"""
-                    int num_reduced_mask = tv::div_up(params.problem.N, {self.mask_width});
-                    mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
-                        params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset);
+                    // uint32_t kmask = params.mask_ptr[(tv::div_up(params.problem.N, params.mask_width)) - 1];
+                    int filter_offset = tile_offset_n / (params.problem.C / {self.tile_shape[1]});
                     """)
-            else:
+            code.raw(f"""
+            Mma mma(gemm_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);
+            {self.fragment_c_t} accumulators;
+            accumulators.clear();
+            """)
+            with code.if_("!kSplitKSerial || params.gemm_k_iterations > 0"):
+                if self.mask_sparse:
+                    if not self.problem.op_type == ConvOpType.kBackwardWeight:
+                        code.raw(f"""
+                        mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask,  params.problem.kernel_volume);
+                        """)
+                    else:
+                        code.raw(f"""
+                        int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
+                        mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
+                            params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
+                            params.mask_width);
+                        """)
+                else:
+                    code.raw(f"""
+                    mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
+                    """)
+            code.raw(f"""
+            // if (threadIdx.x == 3)
+            // tv::print_fragment_meta_once<float>(accumulators, "accumulator");
+            """)
+
+            code.raw(f"""
+            // // C = alpha * A@B + beta * D, D can be C
+            OutputOp output_op(params.alpha, params.beta);
+            """)
+            if self.splitk_serial:
                 code.raw(f"""
-                mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
-                """)
-        code.raw(f"""
-        // if (threadIdx.x == 3)
-        // tv::print_fragment_meta_once<float>(accumulators, "accumulator");
-        """)
-
-        code.raw(f"""
-        // // C = alpha * A@B + beta * D, D can be C
-        OutputOp output_op(params.alpha, params.beta);
-        """)
-        if self.splitk_serial:
-            code.raw(f"""
-            int block_idx = tile_offset_m + tile_offset_n * params.grid_dims.x;
-            tv::Semaphore semaphore(reinterpret_cast<int*>(params.workspace) + block_idx, thread_idx);
-            if (params.grid_dims.z > 1){{
-                semaphore.fetch();
-                output_op.set_k_partition(tile_offset_k, params.grid_dims.z);
-            }}
-            """)
-        code.raw(f"""
-        tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
-                                        tile_offset_n * {self.tile_shape[1]}}};
-
-        OutIter out_iter_C(params.out_params_, params.ptr_C, {{params.m, params.n}},
-                                {{block_offset_C[0], block_offset_C[1]}},
-                                thread_idx);
-        """)
-        if self.splitk_serial:
-            code.raw(f"""
-            bool need_self_reduce = false;
-            if (params.grid_dims.z > 1){{
-                if (tile_offset_k){{
-                    need_self_reduce = true;
+                int block_idx = tile_offset_m + tile_offset_n * params.grid_dims.x;
+                tv::Semaphore semaphore(reinterpret_cast<int*>(params.workspace) + block_idx, thread_idx);
+                if (params.grid_dims.z > 1){{
+                    semaphore.fetch();
+                    output_op.set_k_partition(tile_offset_k, params.grid_dims.z);
                 }}
-                semaphore.wait(tile_offset_k);
-                __threadfence();
-            }}
-            """)
-        if self.need_source:
+                """)
             code.raw(f"""
-            ConstOutIter out_iter_D(params.out_params_, params.ptr_D, {{params.m, params.n}},
-                                {{block_offset_C[0], block_offset_C[1]}},
-                                thread_idx);
+            tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
+                                            tile_offset_n * {self.tile_shape[1]}}};
+
+            OutIter out_iter_C(params.out_params_, params.ptr_C, {{params.m, params.n}},
+                                    {{block_offset_C[0], block_offset_C[1]}},
+                                    thread_idx);
             """)
-        code.raw(
-            f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
-        )
-        if self.splitk_serial:
-            with code.if_("need_self_reduce"):
-                code.raw(
-                    f"out.run_self_reduce(output_op, accumulators, out_iter_C);"
-                )
-            with code.else_():
+            if self.splitk_serial:
+                code.raw(f"""
+                bool need_self_reduce = false;
+                if (params.grid_dims.z > 1){{
+                    if (tile_offset_k){{
+                        need_self_reduce = true;
+                    }}
+                    semaphore.wait(tile_offset_k);
+                    __threadfence();
+                }}
+                """)
+            if self.need_source:
+                code.raw(f"""
+                ConstOutIter out_iter_D(params.out_params_, params.ptr_D, {{params.m, params.n}},
+                                    {{block_offset_C[0], block_offset_C[1]}},
+                                    thread_idx);
+                """)
+            code.raw(
+                f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
+            )
+            if self.splitk_serial:
+                with code.if_("need_self_reduce"):
+                    code.raw(
+                        f"out.run_self_reduce(output_op, accumulators, out_iter_C);"
+                    )
+                with code.else_():
+                    if self.need_source:
+                        code.raw(
+                            f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
+                        )
+                    else:
+                        code.raw(f"out.run(output_op, accumulators, out_iter_C);")
+            else:
                 if self.need_source:
                     code.raw(
                         f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
                     )
                 else:
                     code.raw(f"out.run(output_op, accumulators, out_iter_C);")
-        else:
-            if self.need_source:
-                code.raw(
-                    f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
-                )
-            else:
-                code.raw(f"out.run(output_op, accumulators, out_iter_C);")
 
-        if self.splitk_serial:
+            if self.splitk_serial:
+                code.raw(f"""
+                if (params.grid_dims.z > 1){{
+                    int lock = 0;
+                    if (params.grid_dims.z == tile_offset_k + 1) {{
+                        // The final threadblock resets the semaphore for subsequent grids.
+                        lock = 0;
+                    }}
+                    else {{
+                        // Otherwise, the semaphore is incremented
+                        lock = tile_offset_k + 1;
+                    }}
+                    __threadfence();
+                    semaphore.release(lock);
+                }}
+                """)
+        with code.macro_else_():
             code.raw(f"""
-            if (params.grid_dims.z > 1){{
-                int lock = 0;
-                if (params.grid_dims.z == tile_offset_k + 1) {{
-                    // The final threadblock resets the semaphore for subsequent grids.
-                    lock = 0;
-                }}
-                else {{
-                    // Otherwise, the semaphore is incremented
-                    lock = tile_offset_k + 1;
-                }}
-                
-                semaphore.release(lock);
-            }}
+            tv::printf2_once("this arch isn't supported!");
+            assert(0);
             """)
+        code.macro_endif_()
         return code
 
     # @lineprof.lineprof_wrapper

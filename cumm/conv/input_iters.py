@@ -206,6 +206,7 @@ class WeightOptParams(bases.ConvIterParams):
                  input_layout: Union[layout.TensorGeneric],
                  tmap: Union[thread_map.PitchLinear,
                              thread_map.PitchLinearWarpRaked],
+                 mask_sparse: bool = False,
                  increment_k_first: bool = False):
         super().__init__()
         self.add_dependency(TensorViewMath, ConvEnum)
@@ -218,6 +219,7 @@ class WeightOptParams(bases.ConvIterParams):
         self.ndim = problem.ndim
         self.op_type = problem.op_type
         self.increment_k_first = increment_k_first
+        self.mask_sparse = mask_sparse
         self.add_param_class("input_layout", input_layout, "Layout")
         self.add_param_class("prob", problem, "ConvProblem")
         self.add_member("layout", "Layout")
@@ -249,22 +251,24 @@ class WeightOptParams(bases.ConvIterParams):
         mul_stride_if_bwd = ""
         # if forward, RSC, else, C
         RSC_if_fwd_else_C = f"layout.strides[0]"
-        C_if_fwd_else_KRSC = f"layout.strides[{self.ndim}]"
+        last_dim = 1 if self.mask_sparse else self.ndim
+        C_if_fwd_else_KRSC = f"layout.strides[{last_dim}]"
 
         if self.op_type == ConvOpType.kBackwardInput:
-            RSC_if_fwd_else_C = f"layout.strides[{self.ndim}]"
+            RSC_if_fwd_else_C = f"layout.strides[{last_dim}]"
             C_if_fwd_else_KRSC = f"layout.strides[0] * problem.K"
             # for weight opt params, the C is actually K, so we
             # need to multplie stride.
             mul_stride_if_bwd = " * layout.strides[0]"
+        kernel_vol = "problem.kernel_volume" if self.problem.mask_sparse else "tv::arrayops::prod(problem.ksize)"
         if self.increment_k_first:
             code.raw(f"""
-            int kernel_prod = tv::arrayops::prod(problem.ksize);
+            int kernel_prod = {kernel_vol};
             int filter_c_delta = {self.tile_shape[2]} * problem.split_k_slices;
             """)
         else:
             code.raw(f"""
-            kernel_prod = tv::arrayops::prod(problem.ksize);
+            kernel_prod = {kernel_vol};
             filter_c_delta = {self.tile_shape[2]} * problem.split_k_slices;
             """)
         code.raw(f"""
@@ -275,10 +279,10 @@ class WeightOptParams(bases.ConvIterParams):
         if not self.increment_k_first:
             code.raw(f"""
             // back to strided start, then inc rs
-            inc_rs = int64_t(layout.strides[{self.ndim}])  - inc_strided * int64_t({self.tmap.iterations[0] - 1});
+            inc_rs = int64_t(layout.strides[{last_dim}])  - inc_strided * int64_t({self.tmap.iterations[0] - 1});
             inc_c = filter_c_delta{mul_stride_if_bwd};
             // back to rs start
-            inc_c -= int64_t(kernel_prod - 1) * layout.strides[{self.ndim}];
+            inc_c -= int64_t(kernel_prod - 1) * layout.strides[{last_dim}];
             // and strided start
             inc_c -= inc_strided * int64_t({self.tmap.iterations[0] - 1});
             """)
@@ -286,7 +290,7 @@ class WeightOptParams(bases.ConvIterParams):
             code.raw(f"""
             // back to strided start, then inc c
             inc_c = filter_c_delta{mul_stride_if_bwd} - inc_strided * int64_t({self.tmap.iterations[0] - 1});
-            inc_rs = int64_t(layout.strides[{self.ndim}]);
+            inc_rs = int64_t(layout.strides[{last_dim}]);
             inc_c_reset = -{C_if_fwd_else_KRSC} * {self.dtype.bitsize()} / 8;
             """)
         code.raw(f"""
@@ -823,6 +827,7 @@ class WeightIterator(bases.ConvInputIterator):
                  problem_size: params.ConvProblem,
                  input_layout: Union[layout.TensorGeneric],
                  optimized: bool = False,
+                 mask_sparse: bool = False,
                  transpose_load: bool = False,
                  increment_k_first: bool = False):
         self.thread_access_shape = tmap.iterations
@@ -837,6 +842,7 @@ class WeightIterator(bases.ConvInputIterator):
         self.optimized = optimized
         self.ndim = problem_size.ndim
         self.increment_k_first = increment_k_first
+        self.mask_sparse = mask_sparse
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         if op_type == ConvOpType.kForward:
             assert tmap.iterations[1] == 1
@@ -846,7 +852,7 @@ class WeightIterator(bases.ConvInputIterator):
             self.params = AnalyticParams(problem_size, input_layout)
         else:
             self.params = WeightOptParams(dtype, tile_shape_mnk, problem_size,
-                                          input_layout, tmap)
+                                          input_layout, tmap, mask_sparse, increment_k_first)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -1155,6 +1161,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                  problem_size: params.ConvProblem,
                  input_layout: Union[layout.TensorGeneric],
                  optimized: bool = False,
+                 mask_sparse: bool = False,
                  transpose_load: bool = False,
                  increment_k_first: bool = False):
         self.thread_access_shape = tmap.iterations
@@ -1167,6 +1174,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         self.op_type = op_type
         self.optimized = optimized
         self.ndim = problem_size.ndim
+        self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         if op_type == ConvOpType.kForward:
@@ -1177,7 +1185,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             self.params = AnalyticParams(problem_size, input_layout)
         else:
             self.params = WeightOptParams(dtype, tile_shape_mnk, problem_size,
-                                          input_layout, tmap,
+                                          input_layout, tmap, mask_sparse,
                                           increment_k_first)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
@@ -1194,7 +1202,8 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         self.add_member("pointer_", self.const_byte_pointer)
         self.reduce_channel_axis = 0 if self.op_type == ConvOpType.kBackwardInput else 1
         self.noreduce_channel_axis = 1 if self.op_type == ConvOpType.kBackwardInput else 0
-
+        if problem_size.mask_sparse:
+            assert optimized
         if optimized:
             if not self.increment_k_first:
                 self.add_member("filter_kernel_idx_", f"int")

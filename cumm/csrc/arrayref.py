@@ -18,12 +18,15 @@ from typing import List, Optional
 import pccm
 
 from cumm.common import TensorView, TensorViewCPU
+from cumm.tensorview_bind import TensorViewBind
 
 
 class ArrayPtr(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorViewCPU)
+        # here we add TensorViewBind as dep to ensure tv::Tensor is binded before arrayptr.
+
+        self.add_dependency(TensorViewCPU, TensorViewBind)
         self.add_include("unordered_map")
         self.add_pybind_member("dtype_", "tv::DType", readwrite=False)
         self.add_pybind_member("length_", "int64_t", readwrite=False)

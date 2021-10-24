@@ -31,7 +31,7 @@ from cumm.gemm.bases import (GemmInputIterator, GemmOutputIterator,
                              GemmOutWarpIterator, GemmSmemIterator,
                              GemmWarpIterator)
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
-
+from cumm.gemm.arch.memory import GlobalLoad
 
 def div_up(a, b):
     return (a + b - 1) // b
@@ -155,7 +155,6 @@ class Mma(pccm.ParameterizedClass):
                  clear_mask: bool = True,
                  mask_sparse: bool = False,
                  increment_k_first=False,
-                 mask_width: int = -1,
                  is_sparse_wgrad: bool = False):
         super().__init__()
         self.dtype_acc = dtype_acc
@@ -175,8 +174,9 @@ class Mma(pccm.ParameterizedClass):
         self.first_input_clear = first_input_clear
         self.clear_mask = clear_mask
         self.input_spec = spec.input_spec
-        self.mask_width = mask_width
         self.is_sparse_wgrad = is_sparse_wgrad
+        if is_sparse_wgrad:
+            self.add_param_class("gl_wgrad", GlobalLoad(4), "GlobalLoad")
         self.add_param_class("mma_ns_gm", smem_storage, "GemmStorage")
         self.accumulator_fragment = array_type(dtype_acc,
                                                spec.accumulator_size)
@@ -380,11 +380,12 @@ class Mma(pccm.ParameterizedClass):
         code.arg("split_k_slices", f"int")
 
         code.arg("filter_offset", f"int")
+        code.arg("mask_width", f"int")
 
-        assert self.mask_width > 0
-        mask_width_rate = self.mask_width // self.input_spec.tile_shape[2]
-        assert self.mask_width % self.input_spec.tile_shape[2] == 0
-        assert mask_width_rate > 0
+        # assert self.mask_width > 0
+        # mask_width_rate = self.mask_width // self.input_spec.tile_shape[2]
+        # assert self.mask_width % self.input_spec.tile_shape[2] == 0
+        # assert mask_width_rate > 0
         # mask_width % tile_shape[2] == 0
         # mask_width % (tile_shape[2] * splitk) == 0 OR (tile_shape[2] * splitk) % mask_width == 0
         # mask_width_rate = mask_width // tile_shape[2]
@@ -392,7 +393,8 @@ class Mma(pccm.ParameterizedClass):
         #
         # so mask_idx = unified_iterations // mask_width_rate
         code.raw(f"""
-        // tv::printf2_once("WTF num_reduced_mask", num_reduced_mask, split_k_slices, {mask_width_rate}, filter_offset);
+        int mask_width_rate = mask_width / {self.input_spec.tile_shape[2]};
+        // tv::printf2_once("WTF num_reduced_mask", num_reduced_mask, split_k_slices, mask_width, mask_width_rate, filter_offset);
         uint32_t filter_offset_mask = 1u << filter_offset;
         accumulators = src_accumulators;
         {self.input_spec.input_iter_a.fragment_t} input_frag_A;
@@ -404,6 +406,7 @@ class Mma(pccm.ParameterizedClass):
         input_iter_B.increment_filter(filter_offset);
         int mask_idx = 0;
         uint32_t mask = reduced_mask_ptr[mask_idx];
+
         // find first valid mask
         int k_idx = tile_offset_k;
         int total_skip_count = 0;
@@ -412,22 +415,24 @@ class Mma(pccm.ParameterizedClass):
         while (!(mask & filter_offset_mask) && (gemm_k_iterations)){{
             skip_cnt += 1;
             k_idx += split_k_slices;
-            mask_idx = k_idx / {mask_width_rate};
+            mask_idx = k_idx / mask_width_rate;
             mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+            // GlobalLoad::run(mask, reduced_mask_ptr + mask_idx, mask_idx < num_reduced_mask);
+
             --gemm_k_iterations;
-            // input_iter_A.increment_no_clear_mask();
-            // input_iter_B.increment_no_clear_mask();
+            input_iter_A.increment_no_clear_mask();
+            input_iter_B.increment_no_clear_mask();
         }}
         // here current mask is loaded, k_idx and mask_idx point to current location.
         if (!gemm_k_iterations){{
             return;
         }}
-        // input_iter_A.clear_mask_if_batch_unbound();
-        // input_iter_B.clear_mask_if_batch_unbound();
+        input_iter_A.clear_mask_if_batch_unbound();
+        input_iter_B.clear_mask_if_batch_unbound();
         // tv::printf2_once("RTX", skip_cnt, gemm_k_iterations);
 
-        input_iter_A += skip_cnt;
-        input_iter_B += skip_cnt;
+        // input_iter_A += skip_cnt;
+        // input_iter_B += skip_cnt;
         // total_skip_count += skip_cnt;
         // now input iter point to a valid location
         input_iter_A.update_indices();
@@ -496,24 +501,29 @@ class Mma(pccm.ParameterizedClass):
                     --gemm_k_iterations;
                     skip_cnt = 0;
                     k_idx += split_k_slices;
-                    mask_idx = k_idx / {mask_width_rate};
+                    mask_idx = k_idx / mask_width_rate;
                     // load current mask
                     mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+                    // GlobalLoad::run(mask, reduced_mask_ptr + mask_idx, mask_idx < num_reduced_mask);
+
                     while (!(mask & filter_offset_mask) && (gemm_k_iterations)){{
                         skip_cnt += 1;
                         k_idx += split_k_slices;
-                        mask_idx = k_idx / {mask_width_rate};
+                        mask_idx = k_idx / mask_width_rate;
+                        // GlobalLoad::run(mask, reduced_mask_ptr + mask_idx, mask_idx < num_reduced_mask);
                         mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
                         --gemm_k_iterations;
-                        // input_iter_A.increment_no_clear_mask();
-                        // input_iter_B.increment_no_clear_mask();
+                        input_iter_A.increment_no_clear_mask();
+                        input_iter_B.increment_no_clear_mask();
+                        // ++input_iter_A;
+                        // ++input_iter_B;
                     }}
-                    // input_iter_A.clear_mask_if_batch_unbound();
-                    // input_iter_B.clear_mask_if_batch_unbound();
+                    input_iter_A.clear_mask_if_batch_unbound();
+                    input_iter_B.clear_mask_if_batch_unbound();
                     // input_iter_A.clear_mask_if_pred(!gemm_k_iterations);
                     // input_iter_B.clear_mask_if_pred(!gemm_k_iterations);
-                    input_iter_A += skip_cnt;
-                    input_iter_B += skip_cnt;
+                    // input_iter_A += skip_cnt;
+                    // input_iter_B += skip_cnt;
                     // total_skip_count += skip_cnt;
 
                     // tv::printf2_once("RTX", skip_cnt, gemm_k_iterations);

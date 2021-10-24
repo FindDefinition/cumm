@@ -217,7 +217,7 @@ template <typename T> size_t sizeof_dtype(T dtype) {
   case custom128:
     return 16;
   default:
-    TV_THROW_RT_ERR("unsupported dtype");
+    TV_THROW_RT_ERR("unsupported dtype", dtype);
   }
   return 0;
 }

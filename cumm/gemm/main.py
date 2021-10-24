@@ -17,7 +17,7 @@ import os
 import sys
 from functools import partial
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pccm
@@ -214,7 +214,7 @@ class IGemmMaskIterator(pccm.Class):
     def increment(self):
         pass
 
-
+@pccm.pybind.bind_class_module_local
 class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
@@ -932,11 +932,12 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
 
         # self.add_impl_only_dependency(self.shuffle_matmul_ref, SpconvKernel)
 
-    def matmul_select_helper_base(self, code: FunctionCode):
+    @staticmethod
+    def matmul_select_helper_base(kernels: List[Union[kernel.GemmKernel, Any]], code: FunctionCode):
         """if based algorithm selector
         """
         tabc_to_kers = codeops.group_by(
-            lambda x: (x.trans_a, x.trans_b, x.trans_c), self.all_kernels)
+            lambda x: (x.trans_a, x.trans_b, x.trans_c), kernels)
         func: Callable[[kernel.GemmKernel], Tuple[int, int, int]] = lambda x: (
             x.warp_tile_shape[0], x.warp_tile_shape[1], x.warp_tile_shape[2])
         func2: Callable[[kernel.GemmKernel], Tuple[
@@ -990,12 +991,12 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                                         ):
                                             if spks:
                                                 yield spks_kers
-
-    def matmul_select_helper_stage2(self, code: FunctionCode):
+    @staticmethod
+    def matmul_select_helper_stage2(kernels: List[Union[kernel.GemmKernel, Any]], code: FunctionCode, has_shuffle: bool = True, is_end: bool = True):
         func3: Callable[[kernel.GemmKernel], Optional[Tuple[
             int, int, int]]] = lambda x: (x.tensorop[0], x.tensorop[
                 1], x.tensorop[2]) if x.tensorop is not None else None
-        for spks_kers in self.matmul_select_helper_base(code):
+        for spks_kers in GemmMainUnitTest.matmul_select_helper_base(kernels, code):
             top_to_kers = codeops.group_by(func3, spks_kers)
             for top, top_kers in top_to_kers.items():
                 algo_to_kers = codeops.group_by(
@@ -1004,48 +1005,52 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 if top is None:
                     for (algo, shuf), algo_kers in algo_to_kers.items():
                         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
-                        with code.if_(
-                                f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""
-                        ):
+                        if_test = f"algo_desp.algo == \"{algo.value}\""
+                        if has_shuffle:
+                            if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
+                        with code.if_(if_test):
                             dabc_to_kers = codeops.group_by(
                                 lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
                                            tv_dtype, x.dtype_c.tv_dtype),
                                 algo_kers)
                             for dabc, dabc_kers in dabc_to_kers.items():
-                                assert len(
-                                    dabc_kers
-                                ) == 1, "find multiple kernels for one configuration"
+                                if is_end:
+                                    assert len(
+                                        dabc_kers
+                                    ) == 1, "find multiple kernels for one configuration"
                                 dtype_if_tests = [
                                     f"algo_desp.dtype_a == tv::DType({dabc[0]})",
                                     f"algo_desp.dtype_b == tv::DType({dabc[1]})",
                                     f"algo_desp.dtype_c == tv::DType({dabc[2]})",
                                 ]
                                 with code.if_(" && ".join(dtype_if_tests)):
-                                    yield dabc_kers[0]
+                                    yield dabc_kers
                 else:
                     with code.if_(
                             f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"
                     ):
                         for (algo, shuf), algo_kers in algo_to_kers.items():
                             assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
-                            with code.if_(
-                                    f"algo_desp.algo == \"{algo.value}\" && algo_desp.shuffle_type == \"{shuf.value}\""
-                            ):
+                            if_test = f"algo_desp.algo == \"{algo.value}\""
+                            if has_shuffle:
+                                if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
+                            with code.if_(if_test):
                                 dabc_to_kers = codeops.group_by(
                                     lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
                                                tv_dtype, x.dtype_c.tv_dtype),
                                     algo_kers)
                                 for dabc, dabc_kers in dabc_to_kers.items():
-                                    assert len(
-                                        dabc_kers
-                                    ) == 1, "find multiple kernels for one configuration"
+                                    if is_end:
+                                        assert len(
+                                            dabc_kers
+                                        ) == 1, "find multiple kernels for one configuration"
                                     dtype_if_tests = [
                                         f"algo_desp.dtype_a == tv::DType({dabc[0]})",
                                         f"algo_desp.dtype_b == tv::DType({dabc[1]})",
                                         f"algo_desp.dtype_c == tv::DType({dabc[2]})",
                                     ]
                                     with code.if_(" && ".join(dtype_if_tests)):
-                                        yield dabc_kers[0]
+                                        yield dabc_kers
 
     @pccm.pybind.mark
     @pccm.static_function
@@ -1299,7 +1304,8 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         auto b_inds = params.b_inds;
 
         """)
-        for ker in self.matmul_select_helper_stage2(code):
+        for kers in self.matmul_select_helper_stage2(self.all_kernels, code):
+            ker = kers[0]
             param_type_str = "GemmParams" + ker.get_algo_name()
             code.raw(f"""
             found = true;

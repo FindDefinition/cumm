@@ -30,7 +30,9 @@ def div_up(a: int, b: int) -> int:
     return (a + b - 1) // b
 
 
-def gemm_abc_to_conv_iwo_indices(op_type: bases.ConvOpType):
+def conv_iwo_012_to_abc(op_type: bases.ConvOpType):
+    """get a map that provide conv iwo index, give abc index.
+    """
     if op_type == bases.ConvOpType.kForward:
         # i = a, w = b, o = c
         return [0, 1, 2]
@@ -44,7 +46,7 @@ def gemm_abc_to_conv_iwo_indices(op_type: bases.ConvOpType):
         raise NotImplementedError
 
 
-def conv_iwo_to_gemm_abc_indices(op_type: bases.ConvOpType):
+def gemm_abc_012_to_iwo(op_type: bases.ConvOpType):
     if op_type == bases.ConvOpType.kForward:
         return [0, 1, 2]
     elif op_type == bases.ConvOpType.kBackwardInput:
@@ -90,7 +92,7 @@ class ConvProblem(pccm.ParameterizedClass):
                 "input_dims, output_dims, ksize, padding, stride, dilation",
                 f"tv::array<int, {ndim}>")
         else:
-            self.add_member("ksize", f"tv::array<int, {ndim}>")
+            self.add_member("kernel_volume", f"int")
         self.add_member("mode", "ConvEnum::Mode")
         self.add_member("split_k_slices, groups", "int")
 
@@ -113,7 +115,7 @@ class ConvProblem(pccm.ParameterizedClass):
         code = pccm.FunctionCode()
         code.arg("N, C, K", "int")
         if self.mask_sparse:
-            code.arg("ksize", f"tv::array<int, {self.ndim}>")
+            code.arg("kernel_volume", f"int")
         else:
             code.arg(
                 "input_dims, output_dims, ksize, padding, stride, dilation",
@@ -180,14 +182,13 @@ class ConvProblem(pccm.ParameterizedClass):
         code.arg("op_type", "ConvEnum::OpType")
         if self.mask_sparse:
             code.raw(f"""
-            int ksize_prod = tv::arrayops::prod(ksize);
             switch (op_type) {{
                 case ConvEnum::OpType::kForward:
-                    return {{N, K, C * ksize_prod}};
+                    return {{N, K, C * kernel_volume}};
                 case ConvEnum::OpType::kBackwardInput:
-                    return {{N, C, K * ksize_prod}};
+                    return {{N, C, K * kernel_volume}};
                 case ConvEnum::OpType::kBackwardWeight:
-                    return {{K, C * ksize_prod, N}};
+                    return {{K, C * kernel_volume, N}};
                 default:
                     return {{}};
             }}
@@ -236,12 +237,11 @@ class ConvProblem(pccm.ParameterizedClass):
         code.arg("tile_shape_k", "int")
         if self.mask_sparse:
             code.raw(f"""
-            int ksize_prod = tv::arrayops::prod(ksize);
             switch (op_type) {{
                 case ConvEnum::OpType::kForward:
-                    return ksize_prod * tv::div_up(tv::div_up(C, split_k_slices), tile_shape_k);
+                    return kernel_volume * tv::div_up(tv::div_up(C, split_k_slices), tile_shape_k);
                 case ConvEnum::OpType::kBackwardInput:
-                    return ksize_prod * tv::div_up(tv::div_up(K, split_k_slices), tile_shape_k);
+                    return kernel_volume * tv::div_up(tv::div_up(K, split_k_slices), tile_shape_k);
                 case ConvEnum::OpType::kBackwardWeight:
                     return tv::div_up(tv::div_up(N, split_k_slices), tile_shape_k);
                 default:
@@ -325,12 +325,18 @@ class ConvProblem(pccm.ParameterizedClass):
     @pccm.cuda.member_function(host=True, device=True, inline=True)
     def get_weight_shape(self):
         code = pccm.FunctionCode()
-        msg = ", ".join(f"ksize[{i}]" for i in range(self.ndim))
+        if self.mask_sparse:
+            msg = "kernel_volume"
+        else:
+            msg = ", ".join(f"ksize[{i}]" for i in range(self.ndim))
+
         if self.layout_desp_weight.is_channel_first():
             code.raw(f"return {{K, C, {msg}}};")
         else:
             code.raw(f"return {{K, {msg}, C}};")
-        code.ret(f"tv::array<int, {self.ndim + 2}>")
+        weight_ndim = 3 if self.mask_sparse else self.ndim + 2
+
+        code.ret(f"tv::array<int, {weight_ndim}>")
         return code
 
     @pccm.cuda.member_function(host=True, device=True, inline=True)
@@ -349,12 +355,13 @@ class ConvProblem(pccm.ParameterizedClass):
         return code
 
     def get_a_b_layout_class(self):
+        weight_ndim = 3 if self.mask_sparse else self.ndim + 2
         if self.op_type == bases.ConvOpType.kForward:
             return (self.layout_desp_input.get_layout_class(self.ndim + 2),
-                    self.layout_desp_weight.get_layout_class(self.ndim + 2))
+                    self.layout_desp_weight.get_layout_class(weight_ndim))
         elif self.op_type == bases.ConvOpType.kBackwardInput:
             return (self.layout_desp_output.get_layout_class(self.ndim + 2),
-                    self.layout_desp_weight.get_layout_class(self.ndim + 2))
+                    self.layout_desp_weight.get_layout_class(weight_ndim))
         elif self.op_type == bases.ConvOpType.kBackwardWeight:
             return (self.layout_desp_output.get_layout_class(self.ndim + 2),
                     self.layout_desp_input.get_layout_class(self.ndim + 2))
@@ -362,12 +369,13 @@ class ConvProblem(pccm.ParameterizedClass):
             raise NotImplementedError
 
     def get_c_layout_class(self):
+        weight_ndim = 3 if self.mask_sparse else self.ndim + 2
         if self.op_type == bases.ConvOpType.kForward:
             return self.layout_desp_output.get_layout_class(self.ndim + 2)
         elif self.op_type == bases.ConvOpType.kBackwardInput:
             return self.layout_desp_input.get_layout_class(self.ndim + 2)
         elif self.op_type == bases.ConvOpType.kBackwardWeight:
-            return self.layout_desp_weight.get_layout_class(self.ndim + 2)
+            return self.layout_desp_weight.get_layout_class(weight_ndim)
         else:
             raise NotImplementedError
 

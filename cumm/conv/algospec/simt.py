@@ -120,6 +120,7 @@ class InputSimt(bases.Input):
                 self.problem,
                 self.layout_b,
                 optimized=iter_algo == ConvIterAlgo.Optimized,
+                mask_sparse=mask_sparse,
                 increment_k_first=increment_k_first)
         else:
             if mask_sparse:

@@ -15,8 +15,10 @@
 #pragma once 
 #include <tensorview/dtypes.h>
 #include "common.h"
+#if (CUDA_VERSION >= 11000)
 #include "bfloat16.h"
 #include "tf32.h"
+#endif
 #include "half.h"
 #include "subint.h"
 #include "complex.h"

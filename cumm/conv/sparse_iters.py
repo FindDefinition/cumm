@@ -74,7 +74,7 @@ class SparseParams(bases.ConvIterParams):
         code.ctor_init("mask_argsort_ptr_", "mask_argsort_ptr")
         C_or_K = "C" if self.problem.op_type == ConvOpType.kForward else "K"
         code.raw(f"""
-        RS = tv::arrayops::prod(problem.ksize);
+        RS = problem.kernel_volume;
         filter_c_delta = {self.tile_shape[2]} * problem.split_k_slices;
         """)
         if not self.is_wgrad_out and not self.is_wgrad_input:
@@ -225,7 +225,6 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
     def update_indices(self):
         code = pccm.cuda.PTXCode()
         C_or_K = "C" if self.op_type == ConvOpType.kForward else "K"
-        print(self.tmap.iterations)
         if self.is_wgrad_out:
             # if False:
             # wgrad out only need shuffle.
@@ -283,7 +282,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                     if (mask_ & (1u << (s * {self.sub_tile_shape[0]} + ss))){{
                         indices_[s * {self.sub_tile_shape[0]} + ss] = 
                         indice_ptr_[mask_inds[s * {self.sub_tile_shape[0]} + ss]] * 
-                            problem_.{C_or_K} * {self.dtype.bitsize()} / 8;
+                            problem_.C * {self.dtype.bitsize()} / 8;
                     }}
                 }}
             }}

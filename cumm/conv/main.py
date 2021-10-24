@@ -16,7 +16,7 @@ import asyncio
 import sys
 from functools import partial
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
 import pccm
@@ -29,37 +29,52 @@ from cumm import tensorview as tv
 from cumm.common import GemmBasic, TensorView, TensorViewKernel
 from cumm.constants import CUTLASS_MODE
 from cumm.conv import kernel
+from cumm.gemm.kernel import GemmKernel
 from cumm.conv.bases import (NCHW, NHWC, ConvEnum, ConvIterAlgo, ConvLayout,
                              ConvLayoutType, ConvMode, ConvOpType)
-from cumm.conv.params import (ConvProblem, conv_iwo_to_gemm_abc_indices,
-                              gemm_abc_to_conv_iwo_indices, get_gemm_trans_abc)
+from cumm.conv.params import (ConvProblem, gemm_abc_012_to_iwo,
+                              conv_iwo_012_to_abc, get_gemm_trans_abc)
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm.algospec import GemmAlgo
 from cumm.gemm.algospec.core import TensorOpParams
 from cumm.gemm.core.metaarray import MetaArray
-from cumm.gemm.main import GemmAlgoParams, GemmAlgoDesp, GemmParams
+from cumm.gemm.main import GemmAlgoParams, GemmAlgoDesp, GemmMainUnitTest, GemmParams
+from cumm.gemm import codeops 
 import os 
 
 
 class ConvAlgoDesp(GemmAlgoDesp):
     def __init__(self):
         super().__init__()
+        self.add_pybind_member("ndim", "int")
         self.add_pybind_member("op_type", "int")
         self.add_pybind_member("iter_algo", "int")
-        self.add_pybind_member("layout_i, layout_w, layout_o", "std::string")
+        self.add_pybind_member("layout_i, layout_w, layout_o", "int")
         self.add_pybind_member("interleave_i, interleave_w, interleave_o", "int")
         self.add_pybind_member("mask_sparse", "bool", "false")
         self.add_pybind_member("increment_k_first", "bool", "false")
-        self.add_pybind_member("mask_width", "int", "-1")
 
-        self.add_member("gemm2conv_inds", "std::array<int, 3>", "gemm_abc_to_conv_iwo_indices()")
-        self.add_member("conv2gemm_inds", "std::array<int, 3>", "conv_iwo_to_gemm_abc_indices()")
+        self.add_member("conv2gemm_inds", "std::array<int, 3>")
+        self.add_member("gemm2conv_inds", "std::array<int, 3>")
 
     @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
         code = pccm.FunctionCode()
+        code.arg("ndim", "int")
+        code.arg("op_type", "int")
         code.ctor_init("GemmAlgoDesp", "")
+        code.ctor_init("ndim", "ndim")
+        code.ctor_init("op_type", f"op_type")
+        code.ctor_init("iter_algo", f"{ConvIterAlgo.Optimized.value}")
+        code.ctor_init("layout_i", f"{ConvLayoutType.ChannelLast.value}")
+        code.ctor_init("layout_w", f"{ConvLayoutType.ChannelLast.value}")
+        code.ctor_init("layout_o", f"{ConvLayoutType.ChannelLast.value}")
+        code.ctor_init("interleave_i", f"1")
+        code.ctor_init("interleave_w", f"1")
+        code.ctor_init("interleave_o", f"1")
+        code.ctor_init("conv2gemm_inds", f"conv_iwo_012_to_abc(op_type)")
+        code.ctor_init("gemm2conv_inds", f"gemm_abc_012_to_iwo(op_type)")
         return code
 
     @pccm.pybind.mark
@@ -71,7 +86,20 @@ class ConvAlgoDesp(GemmAlgoDesp):
         std::stringstream ss;
         ss << GemmAlgoDesp::__repr__();
         ss << "_C" << ndim << "_" << op_type << iter_algo;
-        ss << layout_i << interleave_i << layout_w << interleave_w << layout_o << interleave_o;
+        std::string layout_i_str = layout_i == {ConvLayoutType.ChannelFirst.value} ? "F" : "L";
+        std::string layout_w_str = layout_w == {ConvLayoutType.ChannelFirst.value} ? "F" : "L";
+        std::string layout_o_str = layout_o == {ConvLayoutType.ChannelFirst.value} ? "F" : "L";
+        if (interleave_i > 1){{
+            layout_i_str += std::to_string(interleave_i);
+        }}
+        if (interleave_w > 1){{
+            layout_w_str += std::to_string(interleave_w);
+        }}
+        if (interleave_o > 1){{
+            layout_o_str += std::to_string(interleave_o);
+        }}
+
+        ss << layout_i_str << layout_w_str << layout_o_str;
         if (mask_sparse){{
             ss << "_" << increment_k_first ? "SF" : "SK";
         }}
@@ -81,8 +109,9 @@ class ConvAlgoDesp(GemmAlgoDesp):
 
     @pccm.pybind.mark
     @pccm.static_function
-    def gemm_abc_to_conv_iwo_indices(self):
+    def conv_iwo_012_to_abc(self):
         code = pccm.FunctionCode()
+        code.arg("op_type", "int")
         code.raw(f"""
         if (op_type == {ConvOpType.kForward.value}){{
             return {{0, 1, 2}};
@@ -100,8 +129,9 @@ class ConvAlgoDesp(GemmAlgoDesp):
 
     @pccm.pybind.mark
     @pccm.static_function
-    def conv_iwo_to_gemm_abc_indices(self):
+    def gemm_abc_012_to_iwo(self):
         code = pccm.FunctionCode()
+        code.arg("op_type", "int")
         code.raw(f"""
         if (op_type == {ConvOpType.kForward.value}){{
             return {{0, 1, 2}};
@@ -123,7 +153,7 @@ class ConvAlgoDesp(GemmAlgoDesp):
         code = pccm.FunctionCode()
         code.raw(f"""
         std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
-        return dtypes[gemm2conv_inds[0]];
+        return dtypes[conv2gemm_inds[0]];
         """)
         return code.ret("int")
 
@@ -132,9 +162,8 @@ class ConvAlgoDesp(GemmAlgoDesp):
     def dtype_weight(self):
         code = pccm.FunctionCode()
         code.raw(f"""
-        auto indices = gemm_abc_to_conv_iwo_indices();
         std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
-        return dtypes[gemm2conv_inds[1]];
+        return dtypes[conv2gemm_inds[1]];
         """)
         return code.ret("int")
     
@@ -144,14 +173,52 @@ class ConvAlgoDesp(GemmAlgoDesp):
         code = pccm.FunctionCode()
         code.raw(f"""
         std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
-        return dtypes[gemm2conv_inds[2]];
+        return dtypes[conv2gemm_inds[2]];
         """)
         return code.ret("int")
 
-class ConvParams(GemmParams):
+    @pccm.pybind.mark 
+    @pccm.member_function
+    def supported(self):
+        code = pccm.FunctionCode()
+        code.arg("m,n,k, C, K, mask_width", "int")
+        code.raw(f"""
+        bool res = GemmAlgoDesp::supported(m, n, k);
+        if (mask_sparse){{
+            if (op_type == {ConvOpType.kForward.value}){{
+                // NC -> NRSC @ KRSC
+                // require C % tile_k == 0
+                res &= C % tile_shape[2] == 0;
+            }}else if (op_type == {ConvOpType.kBackwardInput.value}){{
+                // NK -> NKRS @ KRSC
+                // require K % tile_k == 0
+                res &= K % tile_shape[2] == 0;
+            }}else{{
+                // NK @ NC -> NRSC
+                // we must ensure every k iteration only have one mask (from forward),
+                res &= C % tile_shape[1] == 0 && mask_width % tile_shape[2] == 0;
+            }}
+        }}
+        return res;
+        """)
+        return code.ret("bool")
+
+
+class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
+        self.add_dependency(ConvAlgoDesp)
+        self.add_pybind_member("conv_algo_desp", "ConvAlgoDesp")
+        self.add_pybind_member("input,weight,output", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
+        self.add_pybind_member("split_k_slices", "int", "1")
         self.add_pybind_member("padding,stride,dilation", "std::vector<int>")
+        self.add_pybind_member("alpha,beta", "float")
+        self.add_pybind_member("mask_width", "int")
+
+        self.add_pybind_member("workspace",
+                               "tv::Tensor",
+                               "tv::Tensor()",
+                               pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("mask",
                                "tv::Tensor",
                                "tv::Tensor()",
@@ -168,85 +235,27 @@ class ConvParams(GemmParams):
                                "tv::Tensor",
                                "tv::Tensor()",
                                pyanno="cumm.tensorview.Tensor = Tensor()")
+        self.add_pybind_member("stream", "std::uintptr_t", "0", pyanno="int")
 
     @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
         code = pccm.FunctionCode()
-        code.ctor_init("GemmParams", "")
-        code.ctor_init("padding", "")
-        code.ctor_init("stride", "")
-        code.ctor_init("dilation", "")
+        code.arg("ndim", "int")
+        code.arg("op_type", "int")
+        code.ctor_init("conv_algo_desp", "ndim, op_type")
+        code.ctor_init("input", "tv::Tensor()")
+        code.ctor_init("weight", "tv::Tensor()")
+        code.ctor_init("output", "tv::Tensor()")
+        code.ctor_init("padding", "std::vector<int>()")
+        code.ctor_init("stride", "std::vector<int>()")
+        code.ctor_init("dilation", "std::vector<int>()")
+        code.ctor_init("alpha", "1.0")
+        code.ctor_init("beta", "0.0")
+        code.ctor_init("mask_width", "-1")
+
         return code
 
-    @pccm.pybind.mark_prop_getter(prop_name="inp")
-    @pccm.member_function
-    def input_get(self):
-        code = pccm.FunctionCode()
-        code.raw(f"""
-        auto index = algo_spec.conv2gemm_inds[0];
-        return index == 0 ? a : index == 1 ? b : c;
-        """)
-        return code.ret("tv::Tensor")
-    
-    @pccm.pybind.mark_prop_setter(prop_name="inp")
-    @pccm.member_function
-    def input_set(self):
-        code = pccm.FunctionCode()
-        code.arg("val", "tv::Tensor")
-        code.raw(f"""
-        auto index = algo_spec.conv2gemm_inds[0];
-        if (index == 0){{
-            a = val;
-        }}
-        """)
-        return code
-
-    @pccm.pybind.mark_prop_getter(prop_name="weight")
-    @pccm.member_function
-    def weight_get(self):
-        code = pccm.FunctionCode()
-        code.raw(f"""
-        auto index = algo_spec.conv2gemm_inds[0];
-        return index == 0 ? a : index == 1 ? b : c;
-        """)
-        return code.ret("tv::Tensor")
-    
-    @pccm.pybind.mark_prop_setter(prop_name="weight")
-    @pccm.member_function
-    def weight_set(self):
-        code = pccm.FunctionCode()
-        code.arg("val", "tv::Tensor")
-        code.raw(f"""
-        auto index = algo_spec.conv2gemm_inds[0];
-        if (index == 0){{
-            a = val;
-        }}
-        """)
-        return code
-
-    @pccm.pybind.mark_prop_getter(prop_name="inp")
-    @pccm.member_function
-    def input_get(self):
-        code = pccm.FunctionCode()
-        code.raw(f"""
-        auto index = algo_spec.conv2gemm_inds[0];
-        return index == 0 ? a : index == 1 ? b : c;
-        """)
-        return code.ret("tv::Tensor")
-    
-    @pccm.pybind.mark_prop_setter(prop_name="inp")
-    @pccm.member_function
-    def input_set(self):
-        code = pccm.FunctionCode()
-        code.arg("val", "tv::Tensor")
-        code.raw(f"""
-        auto index = algo_spec.conv2gemm_inds[0];
-        if (index == 0){{
-            a = val;
-        }}
-        """)
-        return code
 
 def seq(*vals):
     return np.array([*vals], dtype=np.int64)
@@ -269,8 +278,7 @@ class ConvAlgoParams(GemmAlgoParams):
                  splitk_serial: bool = False,
                  splitk_parallel: bool = False,
                  mask_sparse: bool = False,
-                 increment_k_first: bool = False,
-                 mask_width: int = -1):
+                 increment_k_first: bool = False):
         trans_a, trans_b, trans_c = get_gemm_trans_abc(op_type)
         super().__init__(ts, wts, num_stage, dtype_shorts, trans_a, trans_b, 
             trans_c, algo, tensorop, splitk_serial, splitk_parallel)
@@ -280,7 +288,7 @@ class ConvAlgoParams(GemmAlgoParams):
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
 
-        indices = gemm_abc_to_conv_iwo_indices(op_type)
+        indices = conv_iwo_012_to_abc(op_type)
         dtypes_abc = [self.dtype_a, self.dtype_b, self.dtype_c]
         self.dtype_input = dtypes_abc[indices[0]]
         self.dtype_weight = dtypes_abc[indices[1]]
@@ -289,7 +297,6 @@ class ConvAlgoParams(GemmAlgoParams):
         self.layout_desp_input = layout_desp_input
         self.layout_desp_weight = layout_desp_weight
         self.layout_desp_output = layout_desp_output
-        self.mask_width = mask_width
 
     def skipped(self):
         if self.op_type != ConvOpType.kForward and self.dtype_a.itemsize(
@@ -303,11 +310,12 @@ class ConvAlgoParams(GemmAlgoParams):
         res += f"_C{self.ndim}{self.op_type.value}{self.iter_algo.value}"
         res += f"{self.layout_desp_input}{self.layout_desp_weight}{self.layout_desp_output}"
         if self.mask_sparse:
-            res += "SF" if not self.increment_k_first else "SK"
+            res += "_SF" if not self.increment_k_first else "_SK"
         return res
 
 
-def gen_gemm_params(ts,
+def gen_gemm_params(op_types: List[ConvOpType],
+                    ts,
                     wts,
                     ndim: int,
                     iter_algo: ConvIterAlgo,
@@ -321,26 +329,8 @@ def gen_gemm_params(ts,
                     splitk_serial: bool = False,
                     splitk_parallel: bool = False,
                     mask_sparse: bool = False,
-                    increment_k_first: bool = False,
-                    mask_width: int = -1):
+                    increment_k_first: bool = False):
     res = []
-    # for ta in [False, True]:
-    #     for tb in [False, True]:
-    #         for tc in [False, True]:
-    #             p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc, algo, tensorop)
-    #             if not p.skipped():
-    #                 res.append(p)
-    op_types = [
-        ConvOpType.kForward, ConvOpType.kBackwardInput,
-        ConvOpType.kBackwardWeight
-    ]
-    op_types = [
-        ConvOpType.kForward, ConvOpType.kBackwardInput,
-        ConvOpType.kBackwardWeight
-    ]
-    # if mask_sparse:
-    #     op_types = [ConvOpType.kForward, ConvOpType.kBackwardInput]
-
     for op_type in op_types:
         if op_type == ConvOpType.kBackwardWeight:
             p = ConvAlgoParams(ndim,
@@ -358,8 +348,7 @@ def gen_gemm_params(ts,
                                True,
                                splitk_parallel,
                                mask_sparse,
-                               increment_k_first,
-                               mask_width=mask_width)
+                               increment_k_first)
         else:
             p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
                                dtypes_string, li, lw, lo, algo, tensorop,
@@ -370,6 +359,9 @@ def gen_gemm_params(ts,
             res.append(p)
     return res
 
+ConvFwdAndBwdInput = [ConvOpType.kForward, ConvOpType.kBackwardInput]
+ConvBwdWeight = [ConvOpType.kBackwardWeight]
+ConvAllOp = [ConvOpType.kForward, ConvOpType.kBackwardInput, ConvOpType.kBackwardWeight]
 
 def gen_spwgrad_params(ts,
                        wts,
@@ -385,8 +377,7 @@ def gen_spwgrad_params(ts,
                        splitk_serial: bool = False,
                        splitk_parallel: bool = False,
                        mask_sparse: bool = False,
-                       increment_k_first: bool = False,
-                       mask_width: int = -1):
+                       increment_k_first: bool = False):
     p = ConvAlgoParams(ndim,
                        ConvOpType.kBackwardWeight,
                        iter_algo,
@@ -402,8 +393,7 @@ def gen_spwgrad_params(ts,
                        True,
                        splitk_parallel,
                        mask_sparse,
-                       increment_k_first,
-                       mask_width=mask_width)
+                       increment_k_first)
     return [p]
 
 
@@ -427,8 +417,7 @@ def gen_gemm_kernels(params: ConvAlgoParams):
                              splitk_serial=params.splitk_serial,
                              splitk_parallel=params.splitk_parallel,
                              mask_sparse=params.mask_sparse,
-                             increment_k_first=params.increment_k_first,
-                             mask_width=params.mask_width)
+                             increment_k_first=params.increment_k_first)
 
 SHUFFLE_SIMT_PARAMS = []
 
@@ -437,7 +426,7 @@ SHUFFLE_TURING_PARAMS = []
 class ConvMainUnitTest(pccm.Class):
     def __init__(self, conv_params: Optional[List[ConvAlgoParams]] = None):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, ConvEnum)
+        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvParams)
         # unit test params: [ts, wts, stage, dtypes, trans, algo, tensorop]
         if conv_params is None:
             is_debug = os.getenv("CUMM_DEBUG", None)
@@ -445,15 +434,18 @@ class ConvMainUnitTest(pccm.Class):
                 simt_params: List[ConvAlgoParams] = [
                     # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, ConvIterAlgo.Optimized, 2, "s8,s8,s32,s32,s32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.SimtDP4A, None),
-                    # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
+                        NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
+                    *gen_gemm_params(ConvBwdWeight, (128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
+                        NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
+
                     # *gen_spwgrad_params((128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
                     # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
-                    *gen_gemm_params(
-                        (32, 32, 32), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2,
-                        "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
+                    # *gen_gemm_params(
+                    #     (32, 128, 16), (32, 32, 8), 2, ConvIterAlgo.Optimized, 2,
+                    #     "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
                     # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
                     # *gen_gemm_params_rowmajor_c((16, 32, 8), (16, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
                     # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 16, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),
@@ -487,251 +479,272 @@ class ConvMainUnitTest(pccm.Class):
             assert len(conv_params) > 0
             self.all_params = conv_params
             self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
+    
+    @staticmethod
+    def _get_layout_types(ker: kernel.ConvKernel):
+        p = ker.problem
+        return (p.layout_desp_input.layout_type, p.layout_desp_weight.layout_type, p.layout_desp_output.layout_type)
+    
+    @staticmethod
+    def _get_layout_interleaves(ker: kernel.ConvKernel):
+        p = ker.problem
+        return (p.layout_desp_input.interleave, p.layout_desp_weight.interleave, p.layout_desp_output.interleave)
+
+    @staticmethod
+    def _get_sparse_params(ker: kernel.ConvKernel):
+        return (ker.mask_sparse, ker.increment_k_first)
+
+
+    @staticmethod
+    def conv_select_helper_stage1(kernels: List[kernel.ConvKernel], code: pccm.FunctionCode):
+        ndim_op_iter_to_kers = codeops.group_by(
+            lambda x: (x.problem.ndim, x.problem.op_type, x.iter_algo), kernels)
+        for ndim_op_iter, ndim_op_iter_kers in ndim_op_iter_to_kers.items():
+            if_tests = [
+                f"algo_desp.ndim == {ndim_op_iter[0]}",
+                f"algo_desp.op_type == {ndim_op_iter[1].value}",
+                f"algo_desp.iter_algo == {ndim_op_iter[2].value}",
+            ]
+            with code.if_(" && ".join(if_tests)):
+                li_lw_lo_to_kers = codeops.group_by(
+                    ConvMainUnitTest._get_layout_types, ndim_op_iter_kers)
+                for li_lw_lo, lilwlo_kers in li_lw_lo_to_kers.items():
+                    if_tests = [
+                        f"algo_desp.layout_i == {li_lw_lo[0].value}",
+                        f"algo_desp.layout_w == {li_lw_lo[1].value}",
+                        f"algo_desp.layout_o == {li_lw_lo[2].value}",
+                    ]
+                    with code.if_(" && ".join(if_tests)):
+                        lii_lwi_loi_to_kers = codeops.group_by(
+                            ConvMainUnitTest._get_layout_interleaves, lilwlo_kers)
+                        for liilwiloi, liilwiloi_kers in lii_lwi_loi_to_kers.items():
+                            if_tests = [
+                                f"algo_desp.interleave_i == {liilwiloi[0]}",
+                                f"algo_desp.interleave_w == {liilwiloi[1]}",
+                                f"algo_desp.interleave_o == {liilwiloi[2]}",
+                            ]
+                            with code.if_(" && ".join(if_tests)):
+                                ms_ikf_mw_to_kers = codeops.group_by(
+                                    ConvMainUnitTest._get_sparse_params, liilwiloi_kers)
+                                for ms_ikf_mw, ms_ikf_mw_kers in ms_ikf_mw_to_kers.items():
+                                    assert len(ms_ikf_mw_kers) == 1, "find multiple kernels for one configuration"
+                                    if_tests = [
+                                        f"algo_desp.mask_sparse == {pccm.boolean(ms_ikf_mw[0])}",
+                                        f"algo_desp.increment_k_first == {pccm.boolean(ms_ikf_mw[1])}",
+                                    ]
+                                    with code.if_(" && ".join(if_tests)):
+                                        yield ms_ikf_mw_kers
+
+
+    @staticmethod
+    def conv_select_helper(kernels: List[Union[kernel.ConvKernel]], code: pccm.FunctionCode):
+        for kers in GemmMainUnitTest.matmul_select_helper_stage2(kernels, code, False, False):
+            yield from ConvMainUnitTest.conv_select_helper_stage1(kers, code)
+
 
     @pccm.pybind.mark
     @pccm.cuda.static_function
-    def implicit_gemm(self):
+    def implicit_gemm2(self):
         code = pccm.FunctionCode()
         for p, ker in zip(self.all_params, self.all_kernels):
             code.add_param_class("cp" + ker.get_algo_name(), ker.gemm_params,
                                  "ConvParams" + ker.get_algo_name())
             code.add_param_class(ker.get_algo_name(), ker,
                                  "Conv" + ker.get_algo_name())
-
-        code.arg("input,weight,output",
-                 "tv::Tensor",
-                 pyanno="cumm.tensorview.Tensor")
-        code.arg("padding,stride,dilation",
-                 f"std::vector<int>",
-                 pyanno="List[int]")
-
-        code.arg("ndim, iter_algo_, op_type_", "int")
-        code.arg("i_ltype_,w_ltype_,o_ltype_", "int")
-        code.arg("ts,wts", "std::array<int, 3>", pyanno="Tuple[int, int, int]")
-        code.arg("num_stage", "int", pyanno="int")
-        code.arg("dacc,dcomp", "int", pyanno="int")
-        code.arg("algo", "std::string", pyanno="str")
-        code.arg("tensorop", "std::array<int, 3>", "std::array<int, 3>{}")
-        code.arg("i_interleave", "int", "1")
-        code.arg("w_interleave", "int", "1")
-        code.arg("o_interleave", "int", "1")
-        code.arg("alpha", "float", "1")
-        code.arg("beta", "float", "0")
-
-        code.arg("split_k_slices", "int", "1")
-        code.arg("workspace",
-                 "tv::Tensor",
-                 "tv::Tensor()",
-                 pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("mask_sparse", "bool", "false")
-        code.arg("increment_k_first", "bool", "false")
-
-        code.arg("mask",
-                 "tv::Tensor",
-                 "tv::Tensor()",
-                 pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("mask_argsort",
-                 "tv::Tensor",
-                 "tv::Tensor()",
-                 pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("indices",
-                 "tv::Tensor",
-                 "tv::Tensor()",
-                 pyanno="cumm.tensorview.Tensor = Tensor()")
-        code.arg("mask_output",
-                 "tv::Tensor",
-                 "tv::Tensor()",
-                 pyanno="cumm.tensorview.Tensor = Tensor()")
-
+        code.arg("params",
+                 "ConvParams",
+                 pyanno="ConvParams")
         code.raw(f"""
         int groups = 1;
         bool found = false;
-        ConvEnum::IterAlgo iter_algo = static_cast<ConvEnum::IterAlgo>(iter_algo_);
-        ConvEnum::OpType op_type = static_cast<ConvEnum::OpType>(op_type_);
-        ConvEnum::LayoutType i_ltype = static_cast<ConvEnum::LayoutType>(i_ltype_);
-        ConvEnum::LayoutType w_ltype = static_cast<ConvEnum::LayoutType>(w_ltype_);
-        ConvEnum::LayoutType o_ltype = static_cast<ConvEnum::LayoutType>(o_ltype_);
+        auto& algo_desp = params.conv_algo_desp;
+        auto dacc = tv::DType(algo_desp.dacc);
+        auto dcomp = tv::DType(algo_desp.dcomp);
+        ConvEnum::IterAlgo iter_algo = static_cast<ConvEnum::IterAlgo>(algo_desp.iter_algo);
+        ConvEnum::OpType op_type = static_cast<ConvEnum::OpType>(algo_desp.op_type);
+        ConvEnum::LayoutType i_ltype = static_cast<ConvEnum::LayoutType>(algo_desp.layout_i);
+        ConvEnum::LayoutType w_ltype = static_cast<ConvEnum::LayoutType>(algo_desp.layout_w);
+        ConvEnum::LayoutType o_ltype = static_cast<ConvEnum::LayoutType>(algo_desp.layout_o);
+
+        int split_k_slices = params.split_k_slices;
+        auto workspace = params.workspace;
+        auto input = params.input;
+        auto weight = params.weight;
+        auto output = params.output;
+
+        auto indices = params.indices;
+        auto mask = params.mask;
+        auto mask_argsort = params.mask_argsort;
+        auto mask_output = params.mask_output;
+        auto padding = params.padding;
+        auto stride = params.stride;
+        auto dilation = params.dilation;
+        auto mask_width = params.mask_width;
         """)
 
-        for p, ker in zip(self.all_params, self.all_kernels):
-            indices = gemm_abc_to_conv_iwo_indices(p.op_type)
-            inv_indices = conv_iwo_to_gemm_abc_indices(p.op_type)
-            dtypes_abc = [p.dtype_a, p.dtype_b, p.dtype_c]
+        for kers in self.conv_select_helper(self.all_kernels, code):
+            ker = kers[0]
+            p = ker.problem
+            param_type_str = "ConvParams" + ker.get_algo_name()
+            indices = conv_iwo_012_to_abc(ker.problem.op_type)
+            inv_indices = gemm_abc_012_to_iwo(ker.problem.op_type)
+            dtypes_abc = [ker.dtype_a, ker.dtype_b, ker.dtype_c]
             dtypes_iwo = [dtypes_abc[i] for i in indices]
-            param_cls_name = "ConvParams" + p.get_algo_name()
-            param_cls_ns = "cp" + p.get_algo_name()
+            param_cls_name = "ConvParams" + ker.get_algo_name()
+            param_cls_ns = "cp" + ker.get_algo_name()
 
-            if_tests = [
-                f"tv::type_v<{dtypes_iwo[0]}> == input.dtype()",
-                f"tv::type_v<{dtypes_iwo[1]}> == weight.dtype()",
-                f"tv::type_v<{dtypes_iwo[2]}> == output.dtype()",
-            ]
-            if_tests.extend([
-                f"{p.iter_algo.value} == iter_algo_",
-                f"{p.op_type.value} == op_type_",
-                f"{p.ndim} == ndim",
-                f"{p.layout_desp_input.layout_type.value} == i_ltype_",
-                f"{p.layout_desp_weight.layout_type.value} == w_ltype_",
-                f"{p.layout_desp_output.layout_type.value} == o_ltype_",
-                f"{p.layout_desp_input.interleave} == i_interleave",
-                f"{p.layout_desp_weight.interleave} == w_interleave",
-                f"{p.layout_desp_output.interleave} == o_interleave",
-                f"std::array<int, 3>{{{code.unpack(list(p.ts))}}} == ts",
-                f"std::array<int, 3>{{{code.unpack(list(p.wts))}}} == wts",
-                f"{p.num_stage} == num_stage",
-                f"{p.dtype_acc.tv_dtype} == dacc",
-                f"{p.dtype_comp.tv_dtype} == dcomp",
-                f"\"{p.algo.value}\" == algo",
-                f"{pccm.boolean(p.mask_sparse)} == mask_sparse",
-                f"{pccm.boolean(p.increment_k_first)} == increment_k_first",
-            ])
-            if p.tensorop is not None:
-                if_tests.append(
-                    f"std::array<int, 3>{{{code.unpack(list(p.tensorop.shape))}}} == tensorop"
-                )
-            if_test = " && ".join(if_tests)
-            param_type_str = "ConvParams" + p.get_algo_name()
-            with code.if_(if_test):
-                if not p.support_splitk():
-                    code.raw(f"""
-                    TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
-                    """)
-                # TODO if input is NCxHWx
-                # TODO if input weight and output have different layout
-                dim_start = 2 if p.layout_desp_weight.is_channel_first() else 1
-                io_ndim = 2 if p.mask_sparse else p.ndim + 2
+            if not ker.support_splitk():
                 code.raw(f"""
-                found = true;
-                TV_ASSERT_RT_ERR(input.ndim() == {io_ndim}, "error");
-                TV_ASSERT_RT_ERR(weight.ndim() == {p.ndim + 2}, "error");
-                TV_ASSERT_RT_ERR(output.ndim() == {io_ndim}, "error");
-                int N = input.dim(0);
-                int C = {'input.dim(1)' if p.layout_desp_input.is_channel_first() else f'input.dim({io_ndim - 1})'};
-                int K = weight.dim(0);
-                int K2 = {'output.dim(1)' if p.layout_desp_output.is_channel_first() else f'output.dim({io_ndim - 1})'};
-                TV_ASSERT_RT_ERR(K2 == K, "error");
-                tv::array<int, {p.ndim}> ksize, input_dims, output_dims;
+                TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
                 """)
-                if p.mask_sparse:
-                    if p.op_type == ConvOpType.kForward:
-                        code.raw(
-                            f"TV_ASSERT_RT_ERR(!mask_output.empty(), \"error\");"
-                        )
-                    elif p.op_type == ConvOpType.kBackwardWeight:
-                        assert p.mask_width > 0 and p.mask_width % p.ts[2] == 0
-                        code.raw(f"""
-                        TV_ASSERT_RT_ERR(C % {p.ts[1]} == 0, "error");
-                        """)
-                    code.raw(f"""
-                    TV_ASSERT_RT_ERR(!indices.empty(), "error");
-                    TV_ASSERT_RT_ERR(!mask.empty(), "error");
-                    TV_ASSERT_RT_ERR(!mask_argsort.empty(), "error");
+            # TODO if input is NCxHWx
+            # TODO if input weight and output have different layout
+            dim_start = 2 if p.layout_desp_weight.is_channel_first() else 1
+            io_ndim = 2 if p.mask_sparse else p.ndim + 2
+            weight_ndim = 3 if p.mask_sparse else p.ndim + 2
+            abc_names = ["a", "b", "c"]
+            abc_names = [abc_names[i] for i in indices]
+            input_names = ["input", "weight", "output"]
+            input_names = [input_names[i] for i in inv_indices]
 
-                    for (int i = {dim_start}; i < {dim_start + p.ndim}; ++i){{
-                        ksize[i - {dim_start}] = weight.dim(i);
-                    }}
-                    {param_cls_ns}::ConvProblem problem(N, C, K, ksize, 
-                        ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
-                    """)
-                else:
+            code.raw(f"""
+            // {ker.get_algo_name()}
+            found = true;
+            TV_ASSERT_RT_ERR(input.ndim() == {io_ndim}, "error");
+            TV_ASSERT_RT_ERR(weight.ndim() == {weight_ndim}, "error");
+            TV_ASSERT_RT_ERR(output.ndim() == {io_ndim}, "error");
+            int N = input.dim(0);
+            int C = {'input.dim(1)' if p.layout_desp_input.is_channel_first() else f'input.dim({io_ndim - 1})'};
+            int K = weight.dim(0);
+            int K2 = {'output.dim(1)' if p.layout_desp_output.is_channel_first() else f'output.dim({io_ndim - 1})'};
+            TV_ASSERT_RT_ERR(K2 == K, "error");
+            tv::array<int, {p.ndim}> input_dims, output_dims;
+            """)
+            if p.mask_sparse:
+                if p.op_type == ConvOpType.kForward:
+                    code.raw(
+                        f"TV_ASSERT_RT_ERR(!mask_output.empty(), \"error\");"
+                    )
+                elif p.op_type == ConvOpType.kBackwardWeight:
                     code.raw(f"""
-                    for (int i = {dim_start}; i < {dim_start + p.ndim}; ++i){{
-                        ksize[i - {dim_start}] = weight.dim(i);
-                        input_dims[i - {dim_start}] = input.dim(i);
-                        output_dims[i - {dim_start}] = output.dim(i);
-                    }}
-                    tv::array<int, {p.ndim}> padding_arr{{{code.unpack([f"padding[{i}]" for i in range(p.ndim)])}}};
-                    tv::array<int, {p.ndim}> stride_arr{{{code.unpack([f"stride[{i}]" for i in range(p.ndim)])}}};
-                    tv::array<int, {p.ndim}> dilation_arr{{{code.unpack([f"dilation[{i}]" for i in range(p.ndim)])}}};
-                    auto output_dims_check_again = {param_cls_ns}::ConvProblem::calc_output_dims(input_dims, ksize, padding_arr, stride_arr, dilation_arr);
-                    for (int i = 0; i < {p.ndim}; ++i){{
-                        TV_ASSERT_RT_ERR(output_dims_check_again[i] == output_dims[i], "error");
-                    }}
-                    {param_cls_ns}::ConvProblem problem(N, C, K, input_dims, output_dims, ksize, padding_arr, stride_arr, dilation_arr, 
-                        ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
+                    TV_ASSERT_RT_ERR(mask_width > 0 && mask_width % {ker.tile_shape[2]} == 0, "error");
+                    TV_ASSERT_RT_ERR(C % {ker.tile_shape[1]} == 0, "error");
                     """)
                 code.raw(f"""
-                auto mnk = problem.implicit_gemm_mnk(op_type);
-                int workspace_size = 0;
-                auto logical_tile_count = {param_type_str}::get_logical_tile_count(mnk[0], mnk[1], mnk[2], split_k_slices);
-                if (split_k_slices > 1){{
-                    if ({pccm.boolean(p.splitk_serial)}){{
-                        workspace_size = sizeof(int) * logical_tile_count.x * logical_tile_count.y;
-                    }} else if ({pccm.boolean(p.splitk_parallel)}){{
-                        workspace_size = {p.dtype_acc.itemsize()} * mnk[0] * mnk[1] * logical_tile_count.z;
-                    }} else{{
-                        TV_THROW_INVALID_ARG("not impemented");
-                    }}
+                TV_ASSERT_RT_ERR(!indices.empty(), "error");
+                TV_ASSERT_RT_ERR(!mask.empty(), "error");
+                TV_ASSERT_RT_ERR(!mask_argsort.empty(), "error");
+                int kernel_volume = weight.dim({dim_start});
+                tv::ssprint(N, C, K, kernel_volume);
+                {param_cls_ns}::ConvProblem problem(N, C, K, kernel_volume, 
+                    ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
+                """)
+            else:
+                code.raw(f"""
+                tv::array<int, {p.ndim}> ksize;
+                TV_ASSERT_RT_ERR({p.ndim} == padding.size() && {p.ndim} == stride.size() && {p.ndim} == dilation.size(), "error");
+                for (int i = {dim_start}; i < {dim_start + p.ndim}; ++i){{
+                    ksize[i - {dim_start}] = weight.dim(i);
+                    input_dims[i - {dim_start}] = input.dim(i);
+                    output_dims[i - {dim_start}] = output.dim(i);
                 }}
-
-                if (workspace_size > 0){{
-                    if (!workspace.empty()){{
-                        TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
-                            "workspace at least", workspace_size, "bytes.");
-                    }}else{{
-                        workspace = tv::zeros({{workspace_size}}, tv::uint8, 0);
-                    }}
+                tv::array<int, {p.ndim}> padding_arr{{{code.unpack([f"padding[{i}]" for i in range(p.ndim)])}}};
+                tv::array<int, {p.ndim}> stride_arr{{{code.unpack([f"stride[{i}]" for i in range(p.ndim)])}}};
+                tv::array<int, {p.ndim}> dilation_arr{{{code.unpack([f"dilation[{i}]" for i in range(p.ndim)])}}};
+                auto output_dims_check_again = {param_cls_ns}::ConvProblem::calc_output_dims(input_dims, ksize, padding_arr, stride_arr, dilation_arr);
+                for (int i = 0; i < {p.ndim}; ++i){{
+                    TV_ASSERT_RT_ERR(output_dims_check_again[i] == output_dims[i], "error");
                 }}
-
+                {param_cls_ns}::ConvProblem problem(N, C, K, input_dims, output_dims, ksize, padding_arr, stride_arr, dilation_arr, 
+                    ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
                 """)
-                input_names = ["input", "weight", "output"]
-                input_names = [input_names[i] for i in inv_indices]
-                code.raw(f"""
-                auto a_ten = {input_names[0]};
-                auto b_ten = {input_names[1]};
-                auto c_ten = {input_names[2]};
-                """)
-                if p.mask_sparse:
-                    mask_out_ptr = "mask_output.data_ptr<uint32_t>(), "
-                    if p.op_type != ConvOpType.kForward:
-                        mask_out_ptr = ""
-                    code.raw(f"""
-                    {param_type_str} params(
-                        problem, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
-                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(),
-                        mask.data_ptr<uint32_t>(), mask_argsort.data_ptr<int32_t>(),
-                        indices.data_ptr<int32_t>(), {mask_out_ptr}
-                        {p.dtype_comp}(alpha), {p.dtype_comp}(beta){", split_k_slices, workspace.raw_data()" if p.support_splitk() else ""});
-                    """)
-                else:
-                    code.raw(f"""
-                    {param_type_str} params(
-                        problem, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
-                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                        {p.dtype_comp}(alpha), {p.dtype_comp}(beta){", split_k_slices, workspace.raw_data()" if p.support_splitk() else ""});
-                    """)
+            code.raw(f"""
+            auto mnk = problem.implicit_gemm_mnk(op_type);
+            TV_ASSERT_RT_ERR(algo_desp.supported(mnk[0], mnk[1], mnk[2], C, K, mask_width), "error");
 
-                code.raw(f"""
-                tv::cuda::Launch launcher(params.grid_dims, dim3({ker.num_threads}),
-                                            {ker.smem_size});
-                cudaError_t result;
-                if ({ker.smem_size} >= (48 << 10)) {{
-                    result = cudaFuncSetAttribute({p.get_algo_name()}::conv_kernel,
-                                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                                    {ker.smem_size});
-                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
-                    result = cudaFuncSetAttribute(
-                        {p.get_algo_name()}::conv_kernel,
-                        cudaFuncAttributePreferredSharedMemoryCarveout, 100);
-                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+            int workspace_size = algo_desp.query_workspace_size(mnk[0], mnk[1], mnk[2], split_k_slices);
+
+            auto ctx = tv::Context();
+            ctx.set_cuda_stream(reinterpret_cast<cudaStream_t>(params.stream));
+            if (workspace_size > 0){{
+                if (!workspace.empty()){{
+                    workspace.zero_(ctx);
+                    TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
+                        "workspace at least", workspace_size, "bytes.");
+                }}else{{
+                    workspace = tv::empty({{workspace_size}}, tv::uint8, 0);
+                    workspace.zero_(ctx);
                 }}
-                // auto timer = tv::CudaContextTimer<>();
+            }}
+            """)
+            input_names = ["input", "weight", "output"]
+            input_names = [input_names[i] for i in inv_indices]
+            code.raw(f"""
+            auto a_ten = {input_names[0]};
+            auto b_ten = {input_names[1]};
+            auto c_ten = {input_names[2]};
+            """)
+            if p.mask_sparse:
+                mask_out_ptr = "mask_output.data_ptr<uint32_t>(), "
+                if p.op_type != ConvOpType.kForward:
+                    mask_out_ptr = ""
+                mask_width_str = "mask_width, "
+                if p.op_type != ConvOpType.kBackwardWeight:
+                    mask_width_str = ""
 
-                launcher({p.get_algo_name()}::conv_kernel, params);
-                cudaFuncAttributes attr;
-                checkCudaErrors(
-                    cudaFuncGetAttributes(&attr, {p.get_algo_name()}::conv_kernel));
-                // tv::ssprint("{p.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
-
-                // tv::ssprint("{p.get_algo_name()} kernel num regs:", attr.numRegs, "my conv time", timer.report() / 1000.0);
-
-                TV_CHECK_CUDA_ERR_V2("???");
+                code.raw(f"""
+                {param_type_str} ker_params(
+                    problem, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                    c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(),
+                    mask.data_ptr<uint32_t>(), mask_argsort.data_ptr<int32_t>(),
+                    indices.data_ptr<int32_t>(), {mask_out_ptr} {mask_width_str}
+                    {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
                 """)
+            else:
+                code.raw(f"""
+                {param_type_str} ker_params(
+                    problem, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                    c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                    {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
+                """)
+
+            code.raw(f"""
+            tv::cuda::Launch launcher(ker_params.grid_dims, dim3({ker.num_threads}),
+                                        {ker.smem_size});
+            cudaError_t result;
+            if ({ker.smem_size} >= (48 << 10)) {{
+                result = cudaFuncSetAttribute({ker.get_algo_name()}::conv_kernel,
+                                                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                {ker.smem_size});
+                TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                result = cudaFuncSetAttribute(
+                    {ker.get_algo_name()}::conv_kernel,
+                    cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+                TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+            }}
+            """)
+            # if cudasim.enable_debug():
+            code.raw(f"""
+            auto timer = tv::CudaContextTimer<>();
+            """)
+
+            code.raw(f"""
+            launcher({ker.get_algo_name()}::conv_kernel, ker_params);
+            TV_CHECK_CUDA_ERR_V2("???");
+            """)
+            # if cudasim.enable_debug():
+            code.raw(f"""
+            cudaFuncAttributes attr;
+            checkCudaErrors(
+                cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::conv_kernel));
+            tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
+            """)
+            code.raw(f"return;")
         code.raw("""
         if (!found){
-            TV_THROW_INVALID_ARG("Can't Found Algorithm for params:", ts, wts, num_stage, tv::dtype_str(input.dtype()), 
+            TV_THROW_INVALID_ARG("Can't Found Algorithm for params:", algo_desp.__repr__(), tv::dtype_str(input.dtype()), 
                 tv::dtype_str(weight.dtype()), tv::dtype_str(output.dtype()), tv::dtype_str(dacc), 
-                tv::dtype_str(dcomp), algo, tensorop);
+                tv::dtype_str(dcomp));
         }
         """)
         return code
@@ -765,8 +778,8 @@ class ConvMainUnitTest(pccm.Class):
                              o_interleave: int = 1):
         found = False
         for p, ker in zip(self.all_params, self.all_kernels):
-            indices = gemm_abc_to_conv_iwo_indices(p.op_type)
-            inv_indices = conv_iwo_to_gemm_abc_indices(p.op_type)
+            indices = conv_iwo_012_to_abc(p.op_type)
+            inv_indices = gemm_abc_012_to_iwo(p.op_type)
             dtypes_abc = [p.dtype_a, p.dtype_b, p.dtype_c]
             dtypes_iwo = [dtypes_abc[i] for i in indices]
 

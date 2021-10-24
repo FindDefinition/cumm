@@ -39,8 +39,8 @@ class ConvIterAlgo(enum.Enum):
 
 
 class ConvLayoutType(enum.Enum):
-    ChannelFirst = "F"
-    ChannelLast = "L"
+    ChannelFirst = 0
+    ChannelLast = 1
 
 
 class ConvOpType(enum.Enum):
@@ -55,9 +55,10 @@ class ConvLayout:
         self.interleave = interleave
 
     def __repr__(self):
+        layout_str = "F" if self.layout_type == ConvLayoutType.ChannelFirst else "L"
         if self.layout_type == ConvLayoutType.ChannelLast:
-            return str(self.layout_type.value)
-        return f"{self.layout_type.value}{self.interleave}"
+            return layout_str
+        return f"{layout_str}{self.interleave}"
 
     def is_channel_first(self):
         return self.layout_type == ConvLayoutType.ChannelFirst
@@ -122,8 +123,8 @@ class ConvEnum(pccm.Class):
         super().__init__()
         self.add_enum_class("Mode", [("kConvolution", 0),
                                      ("kCrossCorrelation", 1)])
-        self.add_enum_class("OpType", [("kForward", 0), ("kBackwardInput", 1),
-                                       ("kBackwardWeight", 2)])
-        self.add_enum_class("IterAlgo", [("kAnalytic", 0), ("kOptimized", 1)])
-        self.add_enum_class("LayoutType", [("kChannelFirst", 0),
-                                           ("kChannelLast", 1)])
+        self.add_enum_class("OpType", [("kForward", ConvOpType.kForward.value), ("kBackwardInput", ConvOpType.kBackwardInput.value),
+                                       ("kBackwardWeight", ConvOpType.kBackwardWeight.value)])
+        self.add_enum_class("IterAlgo", [("kAnalytic", ConvIterAlgo.Analytic.value), ("kOptimized", ConvIterAlgo.Optimized.value)])
+        self.add_enum_class("LayoutType", [("kChannelFirst", ConvLayoutType.ChannelFirst.value),
+                                           ("kChannelLast", ConvLayoutType.ChannelLast.value)])
