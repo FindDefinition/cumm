@@ -23,7 +23,7 @@ from typing import List, Optional
 import pccm
 from ccimport import compat
 
-from cumm.constants import TENSORVIEW_INCLUDE_PATH
+from cumm.constants import TENSORVIEW_INCLUDE_PATH, CUMM_DISABLE_TENSORVIEW_CUDA
 
 
 def get_executable_path(executable: str) -> str:
@@ -249,10 +249,12 @@ class PyTorchLib(pccm.Class):
 class TensorView(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(CUDALibs, TensorViewCPU)
-        self.build_meta.compiler_to_cflags["nvcc,clang++,g++"] = ["-DTV_CUDA"]
-        self.build_meta.compiler_to_cflags["cl"] = ["/DTV_CUDA"]
-
+        if not CUMM_DISABLE_TENSORVIEW_CUDA:
+            self.add_dependency(CUDALibs, TensorViewCPU)
+            self.build_meta.compiler_to_cflags["nvcc,clang++,g++"] = ["-DTV_CUDA"]
+            self.build_meta.compiler_to_cflags["cl"] = ["/DTV_CUDA"]
+        else:
+            self.add_dependency(TensorViewCPU)
 
 class TensorViewKernel(pccm.Class):
     def __init__(self):
@@ -302,3 +304,12 @@ class PyBind11(pccm.Class):
         self.add_include("pybind11/numpy.h")
         # self.add_include("pybind11/eigen.h")
         self.add_include("pybind11/stl_bind.h")
+
+class BoostGeometryLib(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        boost_root = os.getenv("BOOST_ROOT", None)
+        assert boost_root is not None, f"can't find BOOST_ROOT env"
+        boost_root_p = Path(boost_root)
+        assert (boost_root_p / "boost" / "geometry").exists()
+        self.add_include("boost/geometry.hpp")

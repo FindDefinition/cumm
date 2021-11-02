@@ -95,12 +95,8 @@ class InputSimt(bases.Input):
                                                self.tmap_a, self.problem,
                                                increment_k_first)
             else:
-                if is_dp4a:
-                    inp_iter_cls = input_iters.ForwardDgradIOIteratorDP4A
-                    w_iter_cls = input_iters.WeightIteratorDP4A
-                else:
-                    inp_iter_cls = input_iters.ForwardDgradIOIterator
-                    w_iter_cls = input_iters.WeightIterator
+                inp_iter_cls = input_iters.ForwardDgradIOIteratorDP4A
+                w_iter_cls = input_iters.WeightIteratorDP4A
                 self.inp_iter_a = inp_iter_cls(
                     dtype_a,
                     problem.op_type,
@@ -120,7 +116,6 @@ class InputSimt(bases.Input):
                 self.problem,
                 self.layout_b,
                 optimized=iter_algo == ConvIterAlgo.Optimized,
-                mask_sparse=mask_sparse,
                 increment_k_first=increment_k_first)
         else:
             if mask_sparse:
@@ -210,7 +205,8 @@ class AlgoSpecificSimt(object):
                  tensorop: Optional[TensorOpParams] = None,
                  algo: GemmAlgo = GemmAlgo.Simt,
                  mask_sparse: bool = False,
-                 increment_k_first: bool = False):
+                 increment_k_first: bool = False,
+                 access_per_vector: int = 1):
         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A
         trans_a, trans_b, trans_c = problem.get_gemm_trans_abc()
         self.input_spec = InputSimt(problem, iter_algo, tile_shape,
@@ -233,4 +229,5 @@ class AlgoSpecificSimt(object):
                                       trans_c,
                                       tensorop,
                                       algo,
-                                      shuffle_stride=shuffle_stride)
+                                      shuffle_stride=shuffle_stride,
+                                      access_per_vector=access_per_vector)

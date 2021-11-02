@@ -26,7 +26,7 @@ from cumm import tensorview as tv
 from cumm.gemm import kernel
 from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
 
-VIS_IP = "127.0.0.1:50073"
+VIS_IP = "127.0.0.1:50093"
 
 GEMM_VIS_GLOBAL_SCALE = 10
 import os
@@ -682,9 +682,9 @@ def _asdv_test_turing_python(coord_input: bool = False):
             n = 256 + 40
             k = 32
 
-            m = 64
-            n = 64
-            k = 64
+            m = 32
+            n = 32
+            k = 32
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
@@ -756,7 +756,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
                 dcomp=params.dtype_comp,
                 algo=params.algo.value,
                 tensorop=[0, 0, 0],
-                split_k_slice=2)
+                split_k_slice=1)
             duration = time.time() - t
             vis_res = {}
             for k, v in vis_res_per_thread.items():

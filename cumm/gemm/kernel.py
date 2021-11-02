@@ -287,7 +287,8 @@ class GemmKernel(pccm.ParameterizedClass):
             splitk_serial: bool = False,
             splitk_parallel: bool = False,
             need_source: bool = True,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            access_per_vector: int = 1):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -307,6 +308,7 @@ class GemmKernel(pccm.ParameterizedClass):
         self.splitk_serial = splitk_serial
         self.splitk_parallel = splitk_parallel
         self.need_source = need_source
+        self.access_per_vector = access_per_vector
         transpose_gemm = trans_c
         if transpose_gemm:
             self.dtype_a = dtype_b

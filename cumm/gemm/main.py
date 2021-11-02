@@ -51,7 +51,8 @@ class GemmAlgoParams(object):
             tensorop: Optional[kernel.TensorOpParams] = None,
             splitk_serial: bool = False,
             splitk_parallel: bool = False,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            access_per_vector: int = 1):
         self.ts = MetaArray(*ts)
         self.wts = MetaArray(*wts)
         self.num_stage = num_stage
@@ -75,6 +76,7 @@ class GemmAlgoParams(object):
         self.splitk_serial = splitk_serial
         self.splitk_parallel = splitk_parallel
         self.shuffle_stride = shuffle_stride
+        self.access_per_vector = access_per_vector
 
     def support_splitk(self):
         return self.splitk_serial or self.splitk_parallel
@@ -95,6 +97,7 @@ class GemmAlgoParams(object):
         res += f"{las}{lbs}{lcs}"
         res += f"_m{self.ts[0]}n{self.ts[1]}k{self.ts[2]}"
         res += f"m{self.wts[0]}n{self.wts[1]}k{self.wts[2]}"
+        res += f"A{self.access_per_vector}"
         if self.tensorop is not None:
             tes = self.tensorop.shape
             res += f"T{tes[0]}{tes[1]}{tes[2]}"
@@ -129,8 +132,8 @@ def gen_gemm_params(
     #             p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc, algo, tensorop)
     #             if not p.skipped():
     #                 res.append(p)
-    for ta in [True]:
-        for tb in [False]:
+    for ta in [False]:
+        for tb in [True]:
             for tc in [False]:
                 p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc,
                                    algo, tensorop, splitk_serial,
@@ -195,7 +198,8 @@ def gen_gemm_kernels(params: GemmAlgoParams):
                              tensorop=params.tensorop,
                              splitk_serial=params.splitk_serial,
                              splitk_parallel=params.splitk_parallel,
-                             shuffle_stride=params.shuffle_stride)
+                             shuffle_stride=params.shuffle_stride,
+                             access_per_vector=params.access_per_vector)
 
 
 class SpconvKernel(pccm.Class):
@@ -239,6 +243,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_pybind_member("element_per_access_a", "int", "-1")
         self.add_pybind_member("element_per_access_b", "int", "-1")
         self.add_pybind_member("element_per_access_c", "int", "-1")
+        self.add_pybind_member("access_per_vector", "int", "1")
 
     @pccm.pybind.mark
     @pccm.constructor
@@ -265,6 +270,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("element_per_access_a", "-1")
         code.ctor_init("element_per_access_b", "-1")
         code.ctor_init("element_per_access_c", "-1")
+        code.ctor_init("access_per_vector", "1")
 
         return code
 
@@ -280,6 +286,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         ss << (trans_a() ? "n" : "t") << (trans_b() ? "n" : "t") << (trans_c() ? "n" : "t");
         ss << "_m" << tile_shape[0] << "n" << tile_shape[1] << "k" << tile_shape[2];
         ss << "m" << warp_tile_shape[0] << "n" << warp_tile_shape[1] << "k" << warp_tile_shape[2];
+        ss << "A" << access_per_vector;
         if (tensorop[0] != -1){{
             ss << "T" << tensorop[0] << tensorop[1] << tensorop[2];
         }}
@@ -808,9 +815,9 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_shuffle_params(
                     #     (64, 32, 16),
                     #     (32, 32, 8), ["f32,f32,f32,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
-                    *gen_gemm_params((32, 512, 8),
-                                    (32, 64, 8), 2, "f32,f32,f32,f32,f32",
-                                    kernel.GemmAlgo.Simt, None, splitk_serial=True),
+                    # *gen_gemm_params((32, 512, 8),
+                    #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
+                    #                 kernel.GemmAlgo.Simt, None, splitk_serial=True),
 
                     # *gen_gemm_params((32, 128, 16),
                     #                  (32, 32, 8), 2, "f32,f32,f32,f32,f32",
@@ -862,7 +869,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
 
                     # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
+                    *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
 
                     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
@@ -996,61 +1003,66 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         func3: Callable[[kernel.GemmKernel], Optional[Tuple[
             int, int, int]]] = lambda x: (x.tensorop[0], x.tensorop[
                 1], x.tensorop[2]) if x.tensorop is not None else None
-        for spks_kers in GemmMainUnitTest.matmul_select_helper_base(kernels, code):
-            top_to_kers = codeops.group_by(func3, spks_kers)
-            for top, top_kers in top_to_kers.items():
-                algo_to_kers = codeops.group_by(
-                    lambda x: (x.algo, x.shuffle_stride), top_kers)
 
-                if top is None:
-                    for (algo, shuf), algo_kers in algo_to_kers.items():
-                        assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
-                        if_test = f"algo_desp.algo == \"{algo.value}\""
-                        if has_shuffle:
-                            if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
-                        with code.if_(if_test):
-                            dabc_to_kers = codeops.group_by(
-                                lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
-                                           tv_dtype, x.dtype_c.tv_dtype),
-                                algo_kers)
-                            for dabc, dabc_kers in dabc_to_kers.items():
-                                if is_end:
-                                    assert len(
-                                        dabc_kers
-                                    ) == 1, "find multiple kernels for one configuration"
-                                dtype_if_tests = [
-                                    f"algo_desp.dtype_a == tv::DType({dabc[0]})",
-                                    f"algo_desp.dtype_b == tv::DType({dabc[1]})",
-                                    f"algo_desp.dtype_c == tv::DType({dabc[2]})",
-                                ]
-                                with code.if_(" && ".join(dtype_if_tests)):
-                                    yield dabc_kers
-                else:
-                    with code.if_(
-                            f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"
-                    ):
-                        for (algo, shuf), algo_kers in algo_to_kers.items():
-                            assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
-                            if_test = f"algo_desp.algo == \"{algo.value}\""
-                            if has_shuffle:
-                                if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
-                            with code.if_(if_test):
-                                dabc_to_kers = codeops.group_by(
-                                    lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
-                                               tv_dtype, x.dtype_c.tv_dtype),
-                                    algo_kers)
-                                for dabc, dabc_kers in dabc_to_kers.items():
-                                    if is_end:
-                                        assert len(
-                                            dabc_kers
-                                        ) == 1, "find multiple kernels for one configuration"
-                                    dtype_if_tests = [
-                                        f"algo_desp.dtype_a == tv::DType({dabc[0]})",
-                                        f"algo_desp.dtype_b == tv::DType({dabc[1]})",
-                                        f"algo_desp.dtype_c == tv::DType({dabc[2]})",
-                                    ]
-                                    with code.if_(" && ".join(dtype_if_tests)):
-                                        yield dabc_kers
+        for spks_kers in GemmMainUnitTest.matmul_select_helper_base(kernels, code):
+            apv_to_kers = codeops.group_by(lambda x: x.access_per_vector, spks_kers)
+            for apv, apv_kers in apv_to_kers.items():
+                if_test = f"algo_desp.access_per_vector == {apv}"
+                with code.if_(if_test):
+                    top_to_kers = codeops.group_by(func3, apv_kers)
+                    for top, top_kers in top_to_kers.items():
+                        algo_to_kers = codeops.group_by(
+                            lambda x: (x.algo, x.shuffle_stride), top_kers)
+
+                        if top is None:
+                            for (algo, shuf), algo_kers in algo_to_kers.items():
+                                assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
+                                if_test = f"algo_desp.algo == \"{algo.value}\""
+                                if has_shuffle:
+                                    if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
+                                with code.if_(if_test):
+                                    dabc_to_kers = codeops.group_by(
+                                        lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
+                                                tv_dtype, x.dtype_c.tv_dtype),
+                                        algo_kers)
+                                    for dabc, dabc_kers in dabc_to_kers.items():
+                                        if is_end:
+                                            assert len(
+                                                dabc_kers
+                                            ) == 1, "find multiple kernels for one configuration"
+                                        dtype_if_tests = [
+                                            f"algo_desp.dtype_a == tv::DType({dabc[0]})",
+                                            f"algo_desp.dtype_b == tv::DType({dabc[1]})",
+                                            f"algo_desp.dtype_c == tv::DType({dabc[2]})",
+                                        ]
+                                        with code.if_(" && ".join(dtype_if_tests)):
+                                            yield dabc_kers
+                        else:
+                            with code.if_(
+                                    f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"
+                            ):
+                                for (algo, shuf), algo_kers in algo_to_kers.items():
+                                    assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
+                                    if_test = f"algo_desp.algo == \"{algo.value}\""
+                                    if has_shuffle:
+                                        if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
+                                    with code.if_(if_test):
+                                        dabc_to_kers = codeops.group_by(
+                                            lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
+                                                    tv_dtype, x.dtype_c.tv_dtype),
+                                            algo_kers)
+                                        for dabc, dabc_kers in dabc_to_kers.items():
+                                            if is_end:
+                                                assert len(
+                                                    dabc_kers
+                                                ) == 1, "find multiple kernels for one configuration"
+                                            dtype_if_tests = [
+                                                f"algo_desp.dtype_a == tv::DType({dabc[0]})",
+                                                f"algo_desp.dtype_b == tv::DType({dabc[1]})",
+                                                f"algo_desp.dtype_c == tv::DType({dabc[2]})",
+                                            ]
+                                            with code.if_(" && ".join(dtype_if_tests)):
+                                                yield dabc_kers
 
     @pccm.pybind.mark
     @pccm.static_function
@@ -1087,10 +1099,10 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             desp.split_k_serial_set({pccm.boolean(ker.splitk_serial)});
             desp.split_k_parallel_set({pccm.boolean(ker.splitk_parallel)});
             desp.shuffle_type = "{ker.shuffle_stride.value}";
-            desp.element_per_access_a = {ker.input_spec.input_sub_tile_shape_a[1]};
-            desp.element_per_access_b = {ker.input_spec.input_sub_tile_shape_b[1]};
+            desp.element_per_access_a = {ker.input_spec.input_iter_a.element_per_acc};
+            desp.element_per_access_b = {ker.input_spec.input_iter_b.element_per_acc};
             desp.element_per_access_c = {ker.output_spec.out_iter.element_per_acc};
-
+            desp.access_per_vector = {ker.access_per_vector};
             desps.push_back(desp);
             """)
             code.raw("}")
@@ -1665,6 +1677,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 func = partial(ker.gemm_kernel_python, params=params)
                 blocks = params.grid_dims
                 threads = cudasim.Dim3(ker.num_threads, 1, 1)
+                print("Simulation", blocks, threads)
                 return asyncio.run(
                     cudasim.kernel_launch(func, blocks, threads,
                                           ker.smem_size)), blocks, threads

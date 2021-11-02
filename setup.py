@@ -29,11 +29,11 @@ DESCRIPTION = 'CUda Matrix Multiply library'
 URL = 'https://github.com/FindDefinition/cumm'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
-REQUIRES_PYTHON = '>=3.6'
+REQUIRES_PYTHON = '>=3.7'
 VERSION = None
 
 # What packages are required for this module to be executed?
-REQUIRED = ["pccm>=0.2.5", "pybind11>=2.6.0", "fire", "numpy"]
+REQUIRED = ["pccm>=0.2.17", "pybind11>=2.6.0", "fire", "numpy"]
 
 # What packages are optional?
 EXTRAS = {

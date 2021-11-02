@@ -162,7 +162,7 @@ class MmaTuring(bases.Mma):
         tile_shape_kn = seq(tile_shape[2], tile_shape[1])
         warp_tile_shape_km = seq(warp_tile_shape[2], warp_tile_shape[0])
         warp_tile_shape_kn = seq(warp_tile_shape[2], warp_tile_shape[1])
-        self.partk = self.warp_count_shape[2]
+        self._partk = self.warp_count_shape[2]
         # if trans_a:
         #     warp_shape_raked_a = warp_shape_raked_a[::-1]  # type: np.ndarray
         # if trans_b:
@@ -288,6 +288,10 @@ class MmaTuring(bases.Mma):
         return seq(0, 0)
 
     @property
+    def partk(self):
+        return self._partk
+
+    @property
     def smem_iter_a(self):
         return self._smem_iter_a
 
@@ -329,7 +333,8 @@ class OutputTuring(bases.Output):
             trans_c: bool,
             tensorop: Optional[TensorOpParams] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            access_per_vector: int = 1):
         self._mma_spec = mma_spec
         output_op_count = constants.OPTIM_ACCESS_BITS // dtype_c.bitsize()
         # TODO support more mixed tile shape for int8
@@ -417,7 +422,7 @@ class OutputTuring(bases.Output):
         # do = s8, dacc = s32, epa=8
 
         self._frag_per_iter = 1
-        if dtype_acc == dtypes.float32 and dtype_c == dtypes.float16 and mixed_enable:
+        if dtype_acc == dtypes.float32 and dtype_c == dtypes.float16 and mixed_enable and self.mma_spec.partk == 1:
             self._frag_per_iter = 2
         shuffle = shuffle_stride == ShuffleStrideType.ShuffleAC
         out_iter_params = out_iters.OutIteratorParams(self.out_tmap, shuffle)
@@ -428,7 +433,8 @@ class OutputTuring(bases.Output):
                                                self.part_shape,
                                                self.part_dilation,
                                                output_op_count,
-                                               shuffle_in_stride=shuffle)
+                                               shuffle_in_stride=shuffle,
+                                               access_per_vector=access_per_vector)
         self._const_out_iter = out_iters.OutIterator(dtype_c,
                                                      self.out_tmap,
                                                      out_iter_params,
@@ -436,7 +442,8 @@ class OutputTuring(bases.Output):
                                                      self.part_dilation,
                                                      output_op_count,
                                                      read_only=True,
-                                                     shuffle_in_stride=shuffle)
+                                                     shuffle_in_stride=shuffle,
+                                                     access_per_vector=access_per_vector)
 
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"

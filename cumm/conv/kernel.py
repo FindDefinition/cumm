@@ -39,12 +39,41 @@ from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.outputs import Output, OutputSmemStorage
-from cumm.gemm.utils import GemmUtils
+from cumm.gemm.utils import GemmUtilsCPU
 
 
 def div_up(a, b):
     return (a + b - 1) // b
 
+class ConvUtils(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorView)
+
+    @pccm.static_function
+    def get_spconv_logical_tile_count(self):
+        code = pccm.FunctionCode()
+        code.arg("m,n,k,tile_m, tile_n, split_k_slice, kv, op_type", "int")
+        code.ret("tv::array<int, 3>")
+        code.raw(f"""
+        tv::array<int, 3> grid_dims;
+        if (op_type == {ConvOpType.kBackwardWeight.value}){{
+            // n = C * kv
+            int C = n / kv;
+            // for wgrad, we need to ensure a block must be covered by one mask
+            // so refined_n = tv::div_up(C, tile_n) * tile_n * kv
+            // for example, C = 130, tile_n = 64, so one kernel loc need three
+            // block 64 * 3 = 192, then refined_n = 192 * kv
+            // n = tv::div_up(C, tile_n) * tile_n * kv;
+            grid_dims[1] = tv::div_up(C, tile_n) * kv;
+        }}else{{
+            grid_dims[1] = tv::div_up(n, tile_n);
+        }}
+        grid_dims[0] = tv::div_up(m, tile_m);
+        grid_dims[2] = split_k_slice;
+        return grid_dims;
+        """)
+        return code
 
 class ConvParams(pccm.ParameterizedClass):
     def __init__(self,
@@ -61,9 +90,10 @@ class ConvParams(pccm.ParameterizedClass):
                  iterb_params: ConvIterParams,
                  out_params: out_iters.OutIteratorParams,
                  have_workspace: bool = False,
-                 mask_sparse: bool = False):
+                 mask_sparse: bool = False,
+                 increment_k_first: bool = True):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, ConvEnum)
+        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvUtils, GemmUtilsCPU)
         self.ndim = problem.ndim
         self.op_type = problem.op_type
         self.problem = problem
@@ -74,6 +104,7 @@ class ConvParams(pccm.ParameterizedClass):
         self.layout_b = layout_b
         self.layout_c = layout_c
         self.mask_sparse = mask_sparse
+        self.increment_k_first = increment_k_first
 
         self.add_param_class("cp", problem, "ConvProblem")
         self.add_param_class("itera_p", itera_params, "IterAParams")
@@ -83,7 +114,6 @@ class ConvParams(pccm.ParameterizedClass):
         self.add_param_class("la", layout_a, "LayoutA")
         self.add_param_class("lb", layout_b, "LayoutB")
         self.add_param_class("lc", layout_c, "LayoutC")
-        self.add_param_class("gemmutils", GemmUtils(tile_shape), "GemmUtils")
 
         self.tile_shape = tile_shape
         self.dtype_a = dtype_a
@@ -106,6 +136,7 @@ class ConvParams(pccm.ParameterizedClass):
                 self.add_member("mask_out_ptr", f"uint32_t*")
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             self.add_member("mask_width", "int")
+            self.add_member("mask_filter", "uint32_t")
 
         self.add_member("alpha, beta", f"{dtype_comp}")
         self.add_member("grid_dims", f"dim3")
@@ -203,6 +234,7 @@ class ConvParams(pccm.ParameterizedClass):
                 code.arg("mask_out_ptr", f"uint32_t*")
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             code.arg("mask_width", "int")
+            code.arg("mask_filter", "uint32_t")
 
         code.arg("alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(1)")
         code.arg("beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
@@ -217,7 +249,6 @@ class ConvParams(pccm.ParameterizedClass):
                 code.ctor_init("itera_params_",
                                "problem, indice_ptr, mask_argsort_ptr")
                 code.ctor_init("mask_out_ptr", "mask_out_ptr")
-
             else:
                 code.ctor_init(
                     "itera_params_",
@@ -260,6 +291,7 @@ class ConvParams(pccm.ParameterizedClass):
             code.ctor_init("mask_ptr", "mask_ptr")
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             code.ctor_init("mask_width", "mask_width")
+            code.ctor_init("mask_filter", "mask_filter")
 
         code.ctor_init("alpha", "alpha")
         code.ctor_init("beta", "beta")
@@ -287,43 +319,51 @@ class ConvParams(pccm.ParameterizedClass):
                 # for backward weight, we need to ensure the whole block is inside only one filter offset.
                 # output is A, input is B (row major), so the block contiguous is tile_shape[1]
                 # code.raw(f"gemm_k_size_per_split = GemmUtils::get_gemm_k_size_per_split(k, split_k_slice);")
-                code.raw(
-                    f"TV_ASSERT_RT_ERR(problem.C % {self.tile_shape[1]} == 0, \"error\");"
-                )
+                pass
+                # code.raw(
+                #     f"TV_ASSERT_RT_ERR(problem.C % {self.tile_shape[1]} == 0, \"error\");"
+                # )
             else:
                 code.raw(
                     f"TV_ASSERT_INVALID_ARG(gemm_k_iterations % problem.kernel_volume == 0, \"error\");"
                 )
-                code.raw(
-                    f"TV_ASSERT_RT_ERR(problem.{C_or_K} % (split_k_slice * {self.tile_shape[2]}) == 0, \"error\");"
-                )
-        code.raw("grid_dims = get_logical_tile_count(m, n, k, split_k_slice);")
+                # code.raw(
+                #     f"TV_ASSERT_RT_ERR(problem.{C_or_K} % (split_k_slice * {self.tile_shape[2]}) == 0, \"error\");"
+                # )
+        if self.mask_sparse:
+            code.raw(f"""
+            auto grid_dims_arr = ConvUtils::get_spconv_logical_tile_count(m, n, k, 
+                {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slice, problem.kernel_volume, {self.op_type.value});
+            """)
+        else:
+            code.raw(f"""
+            auto grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(m, n, k, 
+                {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slice);
+            """)
         code.raw(f"""
-        tv::ssprint("gemm_k_size", m, n, k, split_k_slice, gemm_k_iterations, 
-            "GX", grid_dims.x, "GY", grid_dims.y, "GZ", grid_dims.z);
+        grid_dims.x = grid_dims_arr[0];
+        grid_dims.y = grid_dims_arr[1];
+        grid_dims.z = grid_dims_arr[2];
         """)
+        # code.raw(f"""
+        # tv::ssprint("gemm_k_size", m, n, k, split_k_slice, gemm_k_iterations, 
+        #     "GX", grid_dims.x, "GY", grid_dims.y, "GZ", grid_dims.z);
+        # """)
         if self.mask_sparse and not self.op_type == ConvOpType.kBackwardWeight:
-            code.raw(f"gemm_k_iterations /= problem.kernel_volume;")
+            code.raw(f"""
+            gemm_k_iterations /= problem.kernel_volume;
+            """)
+            if self.increment_k_first:
+                code.raw(f"""
+                itera_params_.set_inc_reset_for_inc_k_first(gemm_k_iterations);
+                iterb_params_.set_inc_reset_for_inc_k_first(gemm_k_iterations);
+                """)
             code.raw("out_params_ = OutIterParams(n, mask_argsort_ptr);")
         else:
             # code.raw(f"""
             # TV_THROW_RT_ERR("WTF");
             # """)
             code.raw("out_params_ = OutIterParams(n);")
-        return code
-
-    @pccm.cuda.static_function
-    def get_logical_tile_count(self):
-        code = pccm.FunctionCode()
-        code.arg("m,n,k,split_k_slice", "int")
-        code.ret("dim3")
-        code.raw(f"""
-        dim3 grid_dims;
-        grid_dims.x = tv::div_up(m, {self.tile_shape[0]});
-        grid_dims.y = tv::div_up(n, {self.tile_shape[1]});
-        grid_dims.z = split_k_slice;
-        return grid_dims;
-        """)
         return code
 
 
@@ -349,7 +389,8 @@ class ConvKernel(pccm.ParameterizedClass):
                  splitk_parallel: bool = False,
                  need_source: bool = True,
                  mask_sparse: bool = False,
-                 increment_k_first: bool = False):
+                 increment_k_first: bool = False,
+                 access_per_vector: int = 1):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -404,12 +445,14 @@ class ConvKernel(pccm.ParameterizedClass):
         self.trans_c = trans_c
         self.algo = algo
         self.shuffle_stride = ShuffleStrideType.NoShuffle
+        self.access_per_vector = access_per_vector
         algo_spec = get_algo_spec(self.algo)(problem, tile_shape,
                                              warp_tile_shape, num_stage,
                                              dtype_a, dtype_b, dtype_c,
                                              dtype_acc, dtype_comp, iter_algo,
                                              tensorop, algo, mask_sparse,
-                                             increment_k_first)
+                                             increment_k_first,
+                                             access_per_vector)
         self.algo_spec = algo_spec
         self.input_spec = algo_spec.input_spec
         self.mma_spec = algo_spec.mma_spec
@@ -465,7 +508,7 @@ class ConvKernel(pccm.ParameterizedClass):
                                       self.input_spec.layout_b, self.layout_c,
                                       inp_iter_a_param, inp_iter_b_param,
                                       self.output_spec.out_iter.get_params(),
-                                      have_workspace, mask_sparse)
+                                      have_workspace, mask_sparse, increment_k_first)
         self.add_param_class("conv_params", self.gemm_params, "ConvParams")
         # first_input_clear: for gemm, we don't need to clear frag in every input load
         # but gemm need it. gemm clear frag in iter.load, so we don't need
@@ -519,6 +562,7 @@ class ConvKernel(pccm.ParameterizedClass):
             res += "0"
         res += f"_C{self.problem.ndim}{self.problem.op_type.value}{self.iter_algo.value}"
         res += f"{self.problem.layout_desp_input}{self.problem.layout_desp_weight}{self.problem.layout_desp_output}"
+        res += f"A{self.access_per_vector}"
         if self.mask_sparse:
             res += "_SF" if not self.increment_k_first else "_SK"
         return res
@@ -561,43 +605,17 @@ class ConvKernel(pccm.ParameterizedClass):
                 b_offset = f"{n_offset}, {k_offset}"
             else:
                 if self.mask_sparse and self.problem.op_type == ConvOpType.kBackwardWeight:
-                    code.raw(
-                        f"int num_block_in_C = tv::div_up(params.problem.C, {self.tile_shape[1]});"
-                    )
-                    b_offset = f"{k_offset}, (tile_offset_n % num_block_in_C) * {self.tile_shape[1]}"
+                    code.raw(f"""
+                    int num_block_in_C = tv::div_up(params.problem.C, {self.tile_shape[1]});
+                    int block_offset_in_C = tile_offset_n % num_block_in_C;
+                    """)
+                    b_offset = f"{k_offset}, block_offset_in_C * {self.tile_shape[1]}"
                 else:
                     b_offset = f"{k_offset}, {n_offset}"
             code.raw(f"""
             tv::array<int, 2> block_offset_A{{{a_offset}}};
             tv::array<int, 2> block_offset_B{{{b_offset}}};
             """)
-            # if self.trans_a:
-            #     code.raw(f"""
-            #     tv::array<int, 2> block_offset_A{{tile_offset_k * {self.tile_shape[2]},
-            #                                     tile_offset_m * {self.tile_shape[0]}}};
-            #     """)
-            # else:
-            #     code.raw(f"""
-            #     tv::array<int, 2> block_offset_A{{tile_offset_m * {self.tile_shape[0]},
-            #                                     tile_offset_k * {self.tile_shape[2]}}};
-            #     """)
-            # if self.trans_b:
-            #     code.raw(f"""
-            #     tv::array<int, 2> block_offset_B{{tile_offset_n * {self.tile_shape[1]},
-            #                                     tile_offset_k * {self.tile_shape[2]}}};
-            #     """)
-            # else:
-            #     if self.mask_sparse and self.problem.op_type == ConvOpType.kBackwardWeight:
-            #         # for pre comp convs, we can't add offset to input with implicit filter dims because
-            #         # it's handled by indices.
-            #         code.raw(f"""
-            #         tv::array<int, 2> block_offset_B{{tile_offset_k * {self.tile_shape[2]}, 0}};
-            #         """)
-            #     else:
-            #         code.raw(f"""
-            #         tv::array<int, 2> block_offset_B{{tile_offset_k * {self.tile_shape[2]},
-            #                                         tile_offset_n * {self.tile_shape[1]}}};
-            #         """)
             code.raw(f"""
             int thread_idx = threadIdx.x;
             """)
@@ -647,7 +665,11 @@ class ConvKernel(pccm.ParameterizedClass):
                     """)
                     if self.problem.op_type == ConvOpType.kForward:
                         # we need to save mask which will be used in backward weight.
-                        code.raw(f"params.mask_out_ptr[tile_offset_m] = kmask;")
+                        code.raw(f"""
+                        if (params.mask_out_ptr != nullptr){{
+                            params.mask_out_ptr[tile_offset_m] = kmask;
+                        }}
+                        """)
                     code.raw(f"""
                     if (kmask == 0){{
                         return;
@@ -660,7 +682,10 @@ class ConvKernel(pccm.ParameterizedClass):
                 else:
                     code.raw(f"""
                     // uint32_t kmask = params.mask_ptr[(tv::div_up(params.problem.N, params.mask_width)) - 1];
-                    int filter_offset = tile_offset_n / (params.problem.C / {self.tile_shape[1]});
+                    int filter_offset = tile_offset_n / tv::div_up(params.problem.C, {self.tile_shape[1]});
+                    if (!(params.mask_filter & (1 << filter_offset))){{
+                        return;
+                    }}
                     """)
             code.raw(f"""
             Mma mma(gemm_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);
@@ -684,10 +709,10 @@ class ConvKernel(pccm.ParameterizedClass):
                     code.raw(f"""
                     mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
                     """)
-            code.raw(f"""
-            // if (threadIdx.x == 3)
-            // tv::print_fragment_meta_once<float>(accumulators, "accumulator");
-            """)
+            # code.raw(f"""
+            # // if (threadIdx.x == 3)
+            # tv::print_fragment_meta_once<float>(accumulators, "accumulator");
+            # """)
 
             code.raw(f"""
             // // C = alpha * A@B + beta * D, D can be C
@@ -702,12 +727,21 @@ class ConvKernel(pccm.ParameterizedClass):
                     output_op.set_k_partition(tile_offset_k, params.grid_dims.z);
                 }}
                 """)
+            if self.mask_sparse and self.problem.op_type == ConvOpType.kBackwardWeight:
+                code.raw(f"""
+                tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
+                                                filter_offset * params.problem.C + block_offset_in_C * {self.tile_shape[1]}}};
+                tv::array<int, 2> block_extent_C{{params.m, filter_offset * params.problem.C + params.problem.C}};
+                """)
+            else:
+                code.raw(f"""
+                tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
+                                                tile_offset_n * {self.tile_shape[1]}}};
+                tv::array<int, 2> block_extent_C{{params.m, params.n}};
+                """)
             code.raw(f"""
-            tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
-                                            tile_offset_n * {self.tile_shape[1]}}};
-
-            OutIter out_iter_C(params.out_params_, params.ptr_C, {{params.m, params.n}},
-                                    {{block_offset_C[0], block_offset_C[1]}},
+            OutIter out_iter_C(params.out_params_, params.ptr_C, block_extent_C,
+                                    block_offset_C,
                                     thread_idx);
             """)
             if self.splitk_serial:
@@ -723,8 +757,8 @@ class ConvKernel(pccm.ParameterizedClass):
                 """)
             if self.need_source:
                 code.raw(f"""
-                ConstOutIter out_iter_D(params.out_params_, params.ptr_D, {{params.m, params.n}},
-                                    {{block_offset_C[0], block_offset_C[1]}},
+                ConstOutIter out_iter_D(params.out_params_, params.ptr_D, block_extent_C,
+                                    block_offset_C,
                                     thread_idx);
                 """)
             code.raw(

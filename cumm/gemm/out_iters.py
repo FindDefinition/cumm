@@ -439,13 +439,15 @@ class OutIterator(GemmOutputIterator):
                  part_dilation: MetaArray[int],
                  access_length: int,
                  read_only: bool = False,
-                 shuffle_in_stride: bool = False):
+                 shuffle_in_stride: bool = False,
+                 access_per_vector: int = 1):
         self.iterations = tmap.iterations  # type: MetaArray[int]
         self.delta = tmap.delta  # type: MetaArray[int]
 
         super().__init__(dtype,
                          self.iterations.prod() * access_length, access_length,
-                         dtype.itemsize() * access_length)
+                         dtype.itemsize() * access_length,
+                         access_per_vector)
         self.add_dependency(TensorView, GemmBasicKernel)
         self.read_only = read_only
         self.add_param_class("tmap", tmap, "ThreadMap")
@@ -465,7 +467,7 @@ class OutIterator(GemmOutputIterator):
         self.add_member("params_", "Params const&")
         self.add_member("column_masks_",
                         "bool",
-                        array=f"[{self.iterations[4]}]")
+                        array=f"[{self.iterations[4]}][{self.access_per_vector}]")
         self.add_member("extent_row_, thread_start_row_", self.index_t)
         self.add_member("counts_", "int", array="[3]")
         if self.shuffle_in_stride:
@@ -497,7 +499,9 @@ class OutIterator(GemmOutputIterator):
         thread_start_row_ = thread_offset[0];
         TV_PRAGMA_UNROLL
         for (int c = 0; c < {self.iterations[4]}; ++c) {{
-            column_masks_[c] = ((thread_offset[1] + {self.delta[4]} * c) < extent[1]);
+            for (int v = 0; v < {self.access_per_vector}; ++v){{
+                column_masks_[c][v] = ((thread_offset[1] + {self.delta[4]} * c + v * {self.element_per_acc}) < extent[1]);
+            }}
         }}
         // tv::printf2_block_once("Outthread_offset ", threadIdx.x, thread_offset[0], thread_offset[1], (thread_offset[0]) * stride + thread_offset[1]);
 
@@ -525,7 +529,7 @@ class OutIterator(GemmOutputIterator):
             """)
         else:
             code.raw(f"""
-            pointer_ = ptr + (thread_offset[0]) * extent[1] + thread_offset[1];
+            pointer_ = ptr + (thread_offset[0]) * params.stride + thread_offset[1];
             """)
 
         code.arg("params", "Params const&")
@@ -586,35 +590,67 @@ class OutIterator(GemmOutputIterator):
 
                     bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
                     """)
-                    if self.shuffle_in_stride:
-                        code.raw(f"""
-                        {self.access_t} {const_mem} *memory_pointer =
-                            reinterpret_cast<{self.access_t} {const_mem} *>(cur_pointer + offset + indices_[frag_row_idx]);
-                        """)
-                    else:
-                        code.raw(f"""
-                        {self.access_t} {const_mem} *memory_pointer =
-                            reinterpret_cast<{self.access_t} {const_mem} *>(cur_pointer + offset);
-                        """)
-                    with code.range_("column", str(self.iterations[4]),
-                                     "TV_PRAGMA_UNROLL"):
-                        code.raw(
-                            f"bool guard = row_guard && column_masks_[column];"
-                        )
-                        if store:
+                    if self.access_per_vector > 1:
+                        if self.shuffle_in_stride:
                             code.raw(f"""
-                            tv::gemm::global_store<{self.access_t}, sizeof({self.access_t})>(
-                                frag_ptr[frag_row_idx *  {self.iterations[4]} + column],
-                                (void *)&memory_pointer[column * {self.delta[4]} / {self.element_per_acc}],
-                                guard);
+                            {self.dtype} {const_mem} *memory_pointer = cur_pointer + offset + indices_[frag_row_idx];
                             """)
                         else:
                             code.raw(f"""
-                            tv::gemm::global_load<{self.access_t}, sizeof({self.access_t})>(
-                                frag_ptr[frag_row_idx *  {self.iterations[4]} + column],
-                                (const void *)&memory_pointer[column * {self.delta[4]} / {self.element_per_acc}],
-                                guard);
+                            {self.dtype} {const_mem} *memory_pointer = cur_pointer + offset;
                             """)
+                        with code.range_("column", str(self.iterations[4]),
+                                        "TV_PRAGMA_UNROLL"):
+                            with code.range_("v", self.access_per_vector,
+                                            "TV_PRAGMA_UNROLL"):
+                                code.raw(
+                                    f"bool guard = row_guard && column_masks_[column][v];"
+                                )
+                                if store:
+                                    code.raw(f"""
+                                    tv::gemm::global_store<{self.access_t}, sizeof({self.access_t})>(
+                                        frag_ptr[frag_row_idx *  {self.iterations[4] * self.access_per_vector} + column * {self.access_per_vector} + v],
+                                        memory_pointer + column * {self.delta[4]} + v * {self.element_per_acc},
+                                        guard);
+                                    """)
+                                else:
+                                    code.raw(f"""
+                                    tv::gemm::global_load<{self.access_t}, sizeof({self.access_t})>(
+                                        frag_ptr[frag_row_idx *  {self.iterations[4] * self.access_per_vector} + column * {self.access_per_vector} + v],
+                                        memory_pointer + column * {self.delta[4]} + v * {self.element_per_acc},
+                                        guard);
+                                    """)
+                    else:
+                        if self.shuffle_in_stride:
+                            code.raw(f"""
+                            {self.access_t} {const_mem} *memory_pointer =
+                                reinterpret_cast<{self.access_t} {const_mem} *>(cur_pointer + offset + indices_[frag_row_idx]);
+                            """)
+                        else:
+                            code.raw(f"""
+                            {self.access_t} {const_mem} *memory_pointer =
+                                reinterpret_cast<{self.access_t} {const_mem} *>(cur_pointer + offset);
+                            """)
+
+                        with code.range_("column", str(self.iterations[4]),
+                                        "TV_PRAGMA_UNROLL"):
+                            code.raw(
+                                f"bool guard = row_guard && column_masks_[column][0];"
+                            )
+                            if store:
+                                code.raw(f"""
+                                tv::gemm::global_store<{self.access_t}, sizeof({self.access_t})>(
+                                    frag_ptr[frag_row_idx *  {self.iterations[4]} + column],
+                                    (void *)&memory_pointer[column * {self.delta[4]} / {self.element_per_acc}],
+                                    guard);
+                                """)
+                            else:
+                                code.raw(f"""
+                                tv::gemm::global_load<{self.access_t}, sizeof({self.access_t})>(
+                                    frag_ptr[frag_row_idx *  {self.iterations[4]} + column],
+                                    (const void *)&memory_pointer[column * {self.delta[4]} / {self.element_per_acc}],
+                                    guard);
+                                """)
                     if not self.shuffle_in_stride:
                         code.raw(f"""
                         if (row + 1 <  {self.iterations[3]}) {{

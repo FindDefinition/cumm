@@ -124,6 +124,9 @@ class Mma(abc.ABC):
     def accumulator_size(self) -> int:
         raise NotImplementedError
 
+    @abc.abstractproperty
+    def partk(self) -> int:
+        raise NotImplementedError
 
 class Output(abc.ABC):
     @abc.abstractproperty

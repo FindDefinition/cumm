@@ -40,10 +40,8 @@ enum DType {
   uint16 = 9,
   uint32 = 10,
   uint64 = 11,
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
   bfloat16 = 12,
   tf32 = 13,
-#endif
   custom16 = 100,
   custom32 = 101,
   custom48 = 102,
@@ -184,12 +182,10 @@ template <typename T> constexpr const char *dtype_str(T t) {
     return "custom96";
   case DType::custom128:
     return "custom128";
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
   case DType::tf32:
     return "tf32";
   case DType::bfloat16:
     return "bfloat16";
-#endif
   default:
     return TV_UNKNOWN_DTYPE_STRING;
   }
@@ -234,12 +230,10 @@ template <typename T> constexpr const char *dtype_short_str(T t) {
     return "x96";
   case DType::custom128:
     return "x128";
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
   case DType::tf32:
     return "tf32";
   case DType::bfloat16:
     return "bf16";
-#endif
   default:
     return TV_UNKNOWN_DTYPE_STRING;
   }

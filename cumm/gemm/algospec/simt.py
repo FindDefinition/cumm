@@ -224,7 +224,7 @@ class MmaSimt(bases.Mma):
         self.warp_count_shape = tile_shape // warp_tile_shape
         self.warp_count = self.warp_count_shape.prod()
         self.num_threads = self.warp_count * constants.WARP_SIZE
-        self.partk = self.warp_count_shape[2]
+        self._partk = self.warp_count_shape[2]
         self._smem_iter_a = mask_iters.SmemTileIteratorV2(
             dtype_a,
             input_spec.thread_map_a,
@@ -287,6 +287,10 @@ class MmaSimt(bases.Mma):
         return self._padding_mn
 
     @property
+    def partk(self):
+        return self._partk
+
+    @property
     def smem_iter_a(self):
         return self._smem_iter_a
 
@@ -328,7 +332,8 @@ class OutputSimt(bases.Output):
             trans_c: bool,
             tensorop: Optional[TensorOpParams] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            access_per_vector: int = 1):
         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A
         self._mma_spec = mma_spec
         self.warp_count_shape = tile_shape // warp_tile_shape
@@ -380,7 +385,8 @@ class OutputSimt(bases.Output):
                                                self.part_shape,
                                                self.part_dilation,
                                                output_op_count,
-                                               shuffle_in_stride=shuffle)
+                                               shuffle_in_stride=shuffle,
+                                               access_per_vector=access_per_vector)
         self._const_out_iter = out_iters.OutIterator(dtype_c,
                                                      self.out_tmap,
                                                      out_iter_params,
@@ -388,7 +394,8 @@ class OutputSimt(bases.Output):
                                                      self.part_dilation,
                                                      output_op_count,
                                                      read_only=True,
-                                                     shuffle_in_stride=shuffle)
+                                                     shuffle_in_stride=shuffle,
+                                                     access_per_vector=access_per_vector)
 
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"

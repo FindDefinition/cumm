@@ -23,7 +23,7 @@ from cumm.conv.params import ConvProblem
 from cumm.gemm import constants, layout, mask_iters, thread_map
 from cumm.gemm.algospec import bases
 from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
-from cumm.gemm.algospec.simt import MmaSimt, OutputSimt
+from cumm.gemm.algospec.turing import MmaTuring, OutputTuring
 from cumm.gemm.core import MetaArray, metaseq, seq
 
 
@@ -37,10 +37,12 @@ class InputTuring(bases.Input):
                  dtype_b: dtypes.DType,
                  algo: GemmAlgo = GemmAlgo.Turing,
                  mask_sparse: bool = False,
-                 increment_k_first: bool = False):
+                 increment_k_first: bool = False,
+                 access_per_vector: int = 1):
         ndim = problem.ndim
         self.problem = problem
         self.iter_algo = iter_algo
+        self.access_per_vector = access_per_vector
         trans_a, trans_b, _ = problem.get_gemm_trans_abc()
         self._trans_a = trans_a
         self._trans_b = trans_b
@@ -94,15 +96,21 @@ class InputTuring(bases.Input):
         self.padding_mn = seq(0, 0)
         if self.problem.op_type == ConvOpType.kForward or self.problem.op_type == ConvOpType.kBackwardInput:
             if mask_sparse:
-                inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator
-                w_iter_cls = input_iters.WeightIteratorDP4A
+                if self.access_per_vector == 0:
+                    inp_iter_cls = sparse_iters.ForwardDgradSparseIOIteratorV2Mask
+                    w_iter_cls = input_iters.WeightIteratorDP4AV2Mask
+
+                else:
+                    inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator
+                    w_iter_cls = input_iters.WeightIteratorDP4A
                 self.inp_iter_a = inp_iter_cls(dtype_a, problem.op_type,
                                                tile_shape,
                                                self.input_sub_tile_shape_a,
                                                self.tmap_a, self.problem,
-                                               increment_k_first)
+                                               increment_k_first,
+                                               access_per_vector=access_per_vector)
             else:
-                inp_iter_cls = input_iters.ForwardDgradIOIteratorDP4A
+                inp_iter_cls = input_iters.ForwardDgradIOIterator
                 w_iter_cls = input_iters.WeightIteratorDP4A
                 self.inp_iter_a = inp_iter_cls(
                     dtype_a,
@@ -123,11 +131,17 @@ class InputTuring(bases.Input):
                 self.problem,
                 self.layout_b,
                 optimized=iter_algo == ConvIterAlgo.Optimized,
-                mask_sparse=mask_sparse,
-                increment_k_first=increment_k_first)
+                increment_k_first=increment_k_first,
+                access_per_vector=access_per_vector)
         else:
             if mask_sparse:
-                self.inp_iter_a = sparse_iters.ForwardDgradSparseIOIterator(
+                if self.access_per_vector == 0:
+                    inp_iter_cls = sparse_iters.ForwardDgradSparseIOIteratorV2Mask
+
+                else:
+                    inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator# V2Mask
+
+                self.inp_iter_a = inp_iter_cls(
                     dtype_a,
                     problem.op_type,
                     tile_shape,
@@ -136,8 +150,9 @@ class InputTuring(bases.Input):
                     self.problem,
                     increment_k_first,
                     is_wgrad_out=True,
-                    is_wgrad_input=False)
-                self.inp_iter_b = sparse_iters.ForwardDgradSparseIOIterator(
+                    is_wgrad_input=False,
+                    access_per_vector=access_per_vector)
+                self.inp_iter_b = inp_iter_cls(
                     dtype_b,
                     problem.op_type,
                     tile_shape,
@@ -146,7 +161,8 @@ class InputTuring(bases.Input):
                     self.problem,
                     increment_k_first,
                     is_wgrad_out=False,
-                    is_wgrad_input=True)
+                    is_wgrad_input=True,
+                    access_per_vector=access_per_vector)
 
             else:
                 self.inp_iter_a = input_iters.OutputNPQIterator(
@@ -213,20 +229,22 @@ class AlgoSpecificTuring(object):
                  tensorop: Optional[TensorOpParams] = None,
                  algo: GemmAlgo = GemmAlgo.Turing,
                  mask_sparse: bool = False,
-                 increment_k_first: bool = False):
+                 increment_k_first: bool = False,
+                 access_per_vector: int = 1):
         assert algo == GemmAlgo.Turing
         trans_a, trans_b, trans_c = problem.get_gemm_trans_abc()
         self.input_spec = InputTuring(problem, iter_algo, tile_shape,
                                     warp_tile_shape, dtype_a, dtype_b, algo,
-                                    mask_sparse, increment_k_first)
-        self.mma_spec = MmaSimt(self.input_spec, tile_shape, warp_tile_shape,
+                                    mask_sparse, increment_k_first,
+                                    access_per_vector)
+        self.mma_spec = MmaTuring(self.input_spec, tile_shape, warp_tile_shape,
                                 num_stage, dtype_a, dtype_b, dtype_acc,
                                 trans_a, trans_b, tensorop, algo)
         shuffle_stride = ShuffleStrideType.NoShuffle
         if mask_sparse and not problem.op_type == ConvOpType.kBackwardWeight:
             shuffle_stride = ShuffleStrideType.ShuffleAC
 
-        self.output_spec = OutputSimt(self.mma_spec,
+        self.output_spec = OutputTuring(self.mma_spec,
                                       tile_shape,
                                       warp_tile_shape,
                                       num_stage,
@@ -236,4 +254,5 @@ class AlgoSpecificTuring(object):
                                       trans_c,
                                       tensorop,
                                       algo,
-                                      shuffle_stride=shuffle_stride)
+                                      shuffle_stride=shuffle_stride,
+                                      access_per_vector=access_per_vector)

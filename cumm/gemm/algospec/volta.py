@@ -135,7 +135,7 @@ class InputVolta(bases.Input):
 
 class MmaVolta(bases.Mma):
     def __init__(self,
-                 input_spec: InputVolta,
+                 input_spec: bases.Input,
                  tile_shape: MetaArray[int],
                  warp_tile_shape: MetaArray[int],
                  num_stage: int,
@@ -159,6 +159,7 @@ class MmaVolta(bases.Mma):
         interleaved_wmma_shape = seq(32, 32, 4)
         inst_shape = seq(16, 16, 4)
         self.warp_gemm_iters = warp_tile_shape[2] // interleaved_wmma_shape[2]
+        self._partk = self.warp_count_shape[2]
 
         if trans_a:
             self._smem_iter_a = volta_iters.VoltaSmemTileIteratorCongruous(
@@ -197,6 +198,10 @@ class MmaVolta(bases.Mma):
     @property
     def padding_mn(self):
         return seq(0, 0)
+        
+    @property
+    def partk(self):
+        return self._partk
 
     @property
     def smem_iter_a(self):
@@ -240,7 +245,8 @@ class OutputVolta(bases.Output):
             trans_c: bool,
             tensorop: Optional[TensorOpParams] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            access_per_vector: int = 1):
         self._mma_spec = mma_spec
         output_op_count = constants.OPTIM_ACCESS_BITS // dtype_c.bitsize()
         # 32 * 16 * (128 * 4096 + 256 * 4096) * 2
@@ -291,7 +297,8 @@ class OutputVolta(bases.Output):
                                                self.part_shape,
                                                self.part_dilation,
                                                output_op_count,
-                                               shuffle_in_stride=shuffle)
+                                               shuffle_in_stride=shuffle,
+                                               access_per_vector=access_per_vector)
         self._const_out_iter = out_iters.OutIterator(dtype_c,
                                                      self.out_tmap,
                                                      out_iter_params,
@@ -299,7 +306,8 @@ class OutputVolta(bases.Output):
                                                      self.part_dilation,
                                                      output_op_count,
                                                      read_only=True,
-                                                     shuffle_in_stride=shuffle)
+                                                     shuffle_in_stride=shuffle,
+                                                     access_per_vector=access_per_vector)
 
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"

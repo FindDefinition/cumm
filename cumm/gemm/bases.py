@@ -29,18 +29,27 @@ class DTypeBase(pccm.ParameterizedClass):
     def __init__(self,
                  dtype: dtypes.DType,
                  element_per_acc: int,
-                 alignment: int = 0):
+                 alignment: int = 0,
+                 access_per_vector: int = 1):
         super().__init__()
         self.dtype = dtype
-        self.element_per_acc = element_per_acc
         self.pointer = f"{dtype} *"
         self.const_pointer = f"const {dtype} *"
         self.byte_pointer = f"char *"
         self.const_byte_pointer = f"const char *"
         self.long_index_t = dtypes.int64
         self.index_t = dtypes.int32
+        assert access_per_vector >= 0
+        if access_per_vector == 0:
+            access_per_vector = element_per_acc
+        self.access_per_vector = access_per_vector
+        assert element_per_acc % access_per_vector == 0
+        element_per_acc = element_per_acc // access_per_vector
+        self.element_per_acc = element_per_acc
+
         if alignment == -1:
             alignment = element_per_acc * dtype.bitsize() // 8
+        alignment = min(alignment, element_per_acc * dtype.bitsize() // 8)
         if CUTLASS_MODE:
             if alignment > 0:
                 fmt = "cutlass::AlignedArray<{}, {}, {}>"
@@ -93,8 +102,9 @@ class GemmIterator(DTypeBase):
                  dtype: dtypes.DType,
                  fragment_length: int,
                  element_per_acc: int,
-                 alignment: int = 0):
-        super().__init__(dtype, element_per_acc, alignment)
+                 alignment: int = 0,
+                 access_per_vector: int = 1):
+        super().__init__(dtype, element_per_acc, alignment, access_per_vector)
         self.element_count = fragment_length
         assert fragment_length > 0, "zero size frag length isn't allowed"
         self.fragment_t = array_type(dtype, self.element_count)
@@ -112,8 +122,9 @@ class GemmInputIterator(GemmIterator):
                  sub_tile_shape: MetaArray[int],
                  fragment_length: int,
                  element_per_acc: int,
-                 alignment: int = 0):
-        super().__init__(dtype, fragment_length, element_per_acc, alignment)
+                 alignment: int = 0,
+                 access_per_vector: int = 1):
+        super().__init__(dtype, fragment_length, element_per_acc, alignment, access_per_vector)
         self.tmap = tmap
         self.sub_tile_shape = sub_tile_shape
 

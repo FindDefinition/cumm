@@ -13,8 +13,8 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        python-version: ['3.6', '3.7', '3.8', '3.9', '3.10'] # we only support three newest python version in windows.
-        cuda-version: ['10.2', '11.1', '11.4', '']
+        python-version: ['3.7', '3.8', '3.9', '3.10'] # we only support three newest python version in windows.
+        cuda-version: ['10.2', '11.1', '11.3', '11.4', '']
     steps:
       - uses: actions/checkout@master
       - name: Install CUDA
@@ -63,7 +63,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.8'] # this version is only used for upload.
-        cuda-version: ['102', '111', '114', '']
+        cuda-version: ['102', '111', '113', '114', '']
 
     steps:
       - uses: actions/checkout@master

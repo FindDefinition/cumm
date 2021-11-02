@@ -55,9 +55,10 @@ os.environ["CUMM_DEBUG"] = "1"
 
 def _asdv_test_spconv():
     limit_input_n = 16384
-    limit_input_n = None 
+    limit_input_n = None
+    with (Path.home() / Path("Projects/spconv-release/spconv/test/data/test_spconv.pkl")).open("rb") as f:
 
-    with (Path.home() / Path("OneDrive/dev/spconv-release/spconv/test/data/test_spconv.pkl")).open("rb") as f:
+    # with (Path.home() / Path("OneDrive/dev/spconv-release/spconv/test/data/test_spconv.pkl")).open("rb") as f:
         voxels_np, indices_np, spatial_shape = pickle.load(f)
         voxels_np = voxels_np[:limit_input_n]
         indices_np = indices_np[:limit_input_n]
@@ -129,20 +130,23 @@ def _asdv_test_spconv():
                                     build_dir=Path(__file__).parent / "build" /
                                     "build_unittest_conv",
                                     pybind_file_suffix=".cc",
-                                    verbose=False,
+                                    verbose=True,
                                     disable_anno=True)
 
     lib_object = lib.cumm.conv.main.ConvMainUnitTest()
     algo_cls = lib.cumm.conv.main.ConvAlgoDesp
     params_cls = lib.cumm.conv.main.ConvParams
-
-    for params in main_cu.all_params[:3]:
+    # NKRS @ KRSC
+    mask_width = -1
+    for params in main_cu.all_params:
+        print("START", params.get_algo_name())
         if not params.mask_sparse:
             continue
         # if not params.op_type == ConvOpType.kForward:
         #     continue
         ker = gen_gemm_kernels(params)
-
+        if params.op_type == ConvOpType.kForward:
+            mask_width = params.ts[0]
         # NCHW -> KCRS @ NCRSPQ = NKPQ
         C = 128
         K = 128
@@ -188,7 +192,7 @@ def _asdv_test_spconv():
         spk = 1
         if params.op_type == ConvOpType.kBackwardWeight:
             # TODO support splitk parallel
-            spk = 64
+            spk = 32
         algo = algo_cls(ker.problem.ndim, ker.problem.op_type.value)
         algo.tile_shape = params.ts
         algo.warp_tile_shape = params.wts
@@ -199,8 +203,8 @@ def _asdv_test_spconv():
         algo.trans_a = params.trans_a
         algo.trans_b = params.trans_b
         algo.trans_c = params.trans_c
-        algo.element_per_access_a = ker.input_spec.input_sub_tile_shape_a[1]
-        algo.element_per_access_b = ker.input_spec.input_sub_tile_shape_b[1]
+        algo.element_per_access_a = ker.input_spec.input_iter_a.element_per_acc
+        algo.element_per_access_b = ker.input_spec.input_iter_b.element_per_acc
         algo.element_per_access_c = ker.output_spec.out_iter.element_per_acc
         algo.split_k_serial = params.splitk_serial
         algo.dtype_a = params.dtype_a.tv_dtype
@@ -208,6 +212,7 @@ def _asdv_test_spconv():
         algo.dtype_c = params.dtype_c.tv_dtype
         algo.mask_sparse = params.mask_sparse
         algo.increment_k_first = params.increment_k_first
+        algo.access_per_vector = params.access_per_vector
 
 
         if params.tensorop is not None:
@@ -221,24 +226,28 @@ def _asdv_test_spconv():
         params_cpp.padding = padding
         params_cpp.stride = stride
         params_cpp.dilation = dilation
-        params_cpp.mask_width = 32
+        params_cpp.mask_width = mask_width
 
         params_cpp.beta = 0.0
         tv.zeros([1, 2], device=0)
-        print("START")
+        # print("START")
 
-        for i in range(5):
+        for i in range(1):
             # output_tv.zero_()
             torch.cuda.synchronize()
             t = time.time()
             cnt = 2
             # if params.op_type == ConvOpType.kBackwardWeight:
-            #     # TODO why cnt = 1
             #     cnt = 1
             for j in range(cnt):
 
                 beta = 1 if j == 1 else 0
                 if params.op_type == ConvOpType.kBackwardWeight:
+                    if j == 0:
+                        params_cpp.mask_filter = (0b11111111111111)
+                    else:
+                        params_cpp.mask_filter = ((0b1111111111111) << 14)
+                    
                     mask_op = mask_output[j]
                 else:
                     mask_op = mask_splits[j]
@@ -261,7 +270,7 @@ def _asdv_test_spconv():
                 #     mask=mask_op, mask_argsort=mask_split_indss[j], indices=indice_pairs, 
                 #     beta=beta, mask_output=mask_output[j])  # type: tv.Tensor
             torch.cuda.synchronize()
-            print(time.time() - t, params.op_type)
+            # print(time.time() - t, params.op_type)
         op_duration=  0
         if params.op_type == ConvOpType.kForward:
             output_ref = np.zeros_like(output, dtype=np.float32)
@@ -291,16 +300,12 @@ def _asdv_test_spconv():
             my = output_cpu.reshape(-1)
             # print(np.linalg.norm(out_feature - my))
             print("ERROR", np.linalg.norm(output_ref.reshape(-1) - my))
-            print(params.get_algo_name(), inp.mean(), inp.max(), inp.min(),
-                "Time=", op_duration)
-            print(spatial_shape, weight.mean(), weight.max(), weight.min(),
-                "Time=", op_duration)
 
-            print(params.get_algo_name(), output_ref.mean(), output_ref.max(), output_ref.min(),
-                "Time=", op_duration)
+            # print(params.get_algo_name(), output_ref.mean(), output_ref.max(), output_ref.min(),
+            #     "Time=", op_duration)
 
-            print(params.get_algo_name(), output_cpu.mean(), output_cpu.max(), output_cpu.min(),
-                "Time=", op_duration)
+            # print(params.get_algo_name(), output_cpu.mean(), output_cpu.max(), output_cpu.min(),
+            #     "Time=", op_duration)
             # print(params.get_algo_name(), np.linalg.norm(out_feature - my),
             #     "Time=", op_duration)
 
@@ -328,10 +333,9 @@ def _asdv_test_spconv():
             # print(din_cpu.reshape(-1))
             # print(dinput_ref.reshape(-1))
             duration = time.time() - t
-            print(params.get_algo_name(), din_cpu.mean(), din_cpu.max(), din_cpu.min(),
-                "Time=", op_duration)
+            # print(params.get_algo_name(), din_cpu.mean(), din_cpu.max(), din_cpu.min(),
+            #     "Time=", op_duration)
         else:
-            print("RTXXXXXXXXXXXXXXXXX")
             dw_ref = np.zeros_like(weight_ref, dtype=np.float32) # KV, K, C
             for filter_offset in range(kv):
                 if filter_offset > kv // 2:
@@ -347,10 +351,10 @@ def _asdv_test_spconv():
                 inp_gather = inp[i_inds] # [N, C]
                 # KN @ NC
                 dw_res = out_gather.astype(np.float32).T @ inp_gather.astype(np.float32)
-                if filter_offset == 13:
-                    print(dw_res.mean(), dw_res.min(), dw_res.max())
-                    ref_res = output.T @ inp
-                    print(ref_res.mean(), ref_res.min(), ref_res.max())
+                # if filter_offset == 13:
+                #     print(dw_res.mean(), dw_res.min(), dw_res.max())
+                #     ref_res = output.T @ inp
+                #     print(ref_res.mean(), ref_res.min(), ref_res.max())
 
                 dw_ref[filter_offset] = dw_res
             indice_pairs_np_test = indice_pairs.cpu().numpy()
@@ -358,14 +362,14 @@ def _asdv_test_spconv():
             dw_ref_kcrs = dw_ref.transpose(1, 0, 2)
             dw_cpu = weight_tv.cpu().numpy().reshape(K, np.prod(ksize), C)
             print("ERROR", np.linalg.norm(dw_cpu.reshape(-1) - dw_ref_kcrs.reshape(-1)))
-            print("ERROR2", np.linalg.norm(dw_cpu.reshape(-1)[:448] - dw_ref_kcrs.reshape(-1)[:448]))
-            print("RTX", indices_np.shape)
+            # print("ERROR2", np.linalg.norm(dw_cpu.reshape(-1)[:448] - dw_ref_kcrs.reshape(-1)[:448]))
+            # print("RTX", indices_np.shape)
             # print(dw_cpu[:, 13].reshape(-1)[:50] - dw_ref_kcrs[:, 13].reshape(-1)[:50])
-            print(dw_cpu.reshape(-1)[:10],dw_cpu.reshape(-1)[448:450])
-            print(dw_ref_kcrs.reshape(-1)[:10],dw_ref_kcrs.reshape(-1)[448:450])
+            # print(dw_cpu.reshape(-1)[:10],dw_cpu.reshape(-1)[448:450])
+            # print(dw_ref_kcrs.reshape(-1)[:10],dw_ref_kcrs.reshape(-1)[448:450])
             duration = time.time() - t
-            print(params.get_algo_name(), dw_cpu.mean(), dw_cpu.max(), dw_cpu.min(),
-                "Time=", op_duration)
+            # print(params.get_algo_name(), dw_cpu.mean(), dw_cpu.max(), dw_cpu.min(),
+            #     "Time=", op_duration)
 
 
 if __name__ == "__main__":

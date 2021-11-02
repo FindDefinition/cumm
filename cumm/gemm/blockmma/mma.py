@@ -349,8 +349,8 @@ class Mma(pccm.ParameterizedClass):
                             }}
                             // load next indices
                             // TODO why do we need 20 more registers when use if?
-                            input_iter_A.clear_mask_if_pred(mask_iter.end);
-                            input_iter_B.clear_mask_if_pred(mask_iter.end);
+                            input_iter_A.clear_all_mask_if_pred(mask_iter.end);
+                            input_iter_B.clear_all_mask_if_pred(mask_iter.end);
                             input_iter_A.update_indices();
                         }}
                         input_iter_A.load(input_frag_A);
@@ -406,7 +406,7 @@ class Mma(pccm.ParameterizedClass):
         input_iter_B.increment_filter(filter_offset);
         int mask_idx = 0;
         uint32_t mask = reduced_mask_ptr[mask_idx];
-
+        // mask = 0xffffffff;
         // find first valid mask
         int k_idx = tile_offset_k;
         int total_skip_count = 0;
@@ -429,8 +429,6 @@ class Mma(pccm.ParameterizedClass):
         }}
         input_iter_A.clear_mask_if_batch_unbound();
         input_iter_B.clear_mask_if_batch_unbound();
-        // tv::printf2_once("RTX", skip_cnt, gemm_k_iterations);
-
         // input_iter_A += skip_cnt;
         // input_iter_B += skip_cnt;
         // total_skip_count += skip_cnt;
@@ -645,8 +643,8 @@ class Mma(pccm.ParameterizedClass):
                             input_iter_B.increment_filter(dist);
                             // TODO why do we need 20 more registers when use if?
                             // if (!mask_iter.end){{
-                            input_iter_A.clear_mask_if_not_pred(mask);
-                            input_iter_B.clear_mask_if_not_pred(mask);
+                            input_iter_A.clear_all_mask_if_not_pred(mask);
+                            input_iter_B.clear_all_mask_if_not_pred(mask);
                             input_iter_A.update_indices();
                             // }}
                         }}

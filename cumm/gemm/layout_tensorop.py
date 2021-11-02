@@ -27,6 +27,14 @@ from cumm.gemm.core import MetaArray, metaseq, seq
 def to_stride(shape: np.ndarray):
     return np.cumprod(shape[::-1])[::-1]
 
+def to_stride_list(shape: MetaArray[int]):
+    shape = shape[::-1]
+    res = MetaArray(*shape)
+    m = 1
+    for i, s in enumerate(shape):
+        res[i] = m 
+        m *= s
+    return res[::-1]
 
 def rowmajor_inverse(index: int, shape: np.ndarray) -> np.ndarray:
     res = np.zeros_like(shape)
@@ -38,6 +46,15 @@ def rowmajor_inverse(index: int, shape: np.ndarray) -> np.ndarray:
             index /= shape[i]
     return res
 
+def rowmajor_inverse_list(index: int, shape: MetaArray[int]) -> MetaArray[int]:
+    res = shape.copy()
+    ndim = len(shape)
+    for i in range(ndim - 1, -1, -1):
+        res[i] = index % shape[i]
+        if i > 0:
+            index -= res[i]
+            index //= shape[i]
+    return res
 
 class VoltaTensorOpCrosswise(pccm.ParameterizedClass):
     def __init__(self, element_size: int, kblock: int = 32):

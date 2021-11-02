@@ -464,11 +464,10 @@ def _asdv_test_regular_gemm():
         k *= 2
         m = 64
         n = 64
-        k = 43329
-        # m = max(params.ts[0], m)
-        # n = max(params.ts[1], n)
-        # k = max(params.ts[2], k)
-
+        k = 64
+        m = max(params.ts[0], m)
+        n = max(params.ts[1], n)
+        k = max(params.ts[2], k)
         if params.dtype_a == dtypes.int8:
             a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
             b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
@@ -738,8 +737,8 @@ def _test_scatter():
 
 
 if __name__ == "__main__":
-    _asdv_test_simt_shuffle()
+    # _asdv_test_simt_shuffle()
     # _asdv_test_simt_debug()
-    # _asdv_test_regular_gemm()
+    _asdv_test_regular_gemm()
     # _test_gather()
     # _test_scatter()
