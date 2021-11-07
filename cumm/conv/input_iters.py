@@ -397,7 +397,7 @@ class InputNPQIterator(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params const&")
@@ -438,7 +438,6 @@ class InputNPQIterator(bases.ConvInputIterator):
         return code
 
     @pccm.cuda.member_function(name="operator++",
-                               host=True,
                                device=True,
                                forceinline=True)
     def increment(self):
@@ -449,8 +448,7 @@ class InputNPQIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def npqrs_to_nhwc(self):
@@ -476,8 +474,7 @@ class InputNPQIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def at(self):
@@ -492,8 +489,7 @@ class InputNPQIterator(bases.ConvInputIterator):
 
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def valid(self):
@@ -510,8 +506,7 @@ class InputNPQIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
@@ -657,7 +652,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params const&")
@@ -702,7 +697,6 @@ class OutputNPQIterator(bases.ConvInputIterator):
         return code
 
     @pccm.cuda.member_function(name="operator++",
-                               host=True,
                                device=True,
                                forceinline=True)
     def increment(self):
@@ -726,8 +720,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
                 """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def valid(self):
@@ -750,8 +743,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
             """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
@@ -772,8 +764,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def at(self):
@@ -918,7 +909,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params const&")
@@ -1009,7 +1000,6 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         return code
 
     @pccm.cuda.member_function(name="operator++",
-                               host=True,
                                device=True,
                                forceinline=True)
     def increment(self):
@@ -1208,7 +1198,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -1217,8 +1207,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def at(self):
@@ -1240,8 +1229,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             raise NotImplementedError
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def valid(self):
@@ -1259,8 +1247,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
@@ -1331,7 +1318,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                                                     str(self.index_t))
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def load_invalid(self):
         code = pccm.FunctionCode()
         if not self.optimized:
@@ -1352,7 +1339,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&")
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
         code = pccm.FunctionCode()
         return code
@@ -1451,7 +1438,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params const&")
@@ -1517,7 +1504,6 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         return code
 
     @pccm.cuda.member_function(name="operator++",
-                               host=True,
                                device=True,
                                forceinline=True)
     def increment(self):
@@ -1679,7 +1665,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         code.raw(f"return mask_.clear_all_mask_if_pred(pred);")
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -1688,8 +1674,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def at(self):
@@ -1711,8 +1696,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
             raise NotImplementedError
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def valid(self):
@@ -1731,8 +1715,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
             """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
@@ -1812,7 +1795,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
                                                     str(self.index_t))
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def load_invalid(self):
         code = pccm.FunctionCode()
         if not self.optimized:
@@ -1833,7 +1816,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&")
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
         code = pccm.FunctionCode()
         return code
@@ -1917,7 +1900,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params const&")
@@ -2007,7 +1990,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask_conv(self):
         code = FunctionCode()
         if not self.optimized:
@@ -2021,7 +2004,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask_conv_cond(self):
         # TODO replace these asm code with PTXCode.asm_block
         code = FunctionCode()
@@ -2060,7 +2043,6 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         return code
 
     @pccm.cuda.member_function(name="operator++",
-                               host=True,
                                device=True,
                                forceinline=True)
     def increment(self):
@@ -2106,7 +2088,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -2123,8 +2105,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def at(self):
@@ -2162,8 +2143,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def npqrs_to_nhwc(self):
@@ -2184,8 +2164,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def nhwrs_to_npqk(self):
@@ -2207,8 +2186,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def valid(self):
@@ -2255,8 +2233,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
 
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
@@ -2352,7 +2329,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&")
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
         code = pccm.FunctionCode()
         return code
@@ -2432,7 +2409,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params const&")
@@ -2513,7 +2490,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask_conv(self):
         code = FunctionCode()
         if not self.optimized:
@@ -2527,7 +2504,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask_conv_cond(self):
         code = FunctionCode()
         if not self.optimized:
@@ -2565,7 +2542,6 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         return code
 
     @pccm.cuda.member_function(name="operator++",
-                               host=True,
                                device=True,
                                forceinline=True)
     def increment(self):
@@ -2611,7 +2587,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def add_byte_offset(self):
         code = FunctionCode()
         code.arg("byte_offset", str(self.long_index_t))
@@ -2628,8 +2604,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def at(self):
@@ -2665,8 +2640,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def npqrs_to_nhwc(self):
@@ -2687,8 +2661,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def nhwrs_to_npqk(self):
@@ -2710,8 +2683,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def valid(self):
@@ -2758,8 +2730,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
 
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
@@ -2824,7 +2795,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&")
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
         code = pccm.FunctionCode()
         return code

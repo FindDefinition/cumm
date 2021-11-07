@@ -181,7 +181,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params &")
@@ -261,7 +261,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def update_indices(self):
         code = pccm.cuda.PTXCode()
         C_or_K = "C" if self.op_type == ConvOpType.kForward else "K"
@@ -569,8 +569,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get_indice_offset(self):
@@ -581,8 +580,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"int")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
@@ -730,7 +728,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         return self.params
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode()
         code.arg("params", "Params &")
@@ -809,7 +807,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(device=True, forceinline=True)
     def update_indices(self):
         code = pccm.cuda.PTXCode()
         C_or_K = "C" if self.op_type == ConvOpType.kForward else "K"
@@ -1050,8 +1048,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get_indice_offset(self):
@@ -1062,8 +1059,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         """)
         return code.ret(f"int")
 
-    @pccm.cuda.member_function(host=True,
-                               device=True,
+    @pccm.cuda.member_function(device=True,
                                forceinline=True,
                                const=True)
     def get(self):
