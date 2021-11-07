@@ -24,39 +24,34 @@ namespace tv {
 
 #ifdef TV_CUDA
 template <typename TimeT = std::chrono::microseconds> struct CudaContextTimer {
-  CudaContextTimer() {
-    checkCudaErrors(cudaDeviceSynchronize());
-    mCurTime = std::chrono::steady_clock::now();
+  CudaContextTimer(bool enable = true): enable_(enable) {
+    if (enable_){{
+      checkCudaErrors(cudaDeviceSynchronize());
+      mCurTime = std::chrono::steady_clock::now();
+    }}
   }
   typename TimeT::rep report() {
-    checkCudaErrors(cudaDeviceSynchronize());
-    auto duration = std::chrono::duration_cast<TimeT>(
-        std::chrono::steady_clock::now() - mCurTime);
-    auto res = duration.count();
-    mCurTime = std::chrono::steady_clock::now();
+    typename TimeT::rep res;
+    if (enable_){
+      checkCudaErrors(cudaDeviceSynchronize());
+      auto duration = std::chrono::duration_cast<TimeT>(
+          std::chrono::steady_clock::now() - mCurTime);
+      res = duration.count();
+      mCurTime = std::chrono::steady_clock::now();
+    }
     return res;
   }
-  template <int Count, typename F>
-  double benchmark(F &&f, int start = int(Count) * 0.3) {
-    // std::vector<TimeT::rep> times;
-    auto res = typename TimeT::rep();
-    int count = 0;
-    checkCudaErrors(cudaDeviceSynchronize());
-    for (int i = 0; i < Count; ++i) {
-      std::forward<F>(f)(i);
-      auto time = report();
-      if (i >= start) {
-        // times.push_back(time)
-        res += time;
-        count += 1;
-      }
-    }
-    return res / double(count);
+  CudaContextTimer<TimeT>& enable(){
+    enable_ = true;
+    return *this;
   }
-
 private:
   std::chrono::time_point<std::chrono::steady_clock> mCurTime;
+  bool enable_;
 };
+
+using CUDATimer = CudaContextTimer<>;
+
 #endif
 
 template <typename TimeT = std::chrono::microseconds> struct CPUTimer {

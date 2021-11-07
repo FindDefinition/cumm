@@ -32,7 +32,7 @@ from cumm.conv import kernel
 from cumm.gemm.kernel import GemmKernel
 from cumm.conv.bases import (NCHW, NHWC, ConvEnum, ConvIterAlgo, ConvLayout,
                              ConvLayoutType, ConvMode, ConvOpType)
-from cumm.conv.params import (ConvProblem, gemm_abc_012_to_iwo,
+from cumm.conv.params import (ConvProblem, ConvProblemCommon, gemm_abc_012_to_iwo,
                               conv_iwo_012_to_abc, get_gemm_trans_abc)
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm.algospec import GemmAlgo
@@ -229,6 +229,30 @@ class ConvAlgoDesp(GemmAlgoDesp):
         """)
         return code.ret("int")
 
+    @pccm.pybind.mark 
+    @pccm.member_function
+    def supported_ldx_conv(self):
+        code = pccm.FunctionCode()
+        code.arg("ldi, ldw, ldo", "int")
+        code.raw(f"""
+        bool res = true;
+        std::array<int, 3> epas{{element_per_access_a, element_per_access_b, element_per_access_c}};
+        int epa_i = epas[conv2gemm_inds[0]];
+        int epa_w = epas[conv2gemm_inds[1]];
+        int epa_o = epas[conv2gemm_inds[2]];
+
+        if (epa_i > 0){{
+            res &= ldi % epa_i == 0;
+        }}
+        if (epa_w > 0){{
+            res &= ldw % epa_w == 0;
+        }}
+        if (epa_o > 0){{
+            res &= ldo % epa_o == 0;
+        }}
+        return res;
+        """)
+        return code.ret("bool")
 
 class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
@@ -241,6 +265,8 @@ class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_pybind_member("alpha,beta", "float")
         self.add_pybind_member("mask_width", "int")
         self.add_pybind_member("mask_filter", "uint32_t")
+        self.add_pybind_member("reverse_mask", "bool")
+        self.add_pybind_member("verbose", "bool")
 
         self.add_pybind_member("workspace",
                                "tv::Tensor",
@@ -281,6 +307,8 @@ class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("beta", "0.0")
         code.ctor_init("mask_width", "-1")
         code.ctor_init("mask_filter", "0xffffffff")
+        code.ctor_init("reverse_mask", "false")
+        code.ctor_init("verbose", "false")
 
         return code
 
@@ -464,7 +492,7 @@ SHUFFLE_TURING_PARAMS = []
 class ConvMainUnitTest(pccm.Class):
     def __init__(self, conv_params: Optional[List[ConvAlgoParams]] = None):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvParams)
+        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvParams, ConvProblemCommon)
         # unit test params: [ts, wts, stage, dtypes, trans, algo, tensorop]
         if conv_params is None:
             is_debug = os.getenv("CUMM_DEBUG", None)
@@ -485,23 +513,23 @@ class ConvMainUnitTest(pccm.Class):
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
                     # *gen_gemm_params(ConvBwdWeight, (128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 64, 32), (32, 32, 16), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 64, 32), (32, 32, 16), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
 
-                    # *gen_gemm_params(ConvBwdWeight, (128, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    *gen_gemm_params(ConvBwdWeight, (128, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
                     # *gen_gemm_params(ConvBwdWeight, (64, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
                     # *gen_gemm_params(ConvBwdWeight, (128, 64, 32), (64, 32, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
@@ -528,12 +556,12 @@ class ConvMainUnitTest(pccm.Class):
                     # *gen_gemm_params(ConvFwdAndBwdInput, (64, 128, 64), (32, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
 
-                    *gen_gemm_params(ConvFwdAndBwdInput, (64, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Volta, TensorOpParams((8, 8, 4)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (64, 64, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Volta, TensorOpParams((8, 8, 4)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvBwdWeight, (64, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
-                        NHWC, NHWC, NHWC, GemmAlgo.Volta, TensorOpParams((8, 8, 4)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (64, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Volta, TensorOpParams((8, 8, 4)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (64, 64, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Volta, TensorOpParams((8, 8, 4)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvBwdWeight, (64, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Volta, TensorOpParams((8, 8, 4)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
 
                     # *gen_spwgrad_params((128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
@@ -637,6 +665,21 @@ class ConvMainUnitTest(pccm.Class):
         for kers in GemmMainUnitTest.matmul_select_helper_stage2(kernels, code, False, False):
             yield from ConvMainUnitTest.conv_select_helper_stage1(kers, code)
 
+    @pccm.pybind.mark
+    @pccm.static_function
+    def extract_mnk(self):
+        code = pccm.FunctionCode()
+        code.arg("op_type", "int")
+        code.arg("N, C, K", "int")
+        code.arg("kernel_volume, in_prod, out_prod", "int")
+        code.arg("mask_sparse", "bool")
+        code.raw(f"""
+        auto op_type_enum = static_cast<ConvEnum::OpType>(op_type);
+        auto res = ConvProblemCommon::implicit_gemm_mnk(op_type_enum, N, C, K, 
+            kernel_volume, in_prod, out_prod, mask_sparse);
+        return {{res[0], res[1], res[2]}};
+        """)
+        return code.ret("std::array<int, 3>")
 
     @pccm.pybind.mark
     @pccm.cuda.static_function
@@ -651,6 +694,7 @@ class ConvMainUnitTest(pccm.Class):
                  "ConvParams",
                  pyanno="ConvParams")
         code.raw(f"""
+        // auto rtxtimer = tv::CPUTimer<>();
         int groups = 1;
         bool found = false;
         auto& algo_desp = params.conv_algo_desp;
@@ -717,23 +761,33 @@ class ConvMainUnitTest(pccm.Class):
             tv::array<int, {p.ndim}> input_dims, output_dims;
             """)
             if p.mask_sparse:
-                if p.op_type == ConvOpType.kForward:
-                    code.raw(
-                        f"TV_ASSERT_RT_ERR(!mask_output.empty(), \"error\");"
-                    )
-                elif p.op_type == ConvOpType.kBackwardWeight:
+                if p.op_type == ConvOpType.kBackwardWeight:
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(mask_width > 0 && mask_width % {ker.tile_shape[2]} == 0, "error");
-                    // TV_ASSERT_RT_ERR(C % {ker.tile_shape[1]} == 0, "error");
                     """)
                 code.raw(f"""
                 TV_ASSERT_RT_ERR(!indices.empty(), "error");
                 TV_ASSERT_RT_ERR(!mask.empty(), "error");
                 TV_ASSERT_RT_ERR(!mask_argsort.empty(), "error");
                 int kernel_volume = weight.dim({dim_start});
+                tv::check_shape(indices, {{kernel_volume, -1}});
+                N = indices.dim(1);
+
                 {param_cls_ns}::ConvProblem problem(N, C, K, kernel_volume, 
                     ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
                 """)
+                if p.op_type == ConvOpType.kBackwardWeight:
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                    """)
+                elif p.op_type == ConvOpType.kForward:
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                    """)
+                else:
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR(N == input.dim(0), "error");
+                    """)
             else:
                 code.raw(f"""
                 tv::array<int, {p.ndim}> ksize;
@@ -781,10 +835,11 @@ class ConvMainUnitTest(pccm.Class):
             auto c_ten = {input_names[2]};
             """)
             if p.mask_sparse:
-                mask_out_ptr = "mask_output.data_ptr<uint32_t>(), "
+                mask_out_ptr = "mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>(), "
                 if p.op_type != ConvOpType.kForward:
                     mask_out_ptr = ""
-                mask_width_str = "mask_width, params.mask_filter, "
+                
+                mask_width_str = "mask_width,"
                 if p.op_type != ConvOpType.kBackwardWeight:
                     mask_width_str = ""
 
@@ -793,7 +848,8 @@ class ConvMainUnitTest(pccm.Class):
                     problem, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                     c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(),
                     mask.data_ptr<uint32_t>(), mask_argsort.data_ptr<int32_t>(),
-                    indices.data_ptr<int32_t>(), {mask_out_ptr} {mask_width_str}
+                    indices.data_ptr<int32_t>(), {mask_out_ptr} params.mask_filter, 
+                    params.reverse_mask, {mask_width_str} 
                     {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
                 """)
             else:
@@ -803,7 +859,11 @@ class ConvMainUnitTest(pccm.Class):
                     c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
                     {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
                 """)
-
+            if p.op_type == ConvOpType.kBackwardWeight:
+                code.raw(f"""
+                int num_reduced_mask = tv::div_up(ker_params.problem.N, ker_params.mask_width);
+                TV_ASSERT_RT_ERR(mask.dim(0) >= num_reduced_mask, "error");
+                """)
             code.raw(f"""
             tv::cuda::Launch launcher(ker_params.grid_dims, dim3({ker.num_threads}),
                                         {ker.smem_size});
@@ -821,19 +881,20 @@ class ConvMainUnitTest(pccm.Class):
             """)
             # if cudasim.enable_debug():
             code.raw(f"""
-            auto timer = tv::CudaContextTimer<>();
-            """)
-
-            code.raw(f"""
+            auto timer = tv::CUDATimer(params.verbose);
+            // tv::ssprint("CPU Time", rtxtimer.report() / 1000.0);
             launcher({ker.get_algo_name()}::conv_kernel, ker_params);
             TV_CHECK_CUDA_ERR_V2("???");
             """)
             # if cudasim.enable_debug():
             code.raw(f"""
-            cudaFuncAttributes attr;
-            checkCudaErrors(
-                cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::conv_kernel));
-            tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
+            if (params.verbose){{
+                cudaFuncAttributes attr;
+                checkCudaErrors(
+                    cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::conv_kernel));
+                tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
+            }}
+
             """)
             code.raw(f"return;")
         code.raw("""
@@ -903,7 +964,7 @@ class ConvMainUnitTest(pccm.Class):
         code.raw(f"""
         return desps;
         """)
-        return code.ret("std::vector<ConvAlgoDesp>")
+        return code.ret("std::vector<ConvAlgoDesp>", pyanno="List[ConvAlgoDesp]")
 
     # @lineprof.lineprof_wrapper_cpp
     def implicit_gemm_python(self,

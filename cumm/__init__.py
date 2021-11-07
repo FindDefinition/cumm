@@ -17,11 +17,11 @@ from pathlib import Path
 import pccm
 from pccm.utils import project_is_editable, project_is_installed
 
-from .constants import PACKAGE_NAME
+from .constants import PACKAGE_NAME, CUMM_DISABLE_JIT
 
 from .__version__ import __version__
 
-if project_is_installed(PACKAGE_NAME) and project_is_editable(PACKAGE_NAME):
+if project_is_installed(PACKAGE_NAME) and project_is_editable(PACKAGE_NAME) and not CUMM_DISABLE_JIT:
     from cumm.constants import PACKAGE_ROOT
     from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind

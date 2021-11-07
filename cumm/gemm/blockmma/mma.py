@@ -394,7 +394,7 @@ class Mma(pccm.ParameterizedClass):
         # so mask_idx = unified_iterations // mask_width_rate
         code.raw(f"""
         int mask_width_rate = mask_width / {self.input_spec.tile_shape[2]};
-        // tv::printf2_once("WTF num_reduced_mask", num_reduced_mask, split_k_slices, mask_width, mask_width_rate, filter_offset);
+        // tv::printf2_once("WTF num_reduced_mask",gemm_k_iterations, num_reduced_mask, split_k_slices, mask_width, mask_width_rate, filter_offset);
         uint32_t filter_offset_mask = 1u << filter_offset;
         accumulators = src_accumulators;
         {self.input_spec.input_iter_a.fragment_t} input_frag_A;
@@ -404,11 +404,11 @@ class Mma(pccm.ParameterizedClass):
         WarpMma warp_mma;
         int smem_write_stage_idx = 1;
         input_iter_B.increment_filter(filter_offset);
-        int mask_idx = 0;
-        uint32_t mask = reduced_mask_ptr[mask_idx];
+        int k_idx = tile_offset_k;
+        int mask_idx = k_idx / mask_width_rate;
+        uint32_t mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
         // mask = 0xffffffff;
         // find first valid mask
-        int k_idx = tile_offset_k;
         int total_skip_count = 0;
         int skip_cnt = 0; 
         // int gemm_k_iterations_bkp = gemm_k_iterations;
@@ -417,8 +417,7 @@ class Mma(pccm.ParameterizedClass):
             k_idx += split_k_slices;
             mask_idx = k_idx / mask_width_rate;
             mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
-            // GlobalLoad::run(mask, reduced_mask_ptr + mask_idx, mask_idx < num_reduced_mask);
-
+            // mask = 0xffffffff;
             --gemm_k_iterations;
             input_iter_A.increment_no_clear_mask();
             input_iter_B.increment_no_clear_mask();
@@ -502,14 +501,13 @@ class Mma(pccm.ParameterizedClass):
                     mask_idx = k_idx / mask_width_rate;
                     // load current mask
                     mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
-                    // GlobalLoad::run(mask, reduced_mask_ptr + mask_idx, mask_idx < num_reduced_mask);
-
+                    // mask = 0xffffffff;
                     while (!(mask & filter_offset_mask) && (gemm_k_iterations)){{
                         skip_cnt += 1;
                         k_idx += split_k_slices;
                         mask_idx = k_idx / mask_width_rate;
-                        // GlobalLoad::run(mask, reduced_mask_ptr + mask_idx, mask_idx < num_reduced_mask);
                         mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+                        // mask = 0xffffffff;
                         --gemm_k_iterations;
                         input_iter_A.increment_no_clear_mask();
                         input_iter_B.increment_no_clear_mask();

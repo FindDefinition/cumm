@@ -111,6 +111,22 @@ DTYPE_TO_NPDTYPE = {
     tf32: np.dtype(np.float32),
 }  # type: Dict[DType, np.dtype]
 
+TVDTYPE_TO_NPDTYPE = {
+    float16.tv_dtype: np.dtype(np.float16),
+    float32.tv_dtype: np.dtype(np.float32),
+    float64.tv_dtype: np.dtype(np.float64),
+    int8.tv_dtype: np.dtype(np.int8),
+    int16.tv_dtype: np.dtype(np.int16),
+    int32.tv_dtype: np.dtype(np.int32),
+    int64.tv_dtype: np.dtype(np.int64),
+    uint8.tv_dtype: np.dtype(np.uint8),
+    uint16.tv_dtype: np.dtype(np.uint16),
+    uint32.tv_dtype: np.dtype(np.uint32),
+    uint64.tv_dtype: np.dtype(np.uint64),
+    tf32.tv_dtype: np.dtype(np.float32),
+}  # type: Dict[int, np.dtype]
+
+
 NPDTYPE_TO_DTYPE = {v: k
                     for k, v in DTYPE_TO_NPDTYPE.items()
                     }  # type: Dict[np.dtype, DType]
@@ -122,6 +138,9 @@ def get_dtype_by_shortcut(shortcut: str):
 
 def get_npdtype(dtype: DType):
     return DTYPE_TO_NPDTYPE[dtype]
+
+def get_npdtype_from_tvdtype(tv_dtype: int):
+    return TVDTYPE_TO_NPDTYPE[tv_dtype]
 
 
 def get_dtype_from_npdtype(npdtype: np.dtype):

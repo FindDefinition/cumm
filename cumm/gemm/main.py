@@ -161,6 +161,23 @@ def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
             res.append(p)
     return res
 
+def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: str, stage: int,
+                       algo: kernel.GemmAlgo,
+                       tensorop: Optional[kernel.TensorOpParams]):
+    res = []
+    for ds in dss:
+        for tb in [False, True]:
+            p = GemmAlgoParams(ts, wts, stage, ds, False, tb, False, algo,
+                               tensorop, False, False,
+                               ShuffleStrideType.ShuffleAC)
+            if not p.skipped():
+                res.append(p)
+    if ds_for_sab:
+        p = GemmAlgoParams(ts, wts, stage, ds_for_sab, True, False, False, algo,
+                            tensorop, True, False, ShuffleStrideType.ShuffleAB)
+        if not p.skipped():
+            res.append(p)
+    return res
 
 def gen_gemm_params_rowmajor_c(ts,
                                wts,

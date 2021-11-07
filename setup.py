@@ -33,7 +33,7 @@ REQUIRES_PYTHON = '>=3.7'
 VERSION = None
 
 # What packages are required for this module to be executed?
-REQUIRED = ["pccm>=0.2.17", "pybind11>=2.6.0", "fire", "numpy"]
+REQUIRED = ["pccm>=0.2.21", "pybind11>=2.6.0", "fire", "numpy"]
 
 # What packages are optional?
 EXTRAS = {

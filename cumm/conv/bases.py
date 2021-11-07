@@ -41,6 +41,7 @@ class ConvIterAlgo(enum.Enum):
 class ConvLayoutType(enum.Enum):
     ChannelFirst = 0
     ChannelLast = 1
+    SpatialFirst = 2 # RSKC layout for weight only.
 
 
 class ConvOpType(enum.Enum):
@@ -81,6 +82,8 @@ class ConvLayout:
 NCHW = ConvLayout(ConvLayoutType.ChannelFirst)
 NHWC = ConvLayout(ConvLayoutType.ChannelLast)
 
+KRSC = ConvLayout(ConvLayoutType.ChannelLast)
+RSKC = ConvLayout(ConvLayoutType.SpatialFirst)
 
 class ConvTensor:
     def __init__(self, ndim: int, dtype: dtypes.DType, layout: ConvLayout):

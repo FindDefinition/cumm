@@ -134,9 +134,11 @@ class ConvParams(pccm.ParameterizedClass):
             self.add_member("mask_ptr", f"const uint32_t*")
             if problem.op_type == ConvOpType.kForward:
                 self.add_member("mask_out_ptr", f"uint32_t*")
+            self.add_member("mask_filter", "uint32_t")
+            self.add_member("reverse_mask", "bool")
+
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             self.add_member("mask_width", "int")
-            self.add_member("mask_filter", "uint32_t")
 
         self.add_member("alpha, beta", f"{dtype_comp}")
         self.add_member("grid_dims", f"dim3")
@@ -232,9 +234,11 @@ class ConvParams(pccm.ParameterizedClass):
             code.arg("indice_ptr", f"const int*")
             if self.op_type == ConvOpType.kForward:
                 code.arg("mask_out_ptr", f"uint32_t*")
+            code.arg("mask_filter", "uint32_t")
+            code.arg("reverse_mask", "bool")
+
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             code.arg("mask_width", "int")
-            code.arg("mask_filter", "uint32_t")
 
         code.arg("alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(1)")
         code.arg("beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
@@ -289,9 +293,11 @@ class ConvParams(pccm.ParameterizedClass):
         code.ctor_init("ptr_D", "D")
         if self.mask_sparse:
             code.ctor_init("mask_ptr", "mask_ptr")
+            code.ctor_init("mask_filter", "mask_filter")
+            code.ctor_init("reverse_mask", "reverse_mask")
+
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             code.ctor_init("mask_width", "mask_width")
-            code.ctor_init("mask_filter", "mask_filter")
 
         code.ctor_init("alpha", "alpha")
         code.ctor_init("beta", "beta")
@@ -662,6 +668,7 @@ class ConvKernel(pccm.ParameterizedClass):
                     for (int mask = {constants.WARP_SIZE // 2}; mask > 0; mask /= 2) {{
                         kmask |= __shfl_xor_sync(0xffffffff, kmask, mask, 32);
                     }}
+                    kmask &= params.mask_filter;
                     """)
                     if self.problem.op_type == ConvOpType.kForward:
                         # we need to save mask which will be used in backward weight.
@@ -677,8 +684,11 @@ class ConvKernel(pccm.ParameterizedClass):
                     """)
                     if self.problem.op_type == ConvOpType.kBackwardInput:
                         # reverse kmask
-                        code.raw(
-                            f"""kmask = __brev(kmask) >> ({32} - params.problem.kernel_volume);""")
+                        code.raw(f"""
+                        if (params.reverse_mask){{
+                            kmask = __brev(kmask) >> ({32} - params.problem.kernel_volume);
+                        }}
+                        """)
                 else:
                     code.raw(f"""
                     // uint32_t kmask = params.mask_ptr[(tv::div_up(params.problem.N, params.mask_width)) - 1];

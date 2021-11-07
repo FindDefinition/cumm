@@ -23,7 +23,7 @@ from typing import List, Optional
 import pccm
 from ccimport import compat
 
-from cumm.constants import TENSORVIEW_INCLUDE_PATH, CUMM_DISABLE_TENSORVIEW_CUDA
+from cumm.constants import TENSORVIEW_INCLUDE_PATH, CUMM_CPU_ONLY_BUILD
 
 
 def get_executable_path(executable: str) -> str:
@@ -94,7 +94,9 @@ def _get_cuda_arch_flags() -> List[str]:
     _arch_list = os.environ.get('CUMM_CUDA_ARCH_LIST', None)
     _cuda_version = os.environ.get('CUMM_CUDA_VERSION', None)
     if _arch_list is not None and _arch_list.lower() == "all":
-        assert _cuda_version is not None
+        msg = ( "you must provide CUDA version by CUMM_CUDA_VERSION, "
+                "for example, export CUMM_CUDA_VERSION=\"10.2\"")
+        assert _cuda_version is not None, msg
         cuda_ver_tuple = _cuda_version.split(".")
         if len(cuda_ver_tuple) == 2:
             major = int(cuda_ver_tuple[0])
@@ -152,6 +154,10 @@ def _get_cuda_arch_flags() -> List[str]:
 
         arch_list = _arch_list.split(';')
     flags = []
+    if not arch_list:
+        raise ValueError("can't find arch or can't recogize your GPU. "
+            "use env CUMM_CUDA_ARCH_LIST to specify your gpu arch. "
+            "for example, export CUMM_CUDA_ARCH_LIST=\"8.0;8.6+PTX\"")
     for arch in arch_list:
         if arch.endswith("+PTX"):
             arch_vers = arch.split("+")[0].split(".")
@@ -249,7 +255,7 @@ class PyTorchLib(pccm.Class):
 class TensorView(pccm.Class):
     def __init__(self):
         super().__init__()
-        if not CUMM_DISABLE_TENSORVIEW_CUDA:
+        if not CUMM_CPU_ONLY_BUILD:
             self.add_dependency(CUDALibs, TensorViewCPU)
             self.build_meta.compiler_to_cflags["nvcc,clang++,g++"] = ["-DTV_CUDA"]
             self.build_meta.compiler_to_cflags["cl"] = ["/DTV_CUDA"]

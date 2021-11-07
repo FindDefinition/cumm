@@ -83,6 +83,9 @@ def _asdv_test_spconv():
     indice_pairs_mask_np = np.full([2, indices.dim(0)], (1 << (kv // 2)), np.uint32)
 
     indice_pairs_mask = tv.from_numpy(indice_pairs_mask_np).cuda()
+
+    indice_pairs_mask2 = tv.empty([1, indices.dim(0)], tv.uint32, 0)
+
     indice_pairs_igemm = indice_pairs.clone()
     out_act = SpconvOps.generate_subm_conv_inds(indices, hashdata_subm, indice_pairs,
         out_indices, indice_num_per_loc, 
@@ -92,6 +95,10 @@ def _asdv_test_spconv():
     out_act = SpconvOps.generate_subm_conv_inds(indices, hashdata_subm, indice_pairs_igemm,
         out_indices, indice_num_per_loc, 
         1, spatial_shape, ksize, [1, 1, 1], indice_pairs_mask, False)
+    out_act = SpconvOps.generate_subm_conv_inds(indices, hashdata_subm, indice_pairs_igemm,
+        out_indices, indice_num_per_loc, 
+        1, spatial_shape, ksize, [1, 1, 1], indice_pairs_mask2, False)
+
     indice_pairs_mask_np = indice_pairs_mask.cpu().numpy()
     indice_pairs_igemm_np = indice_pairs_igemm.cpu().numpy()
 
@@ -111,13 +118,27 @@ def _asdv_test_spconv():
     mask_split_indss = []
     indice_pairs_mask_cpu = indice_pairs_mask.cpu().numpy()
     # indice_pairs_mask.fill_int_((1 << 27) - 1)
-    for j in range(2):
-        mask_split = indice_pairs_mask[j].clone()
-        mask_split_inds = SpconvOps.sort_1d_by_key(mask_split)
-        mask_splits.append(mask_split)
-        mask_split_indss.append(mask_split_inds)
-    mask_output = tv.empty([2, div_up(indices.dim(0), 32)], tv.uint32, 0)
+    indice_pairs_mask2_2 = indice_pairs_mask2.clone()
+    masks_np = np.array([0b11111111111111, (0b1111111111111) << 14], dtype=np.uint32)
+    masks_tv = tv.from_numpy(masks_np)
+    # for x in range(10):
+    #     print("-----------")
+    #     for j in range(2):
+    #         mask_split = indice_pairs_mask[j].clone()
+    #         mask_split_inds = SpconvOps.sort_1d_by_key(mask_split)
+    #         mask_splits.append(mask_split)
+    #         mask_split_indss.append(mask_split_inds)
+    indice_pairs_mask2s = [indice_pairs_mask2, indice_pairs_mask2_2]
+    for x in range(2):
+        print("-----------")
+        for j in range(2):
+            mask_split = indice_pairs_mask2s[j].clone()
+            mask_split_inds = SpconvOps.sort_1d_by_key_split(mask_split, masks_tv.slice_first_axis(j, j + 1))
+            mask_splits.append(mask_split)
+            mask_split_indss.append(mask_split_inds)
 
+    mask_output = tv.empty([2, div_up(indices.dim(0), 32)], tv.uint32, 0)
+    # return
     # from spconv.core_cc import arrayref
     np.random.seed(12315)
     main_cu = ConvMainUnitTest()
@@ -250,7 +271,11 @@ def _asdv_test_spconv():
                     
                     mask_op = mask_output[j]
                 else:
+                    params_cpp.mask_filter = 0xffffffff
+
                     mask_op = mask_splits[j]
+                if params.op_type == ConvOpType.kBackwardInput:
+                    params_cpp.reverse_mask = True
                 params_cpp.mask = mask_op
                 params_cpp.mask_argsort = mask_split_indss[j]
                 params_cpp.indices = indice_pairs

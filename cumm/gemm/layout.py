@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -455,8 +455,8 @@ class TensorGeneric(pccm.ParameterizedClass):
                                 f"tv::array<unsigned int, {ndim - 1}>")
                 self.add_member("shift_rights",
                                 f"tv::array<unsigned int, {ndim - 1}>")
-
-        self.add_include("tensorview/math/fastmath.h")
+        if fast_divmod:
+            self.add_include("tensorview/math/fastmath.h")
 
         # cudasim
         self.strides = [0] * ndim
@@ -481,7 +481,7 @@ class TensorGeneric(pccm.ParameterizedClass):
             offset += self.strides[i] * indexes[i]
         return offset
 
-    @pccm.cuda.constructor(host=True, device=True, forceinline=True)
+    @pccm.constructor(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def ctor(self):
         code = pccm.FunctionCode()
         if self.ndim > 1:
@@ -494,7 +494,7 @@ class TensorGeneric(pccm.ParameterizedClass):
                 """)
         return code
 
-    @pccm.cuda.static_function(host=True, device=True, forceinline=True)
+    @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def from_shape(self):
         code = pccm.FunctionCode()
         code.arg("shape", f"const tv::array<int, {self.ndim}> &")
@@ -515,11 +515,10 @@ class TensorGeneric(pccm.ParameterizedClass):
         code.ret(self.class_name)
         return code
 
-    @pccm.cuda.member_function(name="operator()",
-                               host=True,
-                               device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.member_function(name="operator()",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
     def call_operator(self):
         code = pccm.FunctionCode()
         code.arg("indexes", f"const tv::array<int, {self.ndim}> &")
@@ -529,11 +528,10 @@ class TensorGeneric(pccm.ParameterizedClass):
         code.raw(f"return {' + '.join(stmts)};")
         return code.ret(self.long_index_t)
 
-    @pccm.cuda.member_function(name="operator()",
-                               host=True,
-                               device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.member_function(name="operator()",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
     def call_operator2(self):
         code = pccm.FunctionCode()
         code.arg("indexes", f"const int*")
@@ -629,35 +627,31 @@ class TensorGeneric(pccm.ParameterizedClass):
             code.ret(f"tv::array<int, {self.ndim}>")
         return code
 
-    @pccm.cuda.member_function(name="inverse",
-                               host=True,
-                               device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.member_function(name="inverse",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
     def inverse_return_out(self):
         return self.inverse_template(False)
 
-    @pccm.cuda.member_function(name="inverse",
-                               host=True,
-                               device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.member_function(name="inverse",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
     def inverse_input_out(self):
         return self.inverse_template(True)
 
-    @pccm.cuda.member_function(name="inverse",
-                               host=True,
-                               device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.member_function(name="inverse",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
     def inverse_input_unpack(self):
         return self.inverse_template(True, True)
 
-    @pccm.cuda.member_function(name="inverse",
-                               host=True,
-                               device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.member_function(name="inverse",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
     def inverse_input_ptr_out(self):
         return self.inverse_template(True, False, True)
 
