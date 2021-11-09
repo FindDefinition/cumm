@@ -48,7 +48,7 @@
 #define TV_GPU_LAMBDA
 #define TV_GPU_LAMBDA_DEVICE
 #define TV_IS_EXTEND_LAMBDA(x) true
-#define TV_IS_EXTEND_DEVICE_LAMBDA(x) false
+#define TV_IS_EXTEND_DEVICE_LAMBDA(x) true
 #endif
 
 #ifndef TV_MAX_DIM

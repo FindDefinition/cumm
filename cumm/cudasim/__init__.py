@@ -17,7 +17,7 @@ import contextlib
 import contextvars
 from dataclasses import dataclass
 from typing import Any, List, Optional
-
+from ccimport import compat 
 import numpy as np
 
 from .debug import debug_print, debug_tx, enable_debug, enter_debug_context
@@ -120,6 +120,8 @@ class CudaExecutionContext:
     def __init__(self, block_sync: SyncResource, block_idx: Dim3,
                  thread_idx: Dim3, params: KernelLaunchParams,
                  smem: np.ndarray, warp_locks: List[SyncResource]):
+        if compat.Python3_6AndLater and not compat.Python3_7AndLater:
+            raise NotImplementedError("python 3.6 don't support cudasim.")
         self.blockIdx = block_idx
         self.threadIdx = thread_idx
         self.blockDim = params.blockDim

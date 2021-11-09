@@ -20,8 +20,9 @@ from setuptools.extension import Extension
 # Package meta-data.
 NAME = 'cumm'
 RELEASE_NAME = NAME
-cuda_ver = os.environ.get("CUMM_CUDA_VERSION", "")
-if cuda_ver:
+cuda_ver = os.environ.get("CUMM_CUDA_VERSION", None)
+
+if cuda_ver is not None and cuda_ver != "":
     cuda_ver = cuda_ver.replace(".", "")  # 10.2 to 102
     RELEASE_NAME += "-cu{}".format(cuda_ver)
 
@@ -29,11 +30,14 @@ DESCRIPTION = 'CUda Matrix Multiply library'
 URL = 'https://github.com/FindDefinition/cumm'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
-REQUIRES_PYTHON = '>=3.7'
+REQUIRES_PYTHON = '>=3.6'
 VERSION = None
 
 # What packages are required for this module to be executed?
-REQUIRED = ["pccm>=0.2.21", "pybind11>=2.6.0", "fire", "numpy"]
+REQUIRED = [
+    "pccm>=0.2.21", "pybind11>=2.6.0", "fire", "numpy", 
+    "contextvars; python_version == \"3.6\"",
+]
 
 # What packages are optional?
 EXTRAS = {
@@ -143,8 +147,14 @@ if disable_jit is not None and disable_jit == "1":
     }
     from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind
+    from cumm.tools.cuda import CUDAKernelTimer
+    cus = [ArrayPtr(), TensorViewBind()]
+
+    if cuda_ver is None or (cuda_ver is not None and cuda_ver != ""):
+        pass
+        # cus.append(CUDAKernelTimer())
     ext_modules: List[Extension] = [
-        PCCMExtension([ArrayPtr(), TensorViewBind()],
+        PCCMExtension(cus,
                       "cumm/core_cc",
                       Path(__file__).resolve().parent / "cumm",
                       extcallback=CopyHeaderCallback())
