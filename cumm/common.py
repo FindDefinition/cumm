@@ -216,7 +216,7 @@ class TensorViewCPU(pccm.Class):
         self.add_include("tensorview/tensor.h")
         self.add_include("tensorview/tools.h")
         self.add_include("tensorview/check.h")
-
+        self.add_include("tensorview/profile/all.h")
 
 
 class ThrustLib(pccm.Class):

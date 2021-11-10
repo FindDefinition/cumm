@@ -147,12 +147,10 @@ if disable_jit is not None and disable_jit == "1":
     }
     from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind
-    from cumm.tools.cuda import CUDAKernelTimer
     cus = [ArrayPtr(), TensorViewBind()]
 
     if cuda_ver is None or (cuda_ver is not None and cuda_ver != ""):
         pass
-        # cus.append(CUDAKernelTimer())
     ext_modules: List[Extension] = [
         PCCMExtension(cus,
                       "cumm/core_cc",

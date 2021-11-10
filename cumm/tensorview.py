@@ -18,7 +18,7 @@ from typing import List, Tuple, Union
 import numpy as np
 
 from cumm.core_cc import tensorview_bind
-from cumm.core_cc.tensorview_bind import Tensor
+from cumm.core_cc.tensorview_bind import Tensor, CUDAKernelTimer
 
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:

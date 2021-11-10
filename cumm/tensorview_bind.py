@@ -35,6 +35,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         else:
             self.add_dependency(TensorViewCPU, PyBind11)
         self.add_include("tensorview/pybind_utils.h")
+        self.add_include("tensorview/profile/all.h")
 
     @pccm.pybind.mark
     @pccm.static_function
@@ -56,7 +57,18 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("has_cuda_stream", &tv::Context::has_cuda_stream)
 #endif
     ;
-
+#ifdef TV_CUDA
+  py::class_<tv::CUDAKernelTimer, std::shared_ptr<tv::CUDAKernelTimer>>(m, "CUDAKernelTimer")
+    .def(py::init<bool>(), py::arg("enable"))
+    .def("push", &tv::CUDAKernelTimer::push, py::arg("name"))
+    .def("pop", &tv::CUDAKernelTimer::pop)
+    .def("record", &tv::CUDAKernelTimer::record, py::arg("name"), py::arg("stream") = 0)
+    .def("insert_pair", &tv::CUDAKernelTimer::insert_pair, py::arg("name"), py::arg("start"), py::arg("stop"))
+    .def("has_pair", &tv::CUDAKernelTimer::has_pair, py::arg("name"))
+    .def("sync_all_event", &tv::CUDAKernelTimer::sync_all_event)
+    .def_property_readonly("enable", &tv::CUDAKernelTimer::enable)
+    .def("get_all_pair_duration", &tv::CUDAKernelTimer::get_all_pair_duration);
+#endif
   py::class_<tv::Tensor, std::shared_ptr<tv::Tensor>>(m, "Tensor")
     .def(py::init([](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed) {
         return tv::Tensor(tv::TensorShape(shape), tv::DType(dtype), device, pinned, managed);

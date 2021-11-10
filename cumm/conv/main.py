@@ -40,7 +40,8 @@ from cumm.gemm.algospec.core import TensorOpParams
 from cumm.gemm.core.metaarray import MetaArray
 from cumm.gemm.main import GemmAlgoParams, GemmAlgoDesp, GemmMainUnitTest, GemmParams
 from cumm.gemm import codeops 
-import os 
+import os
+
 
 
 class ConvAlgoDesp(GemmAlgoDesp):
@@ -267,6 +268,7 @@ class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_pybind_member("mask_filter", "uint32_t")
         self.add_pybind_member("reverse_mask", "bool")
         self.add_pybind_member("verbose", "bool")
+        self.add_pybind_member("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer")
 
         self.add_pybind_member("workspace",
                                "tv::Tensor",
@@ -296,6 +298,8 @@ class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code = pccm.FunctionCode()
         code.arg("ndim", "int")
         code.arg("op_type", "int")
+        code.arg("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer = CUDAKernelTimer(False)")
+
         code.ctor_init("conv_algo_desp", "ndim, op_type")
         code.ctor_init("input", "tv::Tensor()")
         code.ctor_init("weight", "tv::Tensor()")
@@ -309,6 +313,7 @@ class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("mask_filter", "0xffffffff")
         code.ctor_init("reverse_mask", "false")
         code.ctor_init("verbose", "false")
+        code.ctor_init("timer", "timer")
 
         return code
 
@@ -720,6 +725,7 @@ class ConvMainUnitTest(pccm.Class):
         auto stride = params.stride;
         auto dilation = params.dilation;
         auto mask_width = params.mask_width;
+        auto evtimer = params.timer;
         """)
 
         for kers in self.conv_select_helper(self.all_kernels, code):
@@ -866,7 +872,7 @@ class ConvMainUnitTest(pccm.Class):
                 """)
             code.raw(f"""
             tv::cuda::Launch launcher(ker_params.grid_dims, dim3({ker.num_threads}),
-                                        {ker.smem_size});
+                                        {ker.smem_size}, reinterpret_cast<cudaStream_t>(params.stream));
             cudaError_t result;
             if ({ker.smem_size} >= (48 << 10)) {{
                 result = cudaFuncSetAttribute({ker.get_algo_name()}::conv_kernel,
@@ -883,7 +889,10 @@ class ConvMainUnitTest(pccm.Class):
             code.raw(f"""
             auto timer = tv::CUDATimer(params.verbose);
             // tv::ssprint("CPU Time", rtxtimer.report() / 1000.0);
-            launcher({ker.get_algo_name()}::conv_kernel, ker_params);
+            {{
+                tv::CUDAKernelTimerGuard timerguard(\"{ker.get_algo_name()}\", evtimer, reinterpret_cast<cudaStream_t>(params.stream));
+                launcher({ker.get_algo_name()}::conv_kernel, ker_params);
+            }}
             TV_CHECK_CUDA_ERR_V2("???");
             """)
             # if cudasim.enable_debug():

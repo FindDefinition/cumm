@@ -530,11 +530,14 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
                                pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("alpha,beta", "float")
         self.add_pybind_member("stream", "std::uintptr_t", pyanno="int")
+        self.add_pybind_member("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer")
+
 
     @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
         code = pccm.FunctionCode()
+        code.arg("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer = CUDAKernelTimer(False)")
         code.ctor_init("a", "tv::Tensor()")
         code.ctor_init("b", "tv::Tensor()")
         code.ctor_init("c", "tv::Tensor()")
@@ -546,6 +549,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
         code.ctor_init("alpha", "1.0")
         code.ctor_init("beta", "0.0")
         code.ctor_init("stream", "0")
+        code.ctor_init("timer", "timer")
 
         return code
 
@@ -1331,7 +1335,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         auto a_inds = params.a_inds;
         auto c_inds = params.c_inds;
         auto b_inds = params.b_inds;
-
+        auto& evtimer = params.timer;
         """)
         for kers in self.matmul_select_helper_stage2(self.all_kernels, code):
             ker = kers[0]
@@ -1495,7 +1499,10 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     """)
 
                 code.raw(f"""
-                launcher({ker.get_algo_name()}::gemm_kernel, kernel_params);
+                {{
+                    tv::CUDAKernelTimerGuard timerguard(\"{ker.get_algo_name()}\", evtimer, reinterpret_cast<cudaStream_t>(params.stream));
+                    launcher({ker.get_algo_name()}::gemm_kernel, kernel_params);
+                }}
                 """)
                 if cudasim.enable_debug():
                     code.raw(f"""
