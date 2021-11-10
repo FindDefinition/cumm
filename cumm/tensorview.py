@@ -18,8 +18,13 @@ from typing import List, Tuple, Union
 import numpy as np
 
 from cumm.core_cc import tensorview_bind
-from cumm.core_cc.tensorview_bind import Tensor, CUDAKernelTimer
+from cumm.core_cc.tensorview_bind import Tensor
 
+try:
+    from cumm.core_cc.tensorview_bind import CUDAKernelTimer
+except:
+    # TODO find a better way to solve this problem
+    CUDAKernelTimer = None
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:
     buf = ten.get_memoryview()
