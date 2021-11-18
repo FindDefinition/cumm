@@ -979,7 +979,7 @@ class MaskTileIterator(bases.GemmInputIterator):
                     indices_[s * {self.sub_tile_shape[0]} + ss] = 
                         params_.indice_ptr_[thread_offset_[0] + 
                             s * {self.tmap.delta[0]} + ss] * 
-                            extent_[1] * {self.dtype.bitsize()} / 8;
+                            params_.stride_ * {self.dtype.bitsize()} / 8;
                 else{{
                     indices_[s * {self.sub_tile_shape[0]} + ss] = 0;
                 }}
@@ -1014,7 +1014,7 @@ class MaskTileIterator(bases.GemmInputIterator):
                     """)
                     if not self.shuffle_in_stride:
                         code.raw(f"""
-                        pointer_ += sizeof({self.dtype}) * extent_[1] * residue_offset_;
+                        pointer_ += sizeof({self.dtype}) * params_.stride_ * residue_offset_;
                         """)
 
             else:
@@ -1029,7 +1029,7 @@ class MaskTileIterator(bases.GemmInputIterator):
                     """)
                     if not self.shuffle_in_stride:
                         code.raw(f"""
-                        pointer_ -= sizeof({self.dtype}) * extent_[1] * residue_offset_;
+                        pointer_ -= sizeof({self.dtype}) * params_.stride_ * residue_offset_;
                         """)
 
             if self.advance_axis == 1:
@@ -1116,7 +1116,7 @@ class MaskTileIterator(bases.GemmInputIterator):
                 code.raw(f"""
                 return reinterpret_cast<{const} {self.access_t} *>(
                         pointer_ +
-                        (ss * extent_[1] + c * {self.iteration_delta[contig]}) *
+                        (ss * params_.stride_ + c * {self.iteration_delta[contig]}) *
                             sizeof({self.dtype})) +
                     v;
                 """)

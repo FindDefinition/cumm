@@ -1425,10 +1425,10 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 CutlassGemm::GemmKernel::Params params{{
                     {{m, n, k}},
                     grid_shape,
-                    {{a_ten.data_ptr<{ker.dtype_a}>(), a_ten.size(1)}},
-                    {{b_ten.data_ptr<{ker.dtype_b}>(), b_ten.size(1)}},
-                    {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.size(1)}},
-                    {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.size(1)}},
+                    {{a_ten.data_ptr<{ker.dtype_a}>(), a_ten.stride(0)}},
+                    {{b_ten.data_ptr<{ker.dtype_b}>(), b_ten.stride(0)}},
+                    {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.stride(0)}},
+                    {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.stride(0)}},
                 }};
                 dim3 grid = threadblock_swizzle.get_grid_shape(params.grid_tiled_shape);
                 tv::cuda::Launch launcher(grid, dim3({ker.num_threads}, 1, 1),
@@ -1458,6 +1458,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
                         a_ptr, c_inds.data_ptr<const int>(),
                         {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
@@ -1467,6 +1468,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
                         a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(),
                         {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
@@ -1475,6 +1477,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
                         {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
 

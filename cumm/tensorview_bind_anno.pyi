@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, List, Tuple, Union, overload
+from typing import Type
+from typing import Dict, List, Optional, Tuple, Union, overload
+import builtins
 
 import numpy as np
 
@@ -73,6 +75,12 @@ class Tensor:
     def pinned(self) -> bool:
         ...
 
+    def is_contiguous(self) -> bool:
+        ...
+
+    def byte_offset(self) -> int:
+        ...
+
     def empty(self) -> bool:
         ...
 
@@ -90,6 +98,12 @@ class Tensor:
               use_cpu_copy: bool = False) -> "Tensor":
         ...
 
+    def clone_whole_storage(self) -> "Tensor":
+        ...
+
+    def zero_whole_storage_(self) -> None:
+        ...
+
     def unsqueeze(self, axis: int) -> "Tensor":
         ...
 
@@ -101,7 +115,25 @@ class Tensor:
     def squeeze(self, axis: int) -> "Tensor":
         ...
 
+    @overload
     def __getitem__(self, idx: int) -> "Tensor":
+        ...
+
+    @overload
+    def __getitem__(self, idx: slice) -> "Tensor":
+        ...
+
+    @overload
+    def __getitem__(self, idx: Tuple[Union[int, None, slice, builtins.ellipsis], ...]) -> "Tensor":
+        ...
+
+    def as_strided(self, shape: List[int], stride: List[int], storage_byte_offset: int) -> "Tensor":
+        ...
+
+    def slice_axis(self, dim: int, start: Optional[int], stop: Optional[int], step: Optional[int] = None) -> "Tensor":
+        ...
+
+    def select(self, dim: int, index: int) -> "Tensor":
         ...
 
     def numpy(self) -> np.ndarray:
@@ -174,6 +206,7 @@ def zeros(shape: List[int],
 
 def from_blob(ptr: int,
               shape: List[int],
+              stride: List[int],
               dtype: Union[np.dtype, int] = np.float32,
               device: int = -1) -> Tensor:
     ...
@@ -181,6 +214,7 @@ def from_blob(ptr: int,
 
 def from_const_blob(ptr: int,
                     shape: List[int],
+                    stride: List[int],
                     dtype: Union[np.dtype, int] = np.float32,
                     device: int = -1) -> Tensor:
     ...

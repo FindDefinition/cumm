@@ -20,13 +20,11 @@ import numpy as np
 from cumm.core_cc import tensorview_bind
 from cumm.core_cc.tensorview_bind import Tensor
 
-try:
-    from cumm.core_cc.tensorview_bind import CUDAKernelTimer
-except:
-    # TODO find a better way to solve this problem
-    CUDAKernelTimer = None
+from cumm.core_cc.tensorview_bind import CUDAKernelTimer
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:
+    if not ten.is_contiguous():
+        raise NotImplementedError("numpy_view only support contiguous tv::Tensor")
     buf = ten.get_memoryview()
     return np.frombuffer(buf, dtype=TENSOR_TO_NPDTYPE_MAP[ten.dtype]).reshape(
         ten.shape)
@@ -100,24 +98,24 @@ def zeros(shape: List[int],
     return tensorview_bind.zeros(shape, tv_dtype, device, pinned, managed)
 
 
-def from_blob(ptr: int, shape: List[int], dtype: Union[np.dtype, int],
+def from_blob(ptr: int, shape: List[int], stride: List[int], dtype: Union[np.dtype, int],
               device: int) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
-    return tensorview_bind.from_blob(ptr, shape, tv_dtype, device)
+    return tensorview_bind.from_blob(ptr, shape, stride, tv_dtype, device)
 
 
-def from_const_blob(ptr: int, shape: List[int], dtype: Union[np.dtype, int],
+def from_const_blob(ptr: int, shape: List[int], stride: List[int], dtype: Union[np.dtype, int],
                     device: int) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
-    return tensorview_bind.from_const_blob(ptr, shape, tv_dtype, device)
+    return tensorview_bind.from_const_blob(ptr, shape, stride, tv_dtype, device)
 
 
 def empty(shape: List[int],

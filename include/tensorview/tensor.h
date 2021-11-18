@@ -13,15 +13,84 @@
 // limitations under the License.
 
 /*
-tv::Tensor is a lightweight header-only tensor container
-without template and annoying dependencies. no algorithm is implemented.
-it should only be used when you want a no-template simple container but
-dont want to link with libtorch.
+From PyTorch:
 
-If you can use libtorch, dont use tv::Tensor.
+Copyright (c) 2016-     Facebook, Inc            (Adam Paszke)
+Copyright (c) 2014-     Facebook, Inc            (Soumith Chintala)
+Copyright (c) 2011-2014 Idiap Research Institute (Ronan Collobert)
+Copyright (c) 2012-2014 Deepmind Technologies    (Koray Kavukcuoglu)
+Copyright (c) 2011-2012 NEC Laboratories America (Koray Kavukcuoglu)
+Copyright (c) 2011-2013 NYU                      (Clement Farabet)
+Copyright (c) 2006-2010 NEC Laboratories America (Ronan Collobert, Leon Bottou, Iain Melvin, Jason Weston)
+Copyright (c) 2006      Idiap Research Institute (Samy Bengio)
+Copyright (c) 2001-2004 Idiap Research Institute (Ronan Collobert, Samy Bengio, Johnny Mariethoz)
+
+From Caffe2:
+
+Copyright (c) 2016-present, Facebook Inc. All rights reserved.
+
+All contributions by Facebook:
+Copyright (c) 2016 Facebook Inc.
+
+All contributions by Google:
+Copyright (c) 2015 Google Inc.
+All rights reserved.
+
+All contributions by Yangqing Jia:
+Copyright (c) 2015 Yangqing Jia
+All rights reserved.
+
+All contributions by Kakao Brain:
+Copyright 2019-2020 Kakao Brain
+
+All contributions from Caffe:
+Copyright(c) 2013, 2014, 2015, the respective contributors
+All rights reserved.
+
+All other contributions:
+Copyright(c) 2015, 2016 the respective contributors
+All rights reserved.
+
+Caffe2 uses a copyright model similar to Caffe: each contributor holds
+copyright over their contributions to Caffe2. The project versioning records
+all such contribution and copyright details. If a contributor wants to further
+mark their specific copyright on a particular contribution, they should
+indicate their copyright solely in the commit message of the change when it is
+committed.
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+
+3. Neither the names of Facebook, Deepmind Technologies, NYU, NEC Laboratories America
+   and IDIAP Research Institute nor the names of its contributors may be
+   used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
 */
+
 #pragma once
 
+#include "context.h"
 #include "core/cc17.h"
 #include "dtypes.h"
 #include "mp_helper.h"
@@ -31,7 +100,6 @@ If you can use libtorch, dont use tv::Tensor.
 #include <iomanip>
 #include <memory>
 #include <type_traits>
-#include "context.h"
 #ifdef TV_CUDA
 #include "cuda/driverops.h"
 #include <cuda_fp16.h>
@@ -68,11 +136,10 @@ using all_tensor_types_t =
 using all_tensor_types_print_t =
     std::tuple<float, double, int8_t, int16_t, int32_t, int64_t, uint8_t,
                uint16_t, uint32_t, uint64_t, bool>;
-        
-using all_int_tensor_types_t =
-    std::tuple<int8_t, int16_t, int32_t, int64_t, uint8_t,
-               uint16_t, uint32_t, uint64_t>;
 
+using all_int_tensor_types_t =
+    std::tuple<int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t,
+               uint64_t>;
 
 template <typename T> class TensorStorage {
 public:
@@ -161,6 +228,50 @@ public:
     }
   }
 
+  void zero_whole_(Context ctx = Context()) {
+    return zero_(0, size_, ctx);
+  }
+
+  std::shared_ptr<TensorStorage<T>> clone(Context ctx = Context()) {
+    // clone whole storage
+    auto new_storage_ptr = std::make_shared<TensorStorage<T>>(size_, device_, managed_, pinned_);
+    if (size_ == 0){
+      return new_storage_ptr;
+    }
+    if (device_ == -1) {
+      if (pinned_){
+        if (ctx.has_cuda_stream()) {
+          host2host(new_storage_ptr->ptr_, ptr_,
+                  size_ * sizeof(T), ctx.cuda_stream());
+        } else {
+          host2host(new_storage_ptr->ptr_, ptr_,
+                  size_ * sizeof(T));
+        }
+      }else{
+        // use memcpy instead to avoid cuda context init
+        std::copy(ptr_,
+                  ptr_ + size_ * sizeof(T),
+                  new_storage_ptr->ptr_);
+      }
+    }
+#ifdef TV_CUDA
+    else {
+      if (ctx.has_cuda_stream()) {
+        dev2dev(new_storage_ptr->ptr_, ptr_,
+                size_ * sizeof(T), ctx.cuda_stream());
+      } else {
+        dev2dev(new_storage_ptr->ptr_, ptr_,
+                size_ * sizeof(T));
+      }
+    }
+#else
+    else {
+      TV_THROW_RT_ERR("only support cpu tensor");
+    }
+#endif
+    return new_storage_ptr;
+  }
+
 private:
   size_t size_ = 0;
   T *ptr_ = nullptr;
@@ -222,15 +333,13 @@ template <typename T> size_t sizeof_dtype(T dtype) {
   return 0;
 }
 
-template <class Tsrc, class Tdst>
-struct ConvertTmpType {
+template <class Tsrc, class Tdst> struct ConvertTmpType {
   using type = Tdst;
   static constexpr bool kSpec = false;
 };
 
 #if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
-template <class T>
-struct ConvertTmpType<T, __nv_bfloat16>{
+template <class T> struct ConvertTmpType<T, __nv_bfloat16> {
   using type = float;
   static constexpr bool kSpec = true;
 };
@@ -395,7 +504,6 @@ struct Dispatch<T<Args...>> {
   }
 };
 
-
 template <class T> struct DispatchNoExcept;
 
 template <template <class...> class T, class... Args>
@@ -404,7 +512,6 @@ struct DispatchNoExcept<T<Args...>> {
     return dispatch_noexcept<Args...>(t, std::forward<F>(f));
   }
 };
-
 
 template <class T> struct DispatchContainer;
 
@@ -469,6 +576,7 @@ struct Tensor {
         shape.size() * detail::sizeof_dtype(dtype), device, managed, pinned);
     shape_ = shape;
     stride_ = stride;
+    contiguous_ = compute_is_contiguous();
   }
 
   Tensor(TensorShape shape, DType dtype, int device = -1, bool pinned = false,
@@ -479,6 +587,7 @@ struct Tensor {
         shape.size() * detail::sizeof_dtype(dtype), device, managed, pinned);
     shape_ = shape;
     stride_ = shape.stride_rowmajor();
+    contiguous_ = compute_is_contiguous();
   }
   Tensor(void *ptr, TensorShape shape, TensorShape stride, DType dtype,
          int device = -1)
@@ -489,6 +598,7 @@ struct Tensor {
         shape.size() * detail::sizeof_dtype(dtype), device);
     shape_ = shape;
     stride_ = stride;
+    contiguous_ = compute_is_contiguous();
   }
   Tensor(void *ptr, TensorShape shape, DType dtype, int device = -1)
       : dtype_(dtype) {
@@ -498,6 +608,7 @@ struct Tensor {
         shape.size() * detail::sizeof_dtype(dtype), device);
     shape_ = shape;
     stride_ = shape.stride_rowmajor();
+    contiguous_ = compute_is_contiguous();
   }
 
   Tensor(const void *ptr, TensorShape shape, TensorShape stride, DType dtype,
@@ -509,6 +620,7 @@ struct Tensor {
         shape.size() * detail::sizeof_dtype(dtype), device);
     shape_ = shape;
     stride_ = stride;
+    contiguous_ = compute_is_contiguous();
   }
   Tensor(const void *ptr, TensorShape shape, DType dtype, int device = -1)
       : dtype_(dtype), writeable_(false) {
@@ -518,6 +630,7 @@ struct Tensor {
         shape.size() * detail::sizeof_dtype(dtype), device);
     shape_ = shape;
     stride_ = shape.stride_rowmajor();
+    contiguous_ = compute_is_contiguous();
   }
 
   Tensor(std::initializer_list<int32_t> init)
@@ -616,25 +729,30 @@ struct Tensor {
   }
 
   Tensor view(TensorShape shape) const {
+    TensorShape newshape = shape;
     bool found_minus_1 = false;
-    for (size_t i = 0; i < shape.ndim(); ++i) {
+    for (size_t i = 0; i < newshape.ndim(); ++i) {
       if (!found_minus_1) {
-        if (shape[i] == -1) {
-          shape[i] = 1;
-          shape[i] = size() / shape.size();
+        if (newshape[i] == -1) {
+          newshape[i] = 1;
+          newshape[i] = size() / newshape.size();
           found_minus_1 = true;
         } else {
-          TV_ASSERT_INVALID_ARG(shape[i] > 0,
+          TV_ASSERT_INVALID_ARG(newshape[i] > 0,
                                 "shape except -1 must larger than 0");
         }
       } else {
-        TV_ASSERT_INVALID_ARG(shape[i] > 0, "multiple -1 in your argument.");
+        TV_ASSERT_INVALID_ARG(newshape[i] > 0, "multiple -1 in your argument.");
       }
     }
-    TV_ASSERT_RT_ERR(shape.size() == size(), "error");
+    TV_ASSERT_RT_ERR(newshape.size() == size(), "error");
+    bool stride_valid = true;
+    auto res_stride = computeStride(shape_, stride_, newshape, stride_valid);
+    TV_ASSERT_RT_ERR(stride_valid, "non-contiguous stride can't handled.");
+
     Tensor res(*this);
-    res.shape_ = shape;
-    res.stride_ = shape.stride_rowmajor();
+    res.shape_ = newshape;
+    res.stride_ = res_stride;
     return res;
   }
 
@@ -702,6 +820,224 @@ struct Tensor {
     return res;
   }
 
+private:
+  bool compute_is_contiguous() const {
+    bool is_contiguous = true;
+    if (empty())
+      return is_contiguous;
+    int64_t z = 1;
+    for (int64_t d = ndim() - 1; d >= 0; d--) {
+      const auto size_d = dim(d);
+      if (size_d != 1) {
+        if (stride(d) == z) {
+          z *= size_d;
+        } else {
+          is_contiguous = false;
+          break;
+        }
+      }
+    }
+    return is_contiguous;
+  }
+
+  static size_t computeStorageNbytes(TensorShape sizes, TensorShape strides,
+                                     size_t itemsize_bytes) {
+    // size of the underlying storage is 1 bigger than the offset
+    // of the last element according to stride
+    size_t size = 1;
+    for (int i = 0; i < sizes.ndim(); ++i) {
+      if (sizes[i] == 0) {
+        return 0;
+      }
+      size += strides[i] * (sizes[i] - 1);
+    }
+    return size * itemsize_bytes;
+  }
+
+  static void checkInBoundsForStorage(TensorShape size, TensorShape stride,
+                               int64_t storage_offset_bytes,
+                               const DType data_type,
+                               int64_t new_storage_size_bytes) {
+    int64_t storage_size_bytes =
+        computeStorageNbytes(size, stride, tv::detail::sizeof_dtype(data_type));
+    if (storage_size_bytes == 0) {
+      // NB: (a tensor with arbitrary 0 dims)'s storage can have any numel.
+      return;
+    }
+    TV_ASSERT_INVALID_ARG(
+        storage_size_bytes + storage_offset_bytes <= new_storage_size_bytes,
+        "setStorage: sizes ", size, ", strides ", stride,
+        ","
+        " storage byte offset ",
+        storage_offset_bytes, ", and itemsize ", tv::detail::sizeof_dtype(data_type),
+        " requiring a storage size of ",
+        storage_size_bytes + storage_offset_bytes,
+        " are out of bounds for storage of size ", new_storage_size_bytes);
+  }
+  
+  static inline TensorShape computeStride(
+      TensorShape oldshape,
+      TensorShape oldstride,
+      const TensorShape& newshape,
+      bool& success
+  ) {
+    if (oldshape.empty()) {
+      return TensorShape(newshape.ndim(), 1);
+    }
+
+    // NOTE: stride is arbitrary in the numel() == 0 case;
+    // to match NumPy behavior we copy the strides if the size matches, otherwise
+    // we use the stride as if it were computed via resize.
+    // This could perhaps be combined with the below code, but the complexity
+    // didn't seem worth it.
+    const int64_t numel = oldshape.size();
+    if (numel == 0 && oldshape == newshape) {
+      return oldstride;
+    }
+
+    TensorShape newstride(newshape.ndim());
+    if (numel == 0) {
+      for (int64_t view_d = newshape.ndim() - 1; view_d >= 0; view_d--) {
+        if (view_d == (int64_t)(newshape.ndim() - 1)) {
+          newstride[view_d] = 1;
+        } else {
+          newstride[view_d] =
+            std::max<int64_t>(newshape[view_d+1], 1) * newstride[view_d+1];
+        }
+      }
+      return newstride;
+    }
+
+    int64_t view_d = (int64_t)newshape.ndim() - 1;
+    // stride for each subspace in the chunk
+    int64_t chunk_base_stride = oldstride.back();
+    // numel in current chunk
+    int64_t tensor_numel = 1;
+    int64_t view_numel = 1;
+    for (int64_t tensor_d = oldshape.ndim() - 1; tensor_d >= 0; tensor_d--) {
+      tensor_numel *= oldshape[tensor_d];
+      // if end of tensor size chunk, check view
+      if ((tensor_d == 0) ||
+          (oldshape[tensor_d - 1] != 1 &&
+          oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+        while (view_d >= 0 &&
+              (view_numel < tensor_numel || newshape[view_d] == 1)) {
+          newstride[view_d] = view_numel * chunk_base_stride;
+          view_numel *= newshape[view_d];
+          view_d--;
+        }
+        if (view_numel != tensor_numel) {
+          success = false;
+          return TensorShape();
+        }
+        if (tensor_d > 0) {
+          chunk_base_stride = oldstride[tensor_d - 1];
+          tensor_numel = 1;
+          view_numel = 1;
+        }
+      }
+    }
+    if (view_d != -1) {
+      success = false;
+      return TensorShape();
+    }
+    return newstride;
+  }
+
+
+public:
+  Tensor as_strided(TensorShape shape, TensorShape stride,
+                    int64_t storage_byte_offset) const {
+    // pytorch/c10/core/TensorImpl.h
+    // pytorch/aten/native/Resize.h
+    // TV_ASSERT_INVALID_ARG(contiguous_, "only support contiguous for now");
+    TV_ASSERT_INVALID_ARG(
+        shape.ndim() == stride.ndim() && storage_byte_offset >= 0, "rt error", shape, stride, storage_byte_offset);
+    checkInBoundsForStorage(shape, stride, storage_byte_offset, dtype_,
+                            storage_->size());
+
+    auto new_shape = shape;
+    auto new_stride = stride;
+    int new_dim = new_shape.ndim();
+    if (new_dim > 0) {
+      for (size_t dim = new_dim - 1;; dim--) {
+        if (stride[dim] >= 0) {
+          new_stride[dim] = stride[dim];
+        } else {
+          // XXX: This behavior is surprising and may need to be removed to
+          // support negative strides. Some pytorch functions rely on it:
+          // for example, torch.cat (run TestTorch.test_cat_empty).
+          if (dim == new_dim - 1) {
+            new_stride[dim] = 1;
+          } else {
+            // Keep stride monotonically increasing to match NumPy.
+            new_stride[dim] = std::max<TV_GLOBAL_INDEX>(new_shape[dim + 1], 1) *
+                              new_stride[dim + 1];
+          }
+        }
+        if (dim == 0)
+          break;
+      }
+    }
+    size_t new_offset = storage_byte_offset;
+    Tensor res(*this);
+    res.shape_ = new_shape;
+    res.stride_ = new_stride;
+    res.offset_ = new_offset;
+    res.writeable_ = writeable_;
+    res.contiguous_ = res.compute_is_contiguous();
+    return res;
+  }
+
+  Tensor slice(int dim, TV_GLOBAL_INDEX start, TV_GLOBAL_INDEX end,
+               TV_GLOBAL_INDEX step, bool start_is_none, bool end_is_none) const {
+    TV_GLOBAL_INDEX start_val = start_is_none ? 0 : start;
+    TV_GLOBAL_INDEX end_val =
+        end_is_none ? std::numeric_limits<TV_GLOBAL_INDEX>::max() : end;
+
+    // TODO: support negative strides
+    auto new_shape = this->shape();
+    auto new_stride = this->stride();
+    TV_ASSERT_RT_ERR(step > 0 && dim < ndim(), "slice step must be positive");
+
+    // INT64_MAX stands for default value.
+    if (start_val == std::numeric_limits<TV_GLOBAL_INDEX>::max()) {
+      start_val = 0;
+    }
+    if (start_val < 0) {
+      start_val += this->dim(dim);
+    }
+    if (end_val < 0) {
+      end_val += this->dim(dim);
+    }
+    if (start_val < 0) {
+      start_val = 0;
+    } else if (start_val >= this->dim(dim)) {
+      start_val = this->dim(dim);
+    }
+    if (end_val < start_val) {
+      end_val = start_val;
+    } else if (end_val >= this->dim(dim)) {
+      end_val = this->dim(dim);
+    }
+    auto storage_offset_bytes = offset_ + start_val * this->stride(dim) * itemsize();
+    auto len = end_val - start_val;
+    new_shape[dim] = (len + step - 1) / step; // round-up
+    new_stride[dim] *= step;
+    return as_strided(new_shape, new_stride, storage_offset_bytes);
+  }
+
+  Tensor select(int dim, TV_GLOBAL_INDEX index) const {
+    auto storage_offset = offset_ + index * stride(dim) * itemsize();
+    TensorShape res_shape = shape();
+    TensorShape res_stride = stride();
+    res_shape.erase(res_shape.begin() + dim);
+    res_stride.erase(res_stride.begin() + dim);
+    return as_strided(res_shape, res_stride, storage_offset);
+  }
+
+  bool is_contiguous() const { return contiguous_; }
+
   bool empty() const { return !storage_ || storage_->empty(); }
   DType dtype() const { return dtype_; }
   int device() const { return storage_->device(); }
@@ -730,11 +1066,11 @@ struct Tensor {
       return shape_[idx];
     }
   }
-  const uint8_t *raw_data() const { 
-    if (empty()){
+  const uint8_t *raw_data() const {
+    if (empty()) {
       return nullptr;
     }
-    return storage_->data() + byte_offset(); 
+    return storage_->data() + byte_offset();
   }
   size_t raw_size() const { return size() * itemsize(); }
   size_t nbytes() const { return raw_size(); }
@@ -751,7 +1087,7 @@ struct Tensor {
   }
 
   uint8_t *raw_data() {
-    if (empty()){
+    if (empty()) {
       return nullptr;
     }
     writable_check();
@@ -800,7 +1136,7 @@ struct Tensor {
   }
 
   template <typename T> T *data() {
-    if (empty()){
+    if (empty()) {
       return nullptr;
     }
     template_dtype_check<T>();
@@ -809,7 +1145,7 @@ struct Tensor {
   }
 
   template <typename T> const T *data() const {
-    if (empty()){
+    if (empty()) {
       return nullptr;
     }
     template_dtype_check<T>();
@@ -836,20 +1172,22 @@ struct Tensor {
     if (this->device() == -1 && tensor.device() == -1) {
 #ifdef TV_CUDA
       // use memcpy instead to avoid cuda context init
-      // host2host(raw_data(), tensor.raw_data(),
-      //           size() * detail::sizeof_dtype(dtype_));
-      std::copy(tensor.raw_data(),
-                tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
-                raw_data());
-      // if (ctx.has_cuda_stream()) {
-      //   host2host(this->raw_data(), tensor.raw_data(),
-      //             this->size() * detail::sizeof_dtype(dtype_),
-      //             ctx.cuda_stream());
+      if (this->pinned()){
+        if (ctx.has_cuda_stream()) {
+          host2host(this->raw_data(), tensor.raw_data(),
+                    this->size() * detail::sizeof_dtype(dtype_),
+                    ctx.cuda_stream());
 
-      // } else {
-      //   host2host(this->raw_data(), tensor.raw_data(),
-      //             this->size() * detail::sizeof_dtype(dtype_));
-      // }
+        } else {
+          host2host(this->raw_data(), tensor.raw_data(),
+                    this->size() * detail::sizeof_dtype(dtype_));
+        }
+      }
+      else{
+        std::copy(tensor.raw_data(),
+                  tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
+                  raw_data());
+      }
 #else
       std::copy(tensor.raw_data(),
                 tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
@@ -957,6 +1295,7 @@ struct Tensor {
     writeable_ = tensor.writeable_;
     offset_ = tensor.offset_;
     stride_ = tensor.stride_;
+    contiguous_ = tensor.contiguous_;
     return *this;
   }
 
@@ -967,10 +1306,12 @@ struct Tensor {
     writeable_ = tensor.writeable_;
     offset_ = tensor.offset_;
     stride_ = tensor.stride_;
+    contiguous_ = tensor.contiguous_;
   }
 
   Tensor type_view(DType dtype, TensorShape newshape) const {
-    TV_ASSERT_INVALID_ARG(detail::sizeof_dtype(dtype) * newshape.size() == itemsize() * this->size(),
+    TV_ASSERT_INVALID_ARG(detail::sizeof_dtype(dtype) * newshape.size() ==
+                              itemsize() * this->size(),
                           "dtype itemsize multiple size must same");
     auto ten = *this;
     ten.dtype_ = dtype;
@@ -984,14 +1325,17 @@ struct Tensor {
     auto dtype_size = detail::sizeof_dtype(dtype);
     auto self_dtype_size = itemsize();
     auto new_shape = shape_;
-    if (dtype_size >= self_dtype_size){
-      TV_ASSERT_INVALID_ARG(dtype_size % self_dtype_size == 0, "error", dtype_size, self_dtype_size);
+    if (dtype_size >= self_dtype_size) {
+      TV_ASSERT_INVALID_ARG(dtype_size % self_dtype_size == 0, "error",
+                            dtype_size, self_dtype_size);
       int rate = dtype_size / self_dtype_size;
-      TV_ASSERT_INVALID_ARG(this->dim(this->ndim() - 1) % rate == 0, "error", this->dim(this->ndim() - 1), rate);
+      TV_ASSERT_INVALID_ARG(this->dim(this->ndim() - 1) % rate == 0, "error",
+                            this->dim(this->ndim() - 1), rate);
       auto new_shape = shape_;
       new_shape[this->ndim() - 1] = this->dim(this->ndim() - 1) / rate;
-    }else{
-      TV_ASSERT_INVALID_ARG(self_dtype_size % dtype_size == 0, "error", dtype_size, self_dtype_size);
+    } else {
+      TV_ASSERT_INVALID_ARG(self_dtype_size % dtype_size == 0, "error",
+                            dtype_size, self_dtype_size);
       int rate = self_dtype_size / dtype_size;
       new_shape[this->ndim() - 1] = this->dim(this->ndim() - 1) * rate;
     }
@@ -1020,9 +1364,29 @@ struct Tensor {
     return newtensor;
   }
 
+  Tensor clone_whole_storage() const {
+    // this method clone whole storage,
+    // so it can be used with non-contiguous tensor.
+    if (empty()) {
+      return Tensor();
+    }
+    Tensor res = *this;
+    res.storage_ = storage_->clone();
+    return res;
+  }
+
+  void zero_whole_storage_() const {
+    // this method zero whole storage,
+    // so it can be used with non-contiguous tensor.
+    if (empty()) {
+      return;
+    }
+    storage_->zero_whole_();
+  }
+
   Tensor rand_(int seed = -1) {
     std::random_device rd;
-    if (seed == -1){
+    if (seed == -1) {
       seed = rd();
     }
     dispatch<float, double>(dtype_, [&](auto I) {
@@ -1071,14 +1435,13 @@ struct Tensor {
 
   Tensor rand_int_(int begin, int end, int seed = -1) {
     std::random_device rd;
-    if (seed == -1){
+    if (seed == -1) {
       seed = rd();
     }
     if (this->device() == -1) {
       using all_int16_32_64_t =
           std::tuple<int16_t, int32_t, int64_t, uint16_t, uint32_t, uint64_t>;
-      using all_int8_t =
-          std::tuple<int8_t, uint8_t>;
+      using all_int8_t = std::tuple<int8_t, uint8_t>;
       bool found = DispatchNoExcept<all_int16_32_64_t>()(dtype_, [&](auto I) {
         using T = TV_DECLTYPE(I);
         TensorView<T> tensor_tv = this->tview<T>();
@@ -1088,16 +1451,18 @@ struct Tensor {
           tensor_tv[i] = distr(generator);
         }
       });
-      if (!found){
+      if (!found) {
         Dispatch<all_int8_t>()(dtype_, [&](auto I) {
           found = true;
           using T = TV_DECLTYPE(I);
           TensorView<T> tensor_tv = this->tview<T>();
           std::mt19937 generator(seed);
-          constexpr int kTRange = int32_t(std::numeric_limits<T>::max()) - int32_t(std::numeric_limits<T>::min());
+          constexpr int kTRange = int32_t(std::numeric_limits<T>::max()) -
+                                  int32_t(std::numeric_limits<T>::min());
           std::uniform_int_distribution<int32_t> distr(begin, end);
           for (size_t i = 0; i < this->size(); ++i) {
-            tensor_tv[i] = T((distr(generator) % kTRange) - int32_t(std::numeric_limits<T>::min()));
+            tensor_tv[i] = T((distr(generator) % kTRange) -
+                             int32_t(std::numeric_limits<T>::min()));
           }
         });
       }
@@ -1126,8 +1491,8 @@ struct Tensor {
         //               this->pinned(), this->storage_->managed());
         //   if constexpr (detail::ConvertTmpType<Tcur, Tdst>::kSpec){
         //     Tdst* tensor_data = tensor.data_ptr<Tdst>();
-        //     using TmpType = typename detail::ConvertTmpType<Tcur, Tdst>::type;
-        //     for (int i = 0; i < this->size(); ++i){
+        //     using TmpType = typename detail::ConvertTmpType<Tcur,
+        //     Tdst>::type; for (int i = 0; i < this->size(); ++i){
         //       tensor_data[i] = TmpType(ptr[i]);
         //     }
         //   }else{
@@ -1231,6 +1596,16 @@ inline Tensor from_blob(void *ptr, TensorShape shape, DType dtype,
 inline Tensor from_blob(const void *ptr, TensorShape shape, DType dtype,
                         int device = -1) {
   return Tensor(ptr, shape, dtype, device);
+}
+
+inline Tensor from_blob(void *ptr, TensorShape shape, TensorShape stride,
+                        DType dtype, int device = -1) {
+  return Tensor(ptr, shape, stride, dtype, device);
+}
+
+inline Tensor from_blob(const void *ptr, TensorShape shape, TensorShape stride,
+                        DType dtype, int device = -1) {
+  return Tensor(ptr, shape, stride, dtype, device);
 }
 
 inline Tensor empty(TensorShape shape, DType dtype, int device = -1,

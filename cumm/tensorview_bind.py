@@ -57,7 +57,6 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("has_cuda_stream", &tv::Context::has_cuda_stream)
 #endif
     ;
-#ifdef TV_CUDA
   py::class_<tv::CUDAKernelTimer, std::shared_ptr<tv::CUDAKernelTimer>>(m, "CUDAKernelTimer")
     .def(py::init<bool>(), py::arg("enable"))
     .def("push", &tv::CUDAKernelTimer::push, py::arg("name"))
@@ -68,7 +67,6 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("sync_all_event", &tv::CUDAKernelTimer::sync_all_event)
     .def_property_readonly("enable", &tv::CUDAKernelTimer::enable)
     .def("get_all_pair_duration", &tv::CUDAKernelTimer::get_all_pair_duration);
-#endif
   py::class_<tv::Tensor, std::shared_ptr<tv::Tensor>>(m, "Tensor")
     .def(py::init([](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed) {
         return tv::Tensor(tv::TensorShape(shape), tv::DType(dtype), device, pinned, managed);
@@ -79,11 +77,87 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("clone", [](const tv::Tensor& ten, bool pinned, bool use_cpu_copy){
       return ten.clone(pinned, use_cpu_copy);
     }, py::arg("pinned") = false, py::arg("use_cpu_copy") = false)
+    .def("clone_whole_storage", &tv::Tensor::clone_whole_storage)
+    .def("zero_whole_storage_", &tv::Tensor::zero_whole_storage_)
     .def("view", [](const tv::Tensor& ten, std::vector<int64_t> shape){
       return ten.view(tv::TensorShape(shape));
     })
     .def("__getitem__", &tv::Tensor::operator[])
+    .def("__getitem__", [](const tv::Tensor& src, const pybind11::slice& key){
+      namespace py = pybind11;
+      Py_ssize_t start;
+      Py_ssize_t stop;
+      Py_ssize_t step;
+      PySlice_Unpack(key.ptr(), &start, &stop, &step);
+      PySliceObject* slice_key = reinterpret_cast<PySliceObject*>(key.ptr());
+      bool start_is_none = py::detail::PyNone_Check(slice_key->start);
+      bool end_is_none = py::detail::PyNone_Check(slice_key->stop);
+      bool step_is_none = py::detail::PyNone_Check(slice_key->step);
+      if (step_is_none){
+        step = 1;
+      }
+      return src.slice(0, start, stop, step, start_is_none, end_is_none);
+    })
+    .def("__getitem__", [](const tv::Tensor& src, const pybind11::tuple& key_list){
+
+      namespace py = pybind11;
+      int64_t dim = 0;
+      // tv::Tensor prev_dim_result;
+      int64_t specified_dims = 0;
+
+      for (auto& key : key_list){
+        if (py::detail::PyEllipsis_Check(key.ptr()) || key.is_none()){
+          ++specified_dims;
+        }
+      }
+      tv::Tensor result = src;
+      for (auto& key : key_list){
+        if (py::detail::PyEllipsis_Check(key.ptr())){
+          dim += src.ndim() - specified_dims;
+        }else if (py::isinstance<py::slice>(key)){
+          Py_ssize_t start;
+          Py_ssize_t stop;
+          Py_ssize_t step;
+          PySlice_Unpack(key.ptr(), &start, &stop, &step);
+          PySliceObject* slice_key = reinterpret_cast<PySliceObject*>(key.ptr());
+          bool start_is_none = py::detail::PyNone_Check(slice_key->start);
+          bool end_is_none = py::detail::PyNone_Check(slice_key->stop);
+          bool step_is_none = py::detail::PyNone_Check(slice_key->step);
+          if (step_is_none){
+            step = 1;
+          }
+          result = result.slice(dim, start, stop, step, start_is_none, end_is_none);
+          ++dim;
+        }else if (py::isinstance<py::int_>(key)){
+          int select_idx = py::cast<int64_t>(key);
+          result = result.select(dim, select_idx);
+          // result = result.slice(dim, select_idx, select_idx + 1, 1, false, false).squeeze(dim);
+        }else if (key.is_none()){
+          result = result.unsqueeze(dim);
+          dim++;
+        }else{
+          TV_THROW_INVALID_ARG("tv::Tensor only support .../None/int/slice slicing");
+        }
+      }
+      return result;
+    })
+
+    .def("as_strided", [](const tv::Tensor& ten, std::vector<int64_t> shape, std::vector<int64_t> stride, int64_t storage_byte_offset){
+      return ten.as_strided(shape, stride, storage_byte_offset);
+    }, py::arg("shape"), py::arg("stride"), py::arg("storage_byte_offset") = 0)
     .def("slice_first_axis", &tv::Tensor::slice_first_axis)
+    .def("slice_axis", [](const tv::Tensor& ten, int dim, py::object start, py::object stop, py::object step){
+      bool start_is_none = start.is_none();
+      bool stop_is_none = stop.is_none();
+      bool step_is_none = step.is_none();
+      int64_t start_val = start_is_none ? 0 : py::cast<int64_t>(start);
+      int64_t stop_val = stop_is_none ? 0 : py::cast<int64_t>(stop);
+      int64_t step_val = step_is_none ? 1 : py::cast<int64_t>(step); 
+      return ten.slice(dim, start_val, stop_val, step_val, start_is_none, stop_is_none);
+    }, py::arg("dim"), py::arg("start"), py::arg("stop"), py::arg("step") = py::none())
+    .def("select", &tv::Tensor::select)
+
+    // .def("slice_axis", &tv::Tensor::slice)
     .def("dim", &tv::Tensor::dim)
     .def("squeeze", py::overload_cast<>(&tv::Tensor::squeeze, py::const_))
     .def("squeeze", py::overload_cast<int>(&tv::Tensor::squeeze, py::const_))
@@ -102,12 +176,17 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def_property_readonly("itemsize", &tv::Tensor::itemsize)
     .def_property_readonly("ndim", &tv::Tensor::ndim)
     .def_property_readonly("device", &tv::Tensor::device)
+
     .def("pinned", &tv::Tensor::pinned)
+    .def("is_contiguous", &tv::Tensor::is_contiguous)
+    .def("byte_offset", &tv::Tensor::byte_offset)
+
     .def("unsqueeze", &tv::Tensor::unsqueeze)
     .def("empty", &tv::Tensor::empty)
     .def("byte_pointer", [](const tv::Tensor& ten){
       return reinterpret_cast<std::uintptr_t>(ten.raw_data());
     })
+
 #ifdef TV_CUDA
     .def("cuda", py::overload_cast<tv::Context>(&tv::Tensor::cuda, py::const_), py::arg("ctx") = tv::Context())
 #endif
@@ -132,12 +211,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
       return std::vector<int64_t>(shape.begin(), shape.end());
     });
   // from_blob is used for pytorch.
-  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
-      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, tv::DType(dtype), device);
-  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
-  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
-      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, tv::DType(dtype), device);
-  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
+  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, std::vector<int64_t> stride, int dtype, int device){
+      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, stride, tv::DType(dtype), device);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("stride"), py::arg("dtype"), py::arg("device")); 
+  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, std::vector<int64_t> stride, int dtype, int device){
+      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, stride, tv::DType(dtype), device);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("stride"), py::arg("dtype"), py::arg("device")); 
   m.def("zeros", [](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed){
     return tv::zeros(shape, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 

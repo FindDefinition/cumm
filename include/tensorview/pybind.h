@@ -174,19 +174,25 @@ template <typename Ttensor> py::array tensor2array(const Ttensor &tensor) {
   std::vector<int> shape_vec(shape.begin(), shape.end());
   auto stride = tensor.stride();
   std::vector<int> stride_vec(stride.begin(), stride.end());
-
+  int itemsize = tensor.itemsize();
+  // py::array stride is BYTES!!!
+  for (auto& s : stride_vec){
+    s *= itemsize;
+  }
   auto dtype = tv_dtype_to_py(tensor.dtype());
   // construct py::array will copy content from ptr.
   // its expected because we can't transfer ownership from
   // c++ tv::Tensor to numpy array when c++ object is deleted.
-  return py::array(dtype, shape_vec, {}, tensor.raw_data());
+  return py::array(dtype, shape_vec, stride_vec, tensor.raw_data());
 }
 
 template <typename T> py::array tview2array(TensorView<T> tview) {
   // you cant call this function during GIL released.
   auto shape = tview.shape();
   auto shape_vec = std::vector<int64_t>(shape.begin(), shape.end());
-  auto tensor = Tensor(tview.data(), TensorShape(shape_vec), tv::type_v<T>, -1);
+  auto stride = tview.stride();
+  auto stride_vec = std::vector<int64_t>(stride.begin(), stride.end());
+  auto tensor = Tensor(tview.data(), TensorShape(shape_vec), TensorShape(stride_vec), tv::type_v<T>, -1);
   return tensor2array(tensor);
 }
 

@@ -26,6 +26,7 @@
 #ifdef __CUDACC_RTC__
 #include "nvrtc_std.h"
 #else
+#include <cassert>
 #include <functional>
 #include <iterator>
 #include <type_traits>
@@ -549,6 +550,22 @@ public:
   constexpr const_reverse_iterator rend() const noexcept {
     return const_reverse_iterator(begin());
   }
+
+  iterator erase(const_iterator CIit) {
+    // Just cast away constness because this is a non-const member function.
+    iterator Iit = const_cast<iterator>(CIit);
+
+    assert(Iit >= this->begin() && "Iterator to erase is out of bounds.");
+    assert(Iit < this->end() && "Erasing at past-the-end iterator.");
+
+    iterator Nit = Iit;
+    // Shift all elts down one.
+    std::move(Iit + 1, this->end(), Iit);
+    // Drop the last elt.
+    this->pop_back();
+    return (Nit);
+  }
+
 #endif
   TV_HOST_DEVICE_INLINE constexpr reference front() noexcept { return *begin(); }
 

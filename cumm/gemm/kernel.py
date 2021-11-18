@@ -88,6 +88,12 @@ class GemmParams(pccm.ParameterizedClass):
         self.add_member("ptr_B", f"const {dtype_b}*")
         self.add_member("ptr_C", f"{dtype_c}*")
         self.add_member("ptr_D", f"const {dtype_c}*")
+
+        self.add_member("stride_A", f"int64_t")
+        self.add_member("stride_B", f"int64_t")
+        self.add_member("stride_C", f"int64_t")
+        self.add_member("stride_D", f"int64_t")
+
         self.add_member("alpha, beta", f"{dtype_comp}")
         self.add_member("grid_dims", f"dim3")
         self.have_workspace = have_workspace
@@ -198,10 +204,47 @@ class GemmParams(pccm.ParameterizedClass):
         gemm_k_size_per_split = GemmUtils::get_gemm_k_size_per_split(k, split_k_slice);
         // tv::ssprint("gemm_k_size_per_split", m, n, k, gemm_k_size_per_split, grid_dims.x, grid_dims.y, grid_dims.z);
         """)
+        # if CUTLASS_INPUT_ITER:
+        #     code.raw(f"""
+        #     cutlass::layout::RowMajor layoutA({pccm.boolean(self.trans_a)} ? m : k);
+        #     cutlass::layout::RowMajor layoutB({pccm.boolean(self.trans_b)} ? k : n);
+
+        #     itera_params_ = {self.cutlass_a_param_type}(layoutA);
+        #     iterb_params_ = {self.cutlass_b_param_type}(layoutB);
+        #     """)
+        # else:
+        #     if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
+        #         code.raw(f"""
+        #         itera_params_ = IterAParams({pccm.boolean(self.trans_a)} ? m : k, IndiceA);
+        #         iterb_params_ = IterBParams({pccm.boolean(self.trans_b)} ? k : n);
+        #         """)
+        #     elif self.shuffle_stride == ShuffleStrideType.ShuffleAB:
+        #         code.raw(f"""
+        #         itera_params_ = IterAParams({pccm.boolean(self.trans_a)} ? m : k, IndiceA);
+        #         iterb_params_ = IterBParams({pccm.boolean(self.trans_b)} ? k : n, IndiceB);
+        #         """)
+        #     else:
+        #         code.raw(f"""
+        #         itera_params_ = IterAParams({pccm.boolean(self.trans_a)} ? m : k);
+        #         iterb_params_ = IterBParams({pccm.boolean(self.trans_b)} ? k : n);
+        #         """)
+
+        # if CUTLASS_OUTPUT_ITER:
+        #     code.raw(f"""
+        #     cutlass::layout::RowMajor layoutC(n);
+        #     cutlass::layout::RowMajor layoutD(n);
+        #     params_C = Epilogue::OutputTileIterator::Params(layoutC);
+        #     params_D = Epilogue::OutputTileIterator::Params(layoutD);
+        #     """)
+        # else:
+        #     if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
+        #         code.raw("out_params_ = OutIterParams(n, IndiceC);")
+        #     else:
+        #         code.raw("out_params_ = OutIterParams(n);")
         if CUTLASS_INPUT_ITER:
             code.raw(f"""
-            cutlass::layout::RowMajor layoutA({pccm.boolean(self.trans_a)} ? m : k);
-            cutlass::layout::RowMajor layoutB({pccm.boolean(self.trans_b)} ? k : n);
+            cutlass::layout::RowMajor layoutA(stride_A);
+            cutlass::layout::RowMajor layoutB(stride_B);
 
             itera_params_ = {self.cutlass_a_param_type}(layoutA);
             iterb_params_ = {self.cutlass_b_param_type}(layoutB);
@@ -209,38 +252,41 @@ class GemmParams(pccm.ParameterizedClass):
         else:
             if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
                 code.raw(f"""
-                itera_params_ = IterAParams({pccm.boolean(self.trans_a)} ? m : k, IndiceA);
-                iterb_params_ = IterBParams({pccm.boolean(self.trans_b)} ? k : n);
+                itera_params_ = IterAParams(stride_A, IndiceA);
+                iterb_params_ = IterBParams(stride_B);
                 """)
             elif self.shuffle_stride == ShuffleStrideType.ShuffleAB:
                 code.raw(f"""
-                itera_params_ = IterAParams({pccm.boolean(self.trans_a)} ? m : k, IndiceA);
-                iterb_params_ = IterBParams({pccm.boolean(self.trans_b)} ? k : n, IndiceB);
+                itera_params_ = IterAParams(stride_A, IndiceA);
+                iterb_params_ = IterBParams(stride_B, IndiceB);
                 """)
             else:
                 code.raw(f"""
-                itera_params_ = IterAParams({pccm.boolean(self.trans_a)} ? m : k);
-                iterb_params_ = IterBParams({pccm.boolean(self.trans_b)} ? k : n);
+                itera_params_ = IterAParams(stride_A);
+                iterb_params_ = IterBParams(stride_B);
                 """)
 
         if CUTLASS_OUTPUT_ITER:
             code.raw(f"""
-            cutlass::layout::RowMajor layoutC(n);
-            cutlass::layout::RowMajor layoutD(n);
+            cutlass::layout::RowMajor layoutC(stride_C);
+            cutlass::layout::RowMajor layoutD(stride_D);
             params_C = Epilogue::OutputTileIterator::Params(layoutC);
             params_D = Epilogue::OutputTileIterator::Params(layoutD);
             """)
         else:
+            # TODO find a way to specify D strides for bias Add
             if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
-                code.raw("out_params_ = OutIterParams(n, IndiceC);")
+                code.raw("out_params_ = OutIterParams(stride_C, IndiceC);")
             else:
-                code.raw("out_params_ = OutIterParams(n);")
+                code.raw("out_params_ = OutIterParams(stride_C);")
 
         code.arg("m, n, k", "int")
         code.arg("A", f" {self.dtype_a}*")
         code.arg("B", f"{self.dtype_b}*")
         code.arg("C", f"{self.dtype_c}*")
         code.arg("D", f"{self.dtype_c}*")
+        code.arg("stride_A, stride_B, stride_C, stride_D", f"int64_t")
+
         if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
             code.arg("IndiceA", f"const int*")
             code.arg("IndiceC", f"const int*")
@@ -260,6 +306,10 @@ class GemmParams(pccm.ParameterizedClass):
         code.ctor_init("ptr_B", "B")
         code.ctor_init("ptr_C", "C")
         code.ctor_init("ptr_D", "D")
+        code.ctor_init("stride_A", "stride_A")
+        code.ctor_init("stride_B", "stride_B")
+        code.ctor_init("stride_C", "stride_C")
+        code.ctor_init("stride_D", "stride_D")
 
         code.ctor_init("alpha", "alpha")
         code.ctor_init("beta", "beta")

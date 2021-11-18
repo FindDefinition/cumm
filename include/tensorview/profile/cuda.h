@@ -83,6 +83,34 @@ static float duration(CUDAEvent start, CUDAEvent stop){
 }
 
 };
+#else
+
+using cudaStream_t = std::uintptr_t;
+
+class CUDAEvent {
+private:
+std::chrono::time_point<std::chrono::steady_clock> cur_time_;
+public:
+std::string name;
+
+CUDAEvent(std::string name): name(name){
+}
+
+void record(cudaStream_t stream = nullptr){
+    cur_time_ = std::chrono::steady_clock::now();
+}
+
+void sync(cudaStream_t stream = nullptr){
+}
+
+static float duration(CUDAEvent start, CUDAEvent stop){
+    float ms = std::chrono::duration_cast<std::chrono::microseconds>(
+          stop.cur_time_ - start.cur_time_).count() / 1000.0f;
+    return ms;
+}
+
+};
+#endif
 
 class CUDAKernelTimerCore {
 private:
@@ -259,5 +287,4 @@ CUDAKernelTimerGuard(std::string name, CUDAKernelTimer timer, cudaStream_t strea
 
 };
 
-#endif 
 }

@@ -53,7 +53,7 @@ _GPU_NAME_TO_ARCH = {
     r"(NVIDIA )?TITAN X": "52",
     r"(NVIDIA )?GeForce RTX 30[0-9]0( Ti)?": "86",
     r"(NVIDIA )?GeForce RTX 20[0-9]0( Ti)?": "75",
-    r"(NVIDIA )?GeForce GTX 16[0-9]0( Ti)?": "75",
+    r"(NVIDIA )?GeForce GTX 16[0-9]0( Ti)?": "75", # FIXME GTX 1660 don't have Tensor Core?
     r"(NVIDIA )?GeForce GTX 10[0-9]0( Ti)?": "61",
     r"(NVIDIA )?GeForce GTX 9[0-9]0( Ti)?": "52",
 }
@@ -281,6 +281,12 @@ class TensorViewMath(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("tensorview/math/all.h")
+
+class GemmDTypes(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/gemm/core/all.h")
+        self.add_include("tensorview/gemm/dtypes/all.h")
 
 
 class GemmBasic(pccm.Class):

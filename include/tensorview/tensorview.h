@@ -136,6 +136,9 @@ struct ShapeBase : public vecarray<Tindex, MaxDim> {
       : vecarray<Tindex, MaxDim>(shape) {}
   TV_HOST_DEVICE_INLINE ShapeBase(vecarray<Tindex, MaxDim> vec)
       : vecarray<Tindex, MaxDim>(vec) {}
+  TV_HOST_DEVICE_INLINE ShapeBase(size_t size, Tindex init = Tindex())
+      : vecarray<Tindex, MaxDim>(size, init) {}
+
   TV_HOST_DEVICE_INLINE ShapeBase(const ShapeBase<MaxDim> &shape) {
     TV_ASSERT(shape.ndim() <= MaxDim);
     for (size_t i = 0; i < shape.ndim(); ++i) {
@@ -688,7 +691,7 @@ struct TensorView {
     }
 #endif
     constexpr int Ndim = sizeof...(Inds);
-    return ptr_[ArrayIndexRowMajor<Ndim, Ndim>::runShape(shape_, 0, inds...)];
+    return ptr_[ArrayIndexStride<Ndim, Ndim>::run(stride_.data(), 0, inds...)];
   }
 
   TV_HOST_DEVICE_INLINE T &operator()() const {
