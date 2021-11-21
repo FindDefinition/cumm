@@ -998,9 +998,9 @@ public:
   Tensor select(int dim, TV_GLOBAL_INDEX index) const {
     TV_ASSERT_INVALID_ARG(ndim() > 1, "error");
     if (index < 0) {
-      index += this->dim(0);
+      index += this->dim(dim);
     }
-    TV_ASSERT_INVALID_ARG(index < this->dim(0), "error");
+    TV_ASSERT_INVALID_ARG(index < this->dim(dim), "error");
     auto storage_offset = offset_ + index * stride(dim) * itemsize();
     TensorShape res_shape = shape();
     TensorShape res_stride = stride();
