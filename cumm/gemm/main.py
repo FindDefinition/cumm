@@ -957,7 +957,8 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             assert len(gemm_params) > 0
             self.all_params = gemm_params
             self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
-
+        self.ker_names = [k.get_algo_name() for k in self.all_kernels]
+        assert len(set(self.ker_names)) == len(self.ker_names), "kernel must unique"
         # self.add_impl_only_dependency(self.shuffle_matmul_ref, SpconvKernel)
 
     @staticmethod

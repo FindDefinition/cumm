@@ -21,7 +21,7 @@
 #include <unordered_map>
 #include <memory>
 #include <string>
-
+#include <chrono>
 namespace tv {
 
 #ifdef TV_CUDA
@@ -64,12 +64,12 @@ std::string name;
 CUDAEvent(std::string name): event_(std::make_shared<CUDAEventCore>()), name(name){
 }
 
-void record(cudaStream_t stream = nullptr){
+void record(std::uintptr_t stream = 0){
     TV_ASSERT_RT_ERR(event_, "event is empty");
-    event_->record(stream);
+    event_->record(reinterpret_cast<cudaStream_t>(stream));
 }
 
-void sync(cudaStream_t stream = nullptr){
+void sync(std::uintptr_t stream = 0){
     TV_ASSERT_RT_ERR(event_, "event is empty");
     event_->sync();
 }
@@ -85,7 +85,6 @@ static float duration(CUDAEvent start, CUDAEvent stop){
 };
 #else
 
-using cudaStream_t = std::uintptr_t;
 
 class CUDAEvent {
 private:
@@ -96,11 +95,11 @@ std::string name;
 CUDAEvent(std::string name): name(name){
 }
 
-void record(cudaStream_t stream = nullptr){
+void record(std::uintptr_t stream = 0){
     cur_time_ = std::chrono::steady_clock::now();
 }
 
-void sync(cudaStream_t stream = nullptr){
+void sync(std::uintptr_t stream = 0){
 }
 
 static float duration(CUDAEvent start, CUDAEvent stop){
@@ -151,7 +150,7 @@ std::string add_namespace_to_name(std::string name) {
     return unique_name;
 }
 
-void record(std::string name, cudaStream_t stream = nullptr){
+void record(std::string name, std::uintptr_t stream = 0){
     auto unique_name = add_namespace_to_name(name);
     TV_ASSERT_RT_ERR(name_to_event_.find(unique_name) == name_to_event_.end(), "your name", unique_name, "already exists");
     CUDAEvent newev(unique_name);
@@ -222,7 +221,7 @@ void pop() {
 void record(std::string name, std::uintptr_t stream = 0){
     if (enable_){{
         TV_ASSERT_RT_ERR(timer_ptr_, "event is empty");
-        timer_ptr_->record(name, reinterpret_cast<cudaStream_t>(stream));
+        timer_ptr_->record(name, stream);
     }}
 }
 void insert_pair(std::string name, std::string start, std::string stop){
@@ -258,6 +257,7 @@ std::unordered_map<std::string, float> get_all_pair_duration(){
 
 };
 
+#ifdef TV_CUDA
 class CUDAKernelTimerGuard {
 private:
 std::string name_;
@@ -286,5 +286,6 @@ CUDAKernelTimerGuard(std::string name, CUDAKernelTimer timer, cudaStream_t strea
 }
 
 };
+#endif
 
 }

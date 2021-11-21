@@ -4,13 +4,13 @@ class TensorViewBind:
     @staticmethod
     def hello() -> None: ...
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,17 +23,36 @@ import builtins
 
 import numpy as np
 
+
 class CUDAKernelTimer:
-    def __init__(self, enable: bool) -> None: ...
-    def push(self, name: str) -> None: ...
-    def pop(self) -> None: ...
-    def record(self, name: str, stream: int = 0) -> None: ...
-    def insert_pair(self, name: str, start: str, stop: str) -> None: ...
-    def has_pair(self, name: str) -> bool: ...
-    def sync_all_event(self) -> None: ...
-    def get_all_pair_duration(self) -> Dict[str, float]: ...
-    @property 
-    def enable(self) -> bool: ...
+    def __init__(self, enable: bool) -> None:
+        ...
+
+    def push(self, name: str) -> None:
+        ...
+
+    def pop(self) -> None:
+        ...
+
+    def record(self, name: str, stream: int = 0) -> None:
+        ...
+
+    def insert_pair(self, name: str, start: str, stop: str) -> None:
+        ...
+
+    def has_pair(self, name: str) -> bool:
+        ...
+
+    def sync_all_event(self) -> None:
+        ...
+
+    def get_all_pair_duration(self) -> Dict[str, float]:
+        ...
+
+    @property
+    def enable(self) -> bool:
+        ...
+
 
 class Tensor:
     @overload
@@ -129,13 +148,20 @@ class Tensor:
         ...
 
     @overload
-    def __getitem__(self, idx: Tuple[Union[int, None, slice, builtins.ellipsis], ...]) -> "Tensor":
+    def __getitem__(
+        self, idx: Tuple[Union[int, None, slice, builtins.ellipsis],
+                         ...]) -> "Tensor":
         ...
 
-    def as_strided(self, shape: List[int], stride: List[int], storage_byte_offset: int) -> "Tensor":
+    def as_strided(self, shape: List[int], stride: List[int],
+                   storage_byte_offset: int) -> "Tensor":
         ...
 
-    def slice_axis(self, dim: int, start: Optional[int], stop: Optional[int], step: Optional[int] = None) -> "Tensor":
+    def slice_axis(self,
+                   dim: int,
+                   start: Optional[int],
+                   stop: Optional[int],
+                   step: Optional[int] = None) -> "Tensor":
         ...
 
     def select(self, dim: int, index: int) -> "Tensor":
@@ -208,18 +234,32 @@ def zeros(shape: List[int],
           managed: bool = False) -> Tensor:
     ...
 
+@overload
+def from_blob(ptr: int,
+                      shape: List[int],
+                      stride: List[int],
+                      dtype: Union[np.dtype, int] = np.float32,
+                      device: int = -1) -> Tensor:
+    ...
 
+@overload
+def from_const_blob(ptr: int,
+                            shape: List[int],
+                            stride: List[int],
+                            dtype: Union[np.dtype, int] = np.float32,
+                            device: int = -1) -> Tensor:
+    ...
+
+@overload
 def from_blob(ptr: int,
               shape: List[int],
-              stride: List[int],
               dtype: Union[np.dtype, int] = np.float32,
               device: int = -1) -> Tensor:
     ...
 
-
+@overload
 def from_const_blob(ptr: int,
                     shape: List[int],
-                    stride: List[int],
                     dtype: Union[np.dtype, int] = np.float32,
                     device: int = -1) -> Tensor:
     ...

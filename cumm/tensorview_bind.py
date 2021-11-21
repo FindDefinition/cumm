@@ -19,7 +19,7 @@ from pccm.utils import project_is_editable, project_is_installed
 
 from .constants import PACKAGE_NAME
 from cumm.common import PyBind11, TensorView, TensorViewCPU
-from cumm.constants import PACKAGE_ROOT
+from cumm.constants import PACKAGE_ROOT, CUMM_CPU_ONLY_BUILD
 
 _TENSORVIEW_BIND_CODE_ANNO_PATH = PACKAGE_ROOT / "tensorview_bind_anno.pyi"
 with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
@@ -29,11 +29,7 @@ with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        cumm_cuda_ver = os.getenv("CUMM_CUDA_VERSION", "")
-        if cumm_cuda_ver or (project_is_installed(PACKAGE_NAME) and project_is_editable(PACKAGE_NAME)):
-            self.add_dependency(TensorView, PyBind11)
-        else:
-            self.add_dependency(TensorViewCPU, PyBind11)
+        self.add_dependency(TensorView, PyBind11)
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
 
@@ -217,6 +213,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, std::vector<int64_t> stride, int dtype, int device){
       return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, stride, tv::DType(dtype), device);
   }, py::arg("ptr"), py::arg("shape"), py::arg("stride"), py::arg("dtype"), py::arg("device")); 
+  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
+      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, tv::DType(dtype), device);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
+  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
+      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, tv::DType(dtype), device);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
   m.def("zeros", [](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed){
     return tv::zeros(shape, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
