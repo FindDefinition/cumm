@@ -895,8 +895,17 @@ class ConvMainUnitTest(pccm.Class):
                 tv::CUDAKernelTimerGuard timerguard(\"{ker.get_algo_name()}\", evtimer, reinterpret_cast<cudaStream_t>(params.stream));
                 launcher({ker.get_algo_name()}::conv_kernel, ker_params);
             }}
-            TV_CHECK_CUDA_ERR_V2("???");
             """)
+            if p.mask_sparse:
+                code.raw(f"""
+                TV_CHECK_CUDA_ERR_V2("{ker.get_algo_name()}", "error with params", input.shape(), weight.shape(), output.shape(), 
+                    indices.shape(), mask.shape(), mask_argsort.shape(), mask_output.shape(), mask_width);
+                """)
+            else:
+                code.raw(f"""
+                TV_CHECK_CUDA_ERR_V2("{ker.get_algo_name()}", "error with params", input.shape(), weight.shape(), output.shape());
+                """)
+
             # if cudasim.enable_debug():
             code.raw(f"""
             if (params.verbose){{

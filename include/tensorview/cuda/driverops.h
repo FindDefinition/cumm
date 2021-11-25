@@ -30,23 +30,23 @@ namespace tv {
 #endif
 #endif
 
-template <typename T>
-void check(T result, char const *const func, const char *const file,
-           int const line) {
-  if (result) {
-    fprintf(stderr, "CUDA error at %s:%d code=%d \"%s\" \n", file, line,
-            static_cast<unsigned int>(result), func);
-    DEVICE_RESET
-    // Make sure we call CUDA Device Reset before exiting
-    exit(EXIT_FAILURE);
-  }
-}
+// template <typename T>
+// void check(T result, char const *const func, const char *const file,
+//            int const line) {
+//   if (result) {
+//     fprintf(stderr, "CUDA error at %s:%d code=%d \"%s\" \n", file, line,
+//             static_cast<unsigned int>(result), func);
+//     DEVICE_RESET
+//     // Make sure we call CUDA Device Reset before exiting
+//     exit(EXIT_FAILURE);
+//   }
+// }
 
-#define checkCudaErrors(val) tv::check((val), #val, __FILE__, __LINE__)
+#define checkCudaErrors(val) TV_CUDART_RESULT_CHECK(val)
 
 template <typename T>
 void host2dev(T *dst, const T *src, size_t size, cudaStream_t s) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpyAsync(dst, src, size * sizeof(T), cudaMemcpyHostToDevice, s));
 }
 template <typename T, int Rank, template <class> class PtrTraits1,
@@ -65,7 +65,7 @@ void host2dev(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 }
 
 template <typename T> void host2dev(T *dst, const T *src, size_t size) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpy(dst, src, size * sizeof(T), cudaMemcpyHostToDevice));
 }
 template <typename T, int Rank, template <class> class PtrTraits1,
@@ -83,7 +83,7 @@ void host2dev(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 
 template <typename T>
 void dev2host(T *dst, const T *src, size_t size, cudaStream_t s) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpyAsync(dst, src, size * sizeof(T), cudaMemcpyDeviceToHost, s));
 }
 
@@ -104,7 +104,7 @@ void dev2host(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 
 template <typename T>
 void dev2host(T *dst, const T *src, size_t size) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpy(dst, src, size * sizeof(T), cudaMemcpyDeviceToHost));
 }
 
@@ -124,7 +124,7 @@ void dev2host(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 
 template <typename T>
 void dev2dev(T *dst, const T *src, size_t size, cudaStream_t s) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpyAsync(dst, src, size * sizeof(T), cudaMemcpyDeviceToDevice, s));
 }
 
@@ -145,7 +145,7 @@ void dev2dev(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 
 template <typename T>
 void dev2dev(T *dst, const T *src, size_t size) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpy(dst, src, size * sizeof(T), cudaMemcpyDeviceToDevice));
 }
 
@@ -165,7 +165,7 @@ void dev2dev(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 
 template <typename T>
 void host2host(T *dst, const T *src, size_t size, cudaStream_t s) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpyAsync(dst, src, size * sizeof(T), cudaMemcpyHostToHost, s));
 }
 
@@ -186,7 +186,7 @@ void host2host(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 
 template <typename T>
 void host2host(T *dst, const T *src, size_t size) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemcpy(dst, src, size * sizeof(T), cudaMemcpyHostToHost));
 }
 
@@ -207,13 +207,13 @@ void host2host(TensorView<T, Rank, PtrTraits1, Tindex1> dst,
 template <typename T, int Rank, template <class> class PtrTraits,
           typename Tindex>
 void zero_dev(TensorView<T, Rank, PtrTraits, Tindex> tensor) {
-  checkCudaErrors(cudaMemset(tensor.data(), 0, tensor.size() * sizeof(T)));
+  TV_CUDART_RESULT_CHECK(cudaMemset(tensor.data(), 0, tensor.size() * sizeof(T)));
 }
 
 template <typename T, int Rank, template <class> class PtrTraits,
           typename Tindex>
 void zero_dev(TensorView<T, Rank, PtrTraits, Tindex> tensor, cudaStream_t s) {
-  checkCudaErrors(
+  TV_CUDART_RESULT_CHECK(
       cudaMemsetAsync(tensor.data(), 0, tensor.size() * sizeof(T), s));
 }
 template <typename T, int Rank, template <class> class PtrTraits,
@@ -273,12 +273,12 @@ struct FillDev<float, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<float, Rank, PtrTraits, Tindex> tensor, float val, cudaStream_t s){
     detail::FloatBits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
   }
   static void run(TensorView<float, Rank, PtrTraits, Tindex> tensor, float val){
     detail::FloatBits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD32(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD32(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
   }
 
 };
@@ -289,12 +289,12 @@ struct FillDev<__half, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<__half, Rank, PtrTraits, Tindex> tensor, __half val, cudaStream_t s){
     detail::Float16Bits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD16Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD16Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
   }
   static void run(TensorView<__half, Rank, PtrTraits, Tindex> tensor, __half val){
     detail::Float16Bits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD16(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD16(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
   }
 };
 
@@ -304,12 +304,12 @@ struct FillDev<int32_t, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<int32_t, Rank, PtrTraits, Tindex> tensor, int32_t val, cudaStream_t s){
     detail::IntBits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
   }
   static void run(TensorView<int32_t, Rank, PtrTraits, Tindex> tensor, int32_t val){
     detail::IntBits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD32(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD32(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
   }
 };
 
@@ -317,10 +317,10 @@ template <int Rank, template <class> class PtrTraits,
           typename Tindex>
 struct FillDev<uint32_t, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<uint32_t, Rank, PtrTraits, Tindex> tensor, uint32_t val, cudaStream_t s){
-    checkCudaErrors(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD32Async(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size(), s));
   }
   static void run(TensorView<uint32_t, Rank, PtrTraits, Tindex> tensor, uint32_t val){
-    checkCudaErrors(cuMemsetD32(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD32(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size()));
   }
 };
 
@@ -328,10 +328,10 @@ template <int Rank, template <class> class PtrTraits,
           typename Tindex>
 struct FillDev<uint16_t, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<uint16_t, Rank, PtrTraits, Tindex> tensor, uint16_t val, cudaStream_t s){
-    checkCudaErrors(cuMemsetD16Async(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD16Async(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size(), s));
   }
   static void run(TensorView<uint16_t, Rank, PtrTraits, Tindex> tensor, uint16_t val){
-    checkCudaErrors(cuMemsetD16(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD16(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size()));
   }
 };
 
@@ -339,10 +339,10 @@ template <int Rank, template <class> class PtrTraits,
           typename Tindex>
 struct FillDev<uint8_t, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<uint8_t, Rank, PtrTraits, Tindex> tensor, uint8_t val, cudaStream_t s){
-    checkCudaErrors(cuMemsetD8Async(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD8Async(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size(), s));
   }
   static void run(TensorView<uint8_t, Rank, PtrTraits, Tindex> tensor, uint8_t val){
-    checkCudaErrors(cuMemsetD8(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD8(reinterpret_cast<CUdeviceptr>(tensor.data()), val, tensor.size()));
   }
 };
 
@@ -353,12 +353,12 @@ struct FillDev<int16_t, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<int16_t, Rank, PtrTraits, Tindex> tensor, int16_t val, cudaStream_t s){
     detail::Int16Bits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD16Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD16Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
   }
   static void run(TensorView<int16_t, Rank, PtrTraits, Tindex> tensor, int16_t val){
     detail::Int16Bits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD16(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD16(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
   }
 };
 
@@ -368,12 +368,12 @@ struct FillDev<int8_t, Rank, PtrTraits, Tindex>{
   static void run_async(TensorView<int8_t, Rank, PtrTraits, Tindex> tensor, int8_t val, cudaStream_t s){
     detail::Int8Bits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD8Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD8Async(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size(), s));
   }
   static void run(TensorView<int8_t, Rank, PtrTraits, Tindex> tensor, int8_t val){
     detail::Int8Bits fb;
     fb.src = val;
-    checkCudaErrors(cuMemsetD8(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
+    TV_CUDADRV_RESULT_CHECK(cuMemsetD8(reinterpret_cast<CUdeviceptr>(tensor.data()), fb.dst, tensor.size()));
   }
 };
 #else 

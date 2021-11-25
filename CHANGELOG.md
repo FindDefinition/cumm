@@ -5,6 +5,7 @@
 * add cpu support for CUDAKernelTimer.
 * add non-contiguous support for tv::Tensor.
 ### Changed
+* raise error instead of exit program when cuda error occurs.
 * gemm kernel now use stride, this enable us perform gemm with non-contiguous tensor
 ### Fixed
 * Fix bugs for gemm kernel when use non-contiguous operand.

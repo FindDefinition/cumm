@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 #pragma once
+#include "defs.h"
 #include <iostream>
 #include <sstream>
-#include "defs.h"
 #ifdef TV_USE_STACKTRACE
 #if defined(WIN32) || defined(_WIN32) ||                                       \
     defined(__WIN32) && !defined(__CYGWIN__)
@@ -28,15 +28,15 @@
 #ifdef TV_CUDA
 #include <cuda.h>
 #endif
-#if defined(TV_USE_BOOST_TYPEOF) || (!defined(__clang__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
+#if defined(TV_USE_BOOST_TYPEOF) ||                                            \
+    (!defined(__clang__) && defined(CUDA_VERSION) && CUDA_VERSION >= 11000)
 // a workaround when built with cuda 11
 // #include <boost/typeof/typeof.hpp>
 // #define TV_DECLTYPE(x) BOOST_TYPEOF(x)
 // two options: use BOOST_TYPEOF or identity_t.
 // this is a nvcc bug, msvc/gcc/clang don't have this problem.
-namespace tv{
-template <typename T>
-using identity_t = T;
+namespace tv {
+template <typename T> using identity_t = T;
 }
 #define TV_DECLTYPE(x) tv::identity_t<decltype(x)>
 #else
@@ -49,15 +49,16 @@ using identity_t = T;
 
 namespace tv {
 
-template <char Sep = ' ', class SStream, class T> void sstream_print(SStream &ss, T val) {
+template <char Sep = ' ', class SStream, class T>
+void sstream_print(SStream &ss, T val) {
   ss << val;
 }
 
 template <char Sep = ' ', class SStream, class T, class... TArgs>
 void sstream_print(SStream &ss, T val, TArgs... args) {
-  if TV_IF_CONSTEXPR (Sep == '\0'){
+  if TV_IF_CONSTEXPR (Sep == '\0') {
     ss << val;
-  }else{
+  } else {
     ss << val << Sep;
   }
   sstream_print<Sep>(ss, args...);
@@ -136,7 +137,6 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
 
 #define TV_TYPE_STRING(type) boost::core::demangle(typeid(type).name())
 
-
 #define TV_REQUIRE(expr, ...)                                                  \
   {                                                                            \
     if (!(expr)) {                                                             \
@@ -170,5 +170,50 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
       throw std::runtime_error(__macro_s.str());                               \
     }                                                                          \
   }
+
+#define TV_CUDART_RESULT_CHECK(EXPR)                                           \
+  do {                                                                         \
+    cudaError_t __macro_err = EXPR;                                            \
+    if (__macro_err != cudaSuccess) {                                          \
+      auto error_unused = cudaGetLastError();                                  \
+      std::stringstream __macro_s;                                             \
+      __macro_s << __func__ << " " << __FILE__ << " " << __LINE__ << "\n";     \
+      __macro_s << "cuda failed with error " << __macro_err;                   \
+      __macro_s << " " << cudaGetErrorString(__macro_err);                     \
+      __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.\n"; \
+      TV_BACKTRACE_PRINT(__macro_s);                                           \
+      throw std::runtime_error(__macro_s.str());                               \
+    }                                                                          \
+  } while (0)
+
+#define TV_CUDADRV_RESULT_CHECK(EXPR)                                      \
+  do {                                                                         \
+    CUresult __macro_err = EXPR;                                               \
+    if (__macro_err != CUresult::CUDA_SUCCESS) {                               \
+      const char *errstr;                                                      \
+      cuGetErrorString(__macro_err, &errstr);                                  \
+      std::stringstream __macro_s;                                             \
+      __macro_s << __func__ << " " << __FILE__ << " " << __LINE__ << "\n";     \
+      __macro_s << "cuda failed with error " << __macro_err;                   \
+      __macro_s << " " << errstr << "\n";                                      \
+      __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.";   \
+      TV_BACKTRACE_PRINT(__macro_s);                                           \
+      throw std::runtime_error(__macro_s.str());                               \
+    }                                                                          \
+  } while (0)
+
+#define TV_CUDA_RESULT_CHECK(EXPR)                                             \
+  do {                                                                         \
+    auto __macro_err = EXPR;                                                   \
+    if (__macro_err) {                                                         \
+      std::stringstream __macro_s;                                             \
+      __macro_s << __func__ << " " << __FILE__ << " " << __LINE__ << "\n";     \
+      __macro_s << "cuda failed with error code"                               \
+                << static_cast<int>(__macro_err);                              \
+      __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.\n"; \
+      TV_BACKTRACE_PRINT(__macro_s);                                           \
+      throw std::runtime_error(__macro_s.str());                               \
+    }                                                                          \
+  } while (0)
 
 } // namespace tv

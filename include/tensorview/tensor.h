@@ -1398,7 +1398,7 @@ public:
                 TV_THROW_RT_ERR("curand failed", status);
               }
             });
-        checkCudaErrors(curandDestroyGenerator(gen));
+        TV_CUDA_RESULT_CHECK(curandDestroyGenerator(gen));
 #else
         TV_THROW_RT_ERR("not implemented");
 #endif

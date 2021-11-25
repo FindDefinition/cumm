@@ -889,8 +889,8 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # interleave = 4:
                     # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
 
-                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    *gen_gemm_params((64, 64, 16), (32, 32, 16), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
 
                     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
@@ -1507,6 +1507,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     tv::CUDAKernelTimerGuard timerguard(\"{ker.get_algo_name()}\", evtimer, reinterpret_cast<cudaStream_t>(params.stream));
                     launcher({ker.get_algo_name()}::gemm_kernel, kernel_params);
                 }}
+                TV_CHECK_CUDA_ERR_V2("{ker.get_algo_name()}", "error with params", a.shape(), b.shape(), c.shape());
                 """)
                 if cudasim.enable_debug():
                     code.raw(f"""

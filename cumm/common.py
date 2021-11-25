@@ -41,6 +41,10 @@ def get_executable_path(executable: str) -> str:
 
 
 _GPU_NAME_TO_ARCH = {
+    r"(NVIDIA )?H100": "90",
+    r"(NVIDIA )?A100": "80",
+    r"(NVIDIA )?RTX A[0-9]000": "86",
+
     r"(NVIDIA )?TESLA H100": "90",
     r"(NVIDIA )?TESLA A100": "80",
     r"(NVIDIA )?TESLA V100": "70",
@@ -82,7 +86,8 @@ def _get_cuda_arch_flags() -> List[str]:
         ('Ampere', '8.0;8.6+PTX'),
     ])
 
-    supported_arches = ['5.2', '6.0', '6.1', '7.0', '7.5', '8.0', '8.6']
+    supported_arches = ['5.2', '6.0', '6.1', '7.0', '7.2', '7.5', '8.0', '8.6', '9.0']
+    supported_arches += ['5.3', '6.2', '7.2', '8.7']
     valid_arch_strings = supported_arches + [
         s + "+PTX" for s in supported_arches
     ]
@@ -93,6 +98,8 @@ def _get_cuda_arch_flags() -> List[str]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.environ.get('CUMM_CUDA_ARCH_LIST', None)
     _cuda_version = os.environ.get('CUMM_CUDA_VERSION', None)
+    _enable_cross_compile_aarch64 = os.environ.get('CUMM_CROSS_COMPILE_TARGET', None) == "aarch64"
+
     if _arch_list is not None and _arch_list.lower() == "all":
         msg = ( "you must provide CUDA version by CUMM_CUDA_VERSION, "
                 "for example, export CUMM_CUDA_VERSION=\"10.2\"")
@@ -106,10 +113,20 @@ def _get_cuda_arch_flags() -> List[str]:
             major = num // 10
             minor = num % 10
         assert (major, minor) >= (10, 2), "we only support cuda >= 10.2"
-        if (major, minor) < (11, 0):
-            _arch_list = "5.2;6.0;6.1;7.0;7.5"
+        if _enable_cross_compile_aarch64:
+            # 6.2: TX2, 7.2: Xavier, 8.7: Orin
+            if (major, minor) < (11, 5):
+                _arch_list = "5.3;6.2;7.2+PTX"
+            else:
+                _arch_list = "5.3;6.2;7.2;8.7+PTX"
         else:
-            _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+            if (major, minor) < (11, 0):
+                _arch_list = "5.0;5.2;6.0;6.1;7.0;7.5"
+            elif (major, minor) < (12, 0):
+                _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+            else:
+                # remove sm5x support in CUDA 12.
+                _arch_list = "6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     for named_arch, archval in named_arches.items():
         _all_arch = _all_arch.replace(named_arch, archval)
