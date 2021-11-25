@@ -482,7 +482,7 @@ template <int N, int Ndim> struct ArrayIndexStride {
   TV_HOST_DEVICE_INLINE static TV_GLOBAL_INDEX
   run(const TShape *stride, Tinit start, T index, Ts... inds) {
     return ArrayIndexStride<N - 1, Ndim>::run(
-        stride, start + index * stride[Ndim - N + 1], inds...);
+        stride, start + index * stride[Ndim - N], inds...);
   }
 };
 
@@ -713,7 +713,7 @@ struct TensorView {
     TV_REQUIRE(i1 >= 0 && i1 < shape_[0],
                "index-%d(%d) out-of-range: [0, %d)\n", 0, int(i1), shape_[0]);
 #endif
-    return ptr_[i1];
+    return ptr_[i1 * stride_[0]];
   }
   template <class T1, class T2>
   TV_HOST_DEVICE_INLINE T &operator()(T1 i1, T2 i2) const {
@@ -726,7 +726,7 @@ struct TensorView {
     TV_REQUIRE(i2 >= 0 && i2 < shape_[1],
                "index-%d(%d) out-of-range: [0, %d)\n", 1, int(i2), shape_[1]);
 #endif
-    return ptr_[i1 * stride_[0] + i2];
+    return ptr_[i1 * stride_[0] + i2 * stride_[1]];
   }
   template <class T1, class T2, class T3>
   TV_HOST_DEVICE_INLINE T &operator()(T1 i1, T2 i2, T3 i3) const {
@@ -741,7 +741,7 @@ struct TensorView {
     TV_REQUIRE(i3 >= 0 && i3 < shape_[2],
                "index-%d(%d) out-of-range: [0, %d)\n", 2, int(i3), shape_[2]);
 #endif
-    return ptr_[i1 * stride_[0] + i2 * stride_[1] + i3];
+    return ptr_[i1 * stride_[0] + i2 * stride_[1] + i3 * stride_[2]];
   }
   template <class T1, class T2, class T3, class T4>
   TV_HOST_DEVICE_INLINE T &operator()(T1 i1, T2 i2, T3 i3, T4 i4) const {
@@ -758,7 +758,7 @@ struct TensorView {
     TV_REQUIRE(i4 >= 0 && i4 < shape_[3],
                "index-%d(%d) out-of-range: [0, %d)\n", 3, int(i4), shape_[3]);
 #endif
-    return ptr_[i1 * stride_[0] + i2 * stride_[1] + i3 * stride_[2] + i4];
+    return ptr_[i1 * stride_[0] + i2 * stride_[1] + i3 * stride_[2] + i4 * stride_[3]];
   }
 
   TV_HOST_DEVICE_INLINE T &operator[](int idx) const {
