@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,7 +25,7 @@ class HashTable {
 
 Problems of other hashing
 RobinHood: Exch based, need to save a atomic value. so we can't use robinhood in
-cuda. 
+cuda.
 Cuckoo: if cycle detected during insert, we must rehash whole table.
   linear probing don't need rehash if insert once.
 
@@ -48,6 +48,23 @@ __global__ void insert(THashTable table,
   for (auto i : tv::KernelLoopX<int>(size)) {
     auto &item = items(i);
     table.insert(item.first, item.second);
+  }
+}
+
+template <typename THashTableSplit>
+__global__ void insert_split(
+    THashTableSplit table,
+    const typename THashTableSplit::key_type *__restrict__ key_ptr,
+    const typename THashTableSplit::mapped_type *__restrict__ value_ptr,
+    size_t size) {
+  if (value_ptr == nullptr) {
+    for (auto i : tv::KernelLoopX<int>(size)) {
+      table.insert_key_only(key_ptr[i]);
+    }
+  } else {
+    for (auto i : tv::KernelLoopX<int>(size)) {
+      table.insert(key_ptr[i], value_ptr[i]);
+    }
   }
 }
 
@@ -85,6 +102,23 @@ lookup(THashTable table,
   }
 }
 
+template <typename THashTableSplit>
+__global__ void
+query_split(THashTableSplit table,
+            typename THashTableSplit::key_type *__restrict__ key_ptr,
+            typename THashTableSplit::mapped_type *__restrict__ value_ptr,
+            uint8_t *is_empty, size_t size) {
+  auto value_data = table.value_ptr();
+
+  for (auto i : tv::KernelLoopX<int>(size)) {
+    auto offset = table.lookup_offset(key_ptr[i]);
+    is_empty[i] = offset == -1;
+    if (offset != -1) {
+      value_ptr[i] = value_data[offset];
+    }
+  }
+}
+
 template <typename THashTable>
 __global__ void
 lookup_default(THashTable table,
@@ -108,6 +142,14 @@ template <typename THashTable> __global__ void clear_table(THashTable table) {
   }
 }
 
+template <typename THashTable>
+__global__ void clear_table_split(THashTable table) {
+  auto data = table.key_ptr();
+  for (auto i : tv::KernelLoopX<int>(table.size())) {
+    data[i] = THashTable::empty_key;
+  }
+}
+
 template <typename THashSet> __global__ void clear_set(THashSet set) {
   auto data = set.data();
   for (auto i : tv::KernelLoopX<int>(set.size())) {
@@ -122,7 +164,6 @@ template <typename THashSet> __global__ void clear_set2(THashSet set) {
   }
 }
 
-
 template <typename THashTable>
 __global__ void
 iterate_table(THashTable table,
@@ -136,6 +177,41 @@ iterate_table(THashTable table,
       if (old < out.dim(0)) {
         out(old) = item;
       }
+    }
+  }
+}
+
+template <typename THashTableSplit, typename TSize>
+__global__ void
+iterate_table_split(THashTableSplit table,
+                    typename THashTableSplit::key_type *__restrict__ out_k,
+                    typename THashTableSplit::mapped_type *__restrict__ out_v,
+                    TSize size_limit, TSize *count) {
+  auto key_ptr = table.key_ptr();
+  auto v_ptr = table.value_ptr();
+
+  for (auto i : tv::KernelLoopX<int>(table.size())) {
+    auto key = key_ptr[i];
+    if (key != THashTableSplit::empty_key) {
+      TSize old = tv::cuda::atomicAggInc(count);
+      if (old < size_limit) {
+        out_k[old] = key;
+        out_v[old] = v_ptr[i];
+      }
+    }
+  }
+}
+
+template <typename THashTableSplit, typename TSize>
+__global__ void assign_arange_split(THashTableSplit table, TSize *count) {
+  auto key_ptr = table.key_ptr();
+  auto v_ptr = table.value_ptr();
+
+  for (auto i : tv::KernelLoopX<int>(table.size())) {
+    auto key = key_ptr[i];
+    if (key != THashTableSplit::empty_key) {
+      TSize old = tv::cuda::atomicAggInc(count);
+      v_ptr[i] = old;
     }
   }
 }
@@ -174,9 +250,9 @@ iterate_set(THashSet set, tv::TensorView<typename THashSet::value_type, 1> out,
 }
 
 template <typename THashTable>
-__global__ void
-table_probe_length(THashTable table, tv::TensorView<int64_t, 1> out,
-            int32_t *count) {
+__global__ void table_probe_length(THashTable table,
+                                   tv::TensorView<int64_t, 1> out,
+                                   int32_t *count) {
   auto data = table.data();
   for (auto i : tv::KernelLoopX<int>(table.size())) {
     auto &item = data[i];
@@ -189,11 +265,9 @@ table_probe_length(THashTable table, tv::TensorView<int64_t, 1> out,
   }
 }
 
-
 template <typename THashSet>
-__global__ void
-set_probe_length(THashSet set, tv::TensorView<int64_t, 1> out,
-            int32_t *count) {
+__global__ void set_probe_length(THashSet set, tv::TensorView<int64_t, 1> out,
+                                 int32_t *count) {
   auto data = set.data();
   for (auto i : tv::KernelLoopX<int>(set.size())) {
     auto &item = data[i];

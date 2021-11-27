@@ -75,8 +75,8 @@ template <size_t NumThreads = 1024> struct LaunchEx {
 
   template <class... Args> void operator()(CUfunction kernel, Args &&...args) {
     void *args_vec[] = { &args... };
-    checkCudaErrors(
-      cuLaunchKernel(kernel,
+    TV_CUDART_RESULT_CHECK(
+      cudaLaunchKernel(kernel,
                     blocks.x, blocks.y, blocks.z,    // grid dim
                     threads.x, threads.y, threads.z,   // block dim
                     smem_size, stream,             // shared mem and stream

@@ -49,6 +49,9 @@ template <typename T> struct MapTypeToUnsignedInt {
 };
 } // namespace detail
 
+template <int K>
+using itemsize_to_unsigned_t = typename detail::SizeToInt<K, false>::type;
+
 template <typename K>
 using to_unsigned_t = typename detail::MapTypeToUnsignedInt<K>::type;
 

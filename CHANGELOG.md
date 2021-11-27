@@ -1,9 +1,10 @@
 # Changelog
 
-## [0.2.4] - 2021-11-20
+## [0.2.4] - 2021-11-28
 ### Added
 * add cpu support for CUDAKernelTimer.
 * add non-contiguous support for tv::Tensor.
+* add tsl hash map, refine cuda hash impl.
 ### Changed
 * raise error instead of exit program when cuda error occurs.
 * gemm kernel now use stride, this enable us perform gemm with non-contiguous tensor

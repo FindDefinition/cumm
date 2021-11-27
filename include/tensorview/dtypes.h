@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -137,6 +137,16 @@ template <> struct TypeToDtype<uint64_t> {
 };
 template <> struct TypeToDtype<bool> { static constexpr DType dtype = bool_; };
 
+// in nvcc unsigned long long may not equivalent to uint64_t
+struct __place_holder_t;
+
+template <>
+struct TypeToDtype<
+    std::conditional<std::is_same<uint64_t, unsigned long long>::value,
+                     __place_holder_t, unsigned long long>::type> {
+  static constexpr DType dtype = uint64;
+};
+
 } // namespace detail
 
 template <class T>
@@ -248,7 +258,7 @@ constexpr const char *type_s =
 
 } // namespace tv
 
-// from pytorch aten/src/ATen/Dispatch.h. 
+// from pytorch aten/src/ATen/Dispatch.h.
 // these macros should only be used with cuda extend lambdas
 // because they don't support generic lambda,
 // otherwise you should always use tv::dispatch functions.

@@ -342,3 +342,14 @@ class BoostGeometryLib(pccm.Class):
         boost_root_p = Path(boost_root)
         assert (boost_root_p / "boost" / "geometry").exists()
         self.add_include("boost/geometry.hpp")
+
+
+class NlohmannJson(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/thirdparty/nlohmann/json.hpp")
+
+class TslRobinMap(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/thirdparty/tsl/robin_map.h")
