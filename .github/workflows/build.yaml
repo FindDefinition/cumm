@@ -60,6 +60,9 @@ jobs:
           )
         run: |
           $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
+          $Env:CUMMX_CUDA_VERSION = "${{ matrix.cuda-version }}"
+          $Env:CUMMX_CUDAX_VERSION = "${{ matrix.cuda-version }}"
+
           $Env:CUMM_CUDA_ARCH_LIST = "all"
           $Env:CUMM_DISABLE_JIT = "1"
           pip install pccm pybind11
