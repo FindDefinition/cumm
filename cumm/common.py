@@ -96,7 +96,8 @@ def _get_cuda_arch_flags() -> List[str]:
     # First check for an env var (same as used by the main setup.py)
     # Can be one or more architectures, e.g. "6.1" or "3.5;5.2;6.0;6.1;7.0+PTX"
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
-    for k, v in os.environ:
+    print("CUMM_CPU_ONLY_BUILD", CUMM_CPU_ONLY_BUILD)
+    for k, v in os.environ.items():
         print(k, v)
     _arch_list = os.getenv('CUMM_CUDA_ARCH_LIST', None)
     _cuda_version = os.getenv('CUMM_CUDA_VERSION', None)
