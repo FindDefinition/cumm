@@ -59,12 +59,12 @@ jobs:
             )
           )
         run: |
-          $Env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
-          $Env:CUMMX_CUDA_VERSION = "${{ matrix.cuda-version }}"
-          $Env:CUMMX_CUDAX_VERSION = "${{ matrix.cuda-version }}"
+          $env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
+          $env:CUMMX_CUDA_VERSION = "${{ matrix.cuda-version }}"
+          $env:CUMMX_CUDAX_VERSION = "${{ matrix.cuda-version }}"
 
-          $Env:CUMM_CUDA_ARCH_LIST = "all"
-          $Env:CUMM_DISABLE_JIT = "1"
+          $env:CUMM_CUDA_ARCH_LIST = "all"
+          $env:CUMM_DISABLE_JIT = "1"
           pip install pccm pybind11
           python -m build --wheel --outdir dist/ .
         shell: powershell
