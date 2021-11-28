@@ -47,10 +47,6 @@ jobs:
           CUDA_VERSION: ${{ matrix.cuda-version }}
           PYTHON_VERSION: ${{ matrix.python-version }}
           CUMM_CUDA_VERSION: ${{ matrix.cuda-version }}
-          CUMMX_CUDA_VERSION: ${{ matrix.cuda-version }}
-          CUMMX_CUDAX_VERSION: ${{ matrix.cuda-version }}
-          CUMMX_CUDAX_VERSIONX: ${{ matrix.cuda-version }}
-
         if: |
           (
             (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags')) ) || 
@@ -59,10 +55,8 @@ jobs:
             )
           )
         run: |
-          $env:CUMM_CUDA_VERSION = "${{ matrix.cuda-version }}"
-          $env:CUMMX_CUDA_VERSION = "${{ matrix.cuda-version }}"
-          $env:CUMMX_CUDAX_VERSION = "${{ matrix.cuda-version }}"
-
+          # if we use $env to set a var with empty string, this env will be deteted...
+          # f**k windows
           $env:CUMM_CUDA_ARCH_LIST = "all"
           $env:CUMM_DISABLE_JIT = "1"
           pip install pccm pybind11

@@ -21,7 +21,7 @@ from setuptools.extension import Extension
 NAME = 'cumm'
 RELEASE_NAME = NAME
 cuda_ver = os.getenv("CUMM_CUDA_VERSION", None)
-print("ASFASF", cuda_ver, os.getenv("CUMM_CUDA_VERSION", None))
+
 if cuda_ver is not None and cuda_ver != "":
     cuda_ver = cuda_ver.replace(".", "")  # 10.2 to 102
     RELEASE_NAME += "-cu{}".format(cuda_ver)
