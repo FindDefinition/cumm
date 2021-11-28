@@ -979,7 +979,7 @@ class MaskTileIterator(bases.GemmInputIterator):
                     indices_[s * {self.sub_tile_shape[0]} + ss] = 
                         params_.indice_ptr_[thread_offset_[0] + 
                             s * {self.tmap.delta[0]} + ss] * 
-                            params_.stride_ * {self.dtype.bitsize()} / 8;
+                            params_.stride_ * {self.dtype.nbytes_str()};
                 else{{
                     indices_[s * {self.sub_tile_shape[0]} + ss] = 0;
                 }}

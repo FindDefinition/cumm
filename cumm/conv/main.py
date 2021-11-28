@@ -787,13 +787,21 @@ class ConvMainUnitTest(pccm.Class):
                 if p.op_type == ConvOpType.kBackwardWeight:
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                    TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * {ker.dtype_b.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                        "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                    TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                        "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
                     """)
                 elif p.op_type == ConvOpType.kForward:
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                    TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                        "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
                     """)
                 else:
                     code.raw(f"""
+                    TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                        "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
                     TV_ASSERT_RT_ERR(N == input.dim(0), "error");
                     """)
             else:

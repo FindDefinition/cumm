@@ -74,6 +74,17 @@ class DType(object):
     def npdtype(self):
         return get_npdtype(self)
 
+    def nbytes_str(self, num = -1):
+        bsize = self.bitsize()
+        if num > 0:
+            bsize = num
+        if bsize >= 8:
+            assert bsize % 8 == 0
+            return f"{bsize // 8}"
+        else:
+            return f"{bsize} / 8"
+
+            
 
 float16 = DType("tv::half_t", 2 * 8, "f16", 1, RegDType.F16, "cutlass::half_t")
 float32 = DType("float", 4 * 8, "f32", 2, RegDType.F32)

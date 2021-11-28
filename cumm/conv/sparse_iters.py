@@ -79,7 +79,7 @@ class SparseParams(bases.ConvIterParams):
         """)
         if not self.is_wgrad_out and not self.is_wgrad_input:
             code.raw(
-                f"inc_c_next = filter_c_delta * {self.dtype.bitsize()} / 8;")
+                f"inc_c_next = filter_c_delta * {self.dtype.nbytes_str()} ;")
             if not self.increment_k_first:
                 code.raw(f"""
                 inc_indice_reset = problem.N * (1 - RS);
@@ -93,7 +93,7 @@ class SparseParams(bases.ConvIterParams):
         if not self.increment_k_first:
             return code
         code.raw(f"""
-        inc_c_reset = (- filter_c_delta) * gemm_iters_k * {self.dtype.bitsize()} / 8 ;
+        inc_c_reset = (- filter_c_delta) * gemm_iters_k * {self.dtype.nbytes_str()}  ;
         """)
         return code
 
@@ -294,7 +294,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                 TV_PRAGMA_UNROLL
                 for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
                     indices_[s * {self.sub_tile_shape[0]} + ss] = indices_[s * {self.sub_tile_shape[0]} + ss] * 
-                            problem_.K * {self.dtype.bitsize()} / 8;
+                            problem_.K * {self.dtype.nbytes_str()} ;
                 }}
             }}
             """)
@@ -333,7 +333,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                     if (mask_[0] & (1u << (s * {self.sub_tile_shape[0] * self.tmap.iterations[1]} + ss))){{
                         indices_[s * {self.sub_tile_shape[0]} + ss] = 
                         indice_ptr_[mask_inds[s * {self.sub_tile_shape[0]} + ss]] * 
-                            problem_.{C_or_K} * {self.dtype.bitsize()} / 8;
+                            problem_.{C_or_K} * {self.dtype.nbytes_str()} ;
                     }}
                 }}
             }}
@@ -622,7 +622,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                     inds_unpack = ", ".join([f"indices_[{i}]" for i in range(num_inds)])
                     code.raw(f"""
                     auto access_pointer = reinterpret_cast<{self.const_access_pointer}>(pointer_ + indice_offset + 
-                        c * {self.tmap.delta[1] * self.dtype.bitsize()} / 8) + v;
+                        c * {self.dtype.nbytes_str(self.tmap.delta[1] * self.dtype.bitsize())}) + v;
                     // std::uintptr_t access_pointer_num = reinterpret_cast<std::uintptr_t>(access_pointer);
                     // std::uintptr_t access_pointer_num2 = reinterpret_cast<std::uintptr_t>(pointer_);
 
@@ -838,7 +838,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
                 TV_PRAGMA_UNROLL
                 for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
                     indices_[s * {self.sub_tile_shape[0]} + ss] = indices_[s * {self.sub_tile_shape[0]} + ss] * 
-                            problem_.K * {self.dtype.bitsize()} / 8;
+                            problem_.K * {self.dtype.nbytes_str()} ;
                 }}
             }}
             """)
@@ -874,7 +874,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
                     if (mask_.query_coord(s, 0, ss, 0)){{
                         indices_[s * {self.sub_tile_shape[0]} + ss] = 
                         indice_ptr_[mask_inds[s * {self.sub_tile_shape[0]} + ss]] * 
-                            problem_.{C_or_K} * {self.dtype.bitsize()} / 8;
+                            problem_.{C_or_K} * {self.dtype.nbytes_str()} ;
                     }}
                 }}
             }}
@@ -1100,7 +1100,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
                     # if self.is_wgrad_out:
                     code.raw(f"""
                     auto access_pointer = reinterpret_cast<{self.const_access_pointer}>(pointer_ + indice_offset + 
-                        c * {self.tmap.delta[1] * self.dtype.bitsize()} / 8) + v;
+                        c * {self.dtype.nbytes_str(self.tmap.delta[1] * self.dtype.bitsize())}) + v;
                     // tv::gemm::global_load<{self.access_t}, sizeof({self.access_t})>(
                     //    frag_ptr[idx], access_pointer, valid);
                     GlobalLoad::run(frag_ptr[idx], access_pointer, valid);

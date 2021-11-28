@@ -1361,6 +1361,9 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 }}else{{
                     m = a.dim(0);
                 }}
+                TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+
                 int k = a_ten.dim(int(!trans_a));
                 int k2 = b_ten.dim(int(trans_b));
                 int n = b_ten.dim(int(!trans_b) );
@@ -1377,6 +1380,10 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 auto k = a_inds.dim(0);
                 auto k2 = b_inds.dim(0);
                 auto n = b_ten.dim(int(!trans_b) );
+                TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                TV_ASSERT_RT_ERR(int64_t(b.dim(0)) * int64_t(b.dim(1)) * {ker.dtype_b.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
                 if (trans_c){{
                     tv::check_shape(c_ten, {{n, m}});
                 }}else{{

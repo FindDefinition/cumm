@@ -472,7 +472,7 @@ class OutIterator(GemmOutputIterator):
         self.add_member("counts_", "int", array="[3]")
         if self.shuffle_in_stride:
             self.add_member("indices_",
-                            "int",
+                            "int64_t",
                             array=f"[{self.iterations[1:4].prod()}]")
 
         # cudasim members
@@ -521,7 +521,7 @@ class OutIterator(GemmOutputIterator):
                         bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
                         if (row_guard)
                             indices_[idx] = 
-                                params_.indice_ptr_[row_offset + thread_start_row_] * params.stride;
+                                int64_t(params_.indice_ptr_[row_offset + thread_start_row_]) * int64_t(params.stride);
 
                         """)
             code.raw(f"""
@@ -804,7 +804,7 @@ class OutIterator(GemmOutputIterator):
                         bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
                         if (row_guard)
                             indices_[idx] = 
-                                params_.indice_ptr_[row_offset + thread_start_row_] * params_.stride;
+                                int64_t(params_.indice_ptr_[row_offset + thread_start_row_]) * int64_t(params_.stride);
 
                         """)
         code.raw("return *this;")
