@@ -96,9 +96,11 @@ def _get_cuda_arch_flags() -> List[str]:
     # First check for an env var (same as used by the main setup.py)
     # Can be one or more architectures, e.g. "6.1" or "3.5;5.2;6.0;6.1;7.0+PTX"
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
-    _arch_list = os.environ.get('CUMM_CUDA_ARCH_LIST', None)
-    _cuda_version = os.environ.get('CUMM_CUDA_VERSION', None)
-    _enable_cross_compile_aarch64 = os.environ.get('CUMM_CROSS_COMPILE_TARGET', None) == "aarch64"
+    for k, v in os.environ:
+        print(k, v)
+    _arch_list = os.getenv('CUMM_CUDA_ARCH_LIST', None)
+    _cuda_version = os.getenv('CUMM_CUDA_VERSION', None)
+    _enable_cross_compile_aarch64 = os.getenv('CUMM_CROSS_COMPILE_TARGET', None) == "aarch64"
 
     if _arch_list is not None and _arch_list.lower() == "all":
         msg = ( "you must provide CUDA version by CUMM_CUDA_VERSION, "
