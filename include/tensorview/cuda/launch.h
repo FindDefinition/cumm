@@ -73,7 +73,7 @@ template <size_t NumThreads = 1024> struct LaunchEx {
         std::forward<Args>(args)...);
   }
 
-  template <class... Args> void operator()(CUfunction kernel, Args &&...args) {
+  template <class... Args> void run_launch_api(CUfunction kernel, Args &&...args) {
     void *args_vec[] = { &args... };
     TV_CUDART_RESULT_CHECK(
       cudaLaunchKernel(kernel,

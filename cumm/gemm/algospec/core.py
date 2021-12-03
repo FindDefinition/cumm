@@ -26,7 +26,7 @@ class GemmAlgo(enum.Enum):
     Ampere = "Ampere"
 
 _GEMM_MIN_ARCH_TO_ALGO : List[Tuple[Tuple[int, int], List[str]]] = [
-    ((5, 2), [GemmAlgo.Simt.value]),
+    ((3, 5), [GemmAlgo.Simt.value]),
     ((6, 1), [GemmAlgo.SimtDP4A.value, GemmAlgo.SimtDP2A.value]),
     ((7, 0), [GemmAlgo.Volta.value]),
     ((7, 5), [GemmAlgo.Turing.value]),

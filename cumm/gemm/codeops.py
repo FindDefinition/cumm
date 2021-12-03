@@ -17,6 +17,7 @@ from typing import (Any, Callable, Dict, Generator, Generic, Hashable,
                     Iterable, List, Tuple, TypeVar, Union)
 
 import pccm
+from cumm import dtypes
 
 _T = TypeVar("_T")
 _T2 = TypeVar("_T2")
@@ -61,3 +62,35 @@ class Condition:
             return true_cond
         else:
             return false_cond
+
+def dispatch_ints(code: pccm.FunctionCode, ints: List[int], var: str):
+    """equivalent to tv::dispatch_int, exists because some compiler
+    don't support nested dispatch_int.
+    """
+    for i, val in enumerate(ints):
+        if i == 0:
+            with code.if_(f"{var} == {val}"):
+                yield val 
+        else:
+            with code.else_if_(f"{var} == {val}"):
+                yield val 
+    with code.else_():
+        code.raw(f"""
+        TV_THROW_RT_ERR("unknown val {var}, available: {ints}")
+        """)
+
+def dispatch(code: pccm.FunctionCode, dts: List[dtypes.DType], var: str):
+    """equivalent to tv::dispatch, exists because some compiler
+    don't support nested dispatch.
+    """
+    for i, dtype in enumerate(dts):
+        if i == 0:
+            with code.if_(f"{var} == tv::DType({dtype.tv_dtype})"):
+                yield dtype 
+        else:
+            with code.else_if_(f"{var} == tv::DType({dtype.tv_dtype})"):
+                yield dtype 
+    with code.else_():
+        code.raw(f"""
+        TV_THROW_RT_ERR("unknown dtype {var}, available: {dts}")
+        """)

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.6] - 2021-12-3
+### Fixed
+* Fix a small bug that incorrectly limit arch of simt to sm52.
+
 ## [0.2.4] - 2021-11-28
 ### Added
 * add cpu support for CUDAKernelTimer.
