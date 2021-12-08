@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.7] - 2021-12-8
+### Added
+* add sm37 for cu102.
+* add compile info (cuda arch) for better error information.
+
 ## [0.2.6] - 2021-12-3
 ### Fixed
 * Fix a small bug that incorrectly limit arch of simt to sm52.

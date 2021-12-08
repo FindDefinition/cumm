@@ -18,7 +18,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import pccm
 from ccimport import compat
@@ -63,7 +63,7 @@ _GPU_NAME_TO_ARCH = {
 }
 
 
-def _get_cuda_arch_flags() -> List[str]:
+def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
     r'''
     Determine CUDA arch flags to use.
 
@@ -121,7 +121,7 @@ def _get_cuda_arch_flags() -> List[str]:
                 _arch_list = "5.3;6.2;7.2;8.7+PTX"
         else:
             if (major, minor) < (11, 0):
-                _arch_list = "5.0;5.2;6.0;6.1;7.0;7.5"
+                _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5"
             elif (major, minor) < (12, 0):
                 _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
             else:
@@ -171,6 +171,7 @@ def _get_cuda_arch_flags() -> List[str]:
 
         arch_list = _arch_list.split(';')
     flags = []
+    nums: List[Tuple[int, int]] = []
     if not arch_list:
         raise ValueError("can't find arch or can't recogize your GPU. "
             "use env CUMM_CUDA_ARCH_LIST to specify your gpu arch. "
@@ -185,17 +186,18 @@ def _get_cuda_arch_flags() -> List[str]:
                 f"Unknown CUDA arch ({arch}) or GPU not supported")
         else:
             num = arch_vers[0] + arch_vers[1]
+            nums.append((int(arch_vers[0]), int(arch_vers[1])))
             flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
             if arch.endswith('+PTX'):
                 flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
-    return sorted(list(set(flags)))
+    return sorted(list(set(flags))), nums
 
 
 class CUDALibs(pccm.Class):
     def __init__(self):
         super().__init__()
-        gpu_arch_flags = _get_cuda_arch_flags()
+        gpu_arch_flags, self.cuda_archs = _get_cuda_arch_flags()
         if compat.InWindows:
             nvcc_version = subprocess.check_output(["nvcc", "--version"
                                                     ]).decode("utf-8").strip()
@@ -278,6 +280,29 @@ class TensorView(pccm.Class):
             self.build_meta.compiler_to_cflags["cl"] = ["/DTV_CUDA"]
         else:
             self.add_dependency(TensorViewCPU)
+
+class CompileInfo(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        if not CUMM_CPU_ONLY_BUILD:
+            _, self.cuda_archs = _get_cuda_arch_flags()
+        else:
+            self.cuda_archs = []
+
+        self.add_include("vector", "tuple")
+        self.add_include("string")
+
+    @pccm.pybind.mark 
+    @pccm.static_function
+    def get_compiled_cuda_arch(self):
+        code = pccm.FunctionCode()
+        code.raw(f"""
+        std::vector<std::tuple<int, int>> res;
+        """)
+        for ar0, ar1 in self.cuda_archs:
+            code.raw(f"res.push_back(std::make_tuple({ar0}, {ar1}));")
+        code.raw(f"return res;")
+        return code.ret("std::vector<std::tuple<int, int>>")
 
 class TensorViewKernel(pccm.Class):
     def __init__(self):
