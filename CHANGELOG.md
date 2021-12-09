@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.2.8] - 2021-12-8
+### Fixed
+* Fix missing sm37 in supported arch
+
+
 ## [0.2.7] - 2021-12-8
 ### Added
 * add sm37 for cu102.

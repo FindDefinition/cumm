@@ -86,7 +86,7 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
         ('Ampere', '8.0;8.6+PTX'),
     ])
 
-    supported_arches = ['5.0', '5.2', '6.0', '6.1', '7.0', '7.2', '7.5', '8.0', '8.6', '9.0']
+    supported_arches = ['3.5', '3.7', '5.0', '5.2', '6.0', '6.1', '7.0', '7.2', '7.5', '8.0', '8.6', '9.0']
     supported_arches += ['5.3', '6.2', '7.2', '8.7']
     valid_arch_strings = supported_arches + [
         s + "+PTX" for s in supported_arches
