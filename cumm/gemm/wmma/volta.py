@@ -18,7 +18,7 @@ import numpy as np
 import pccm
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, TensorView
+from cumm.common import GemmBasic, TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import bases, constants, core, layout, thread_map
 from cumm.gemm.arch import tensorop
@@ -34,7 +34,7 @@ class WarpMmaVolta(bases.WarpMma):
                  dtype_b: dtypes.DType, dtype_c: dtypes.DType, trans_a: bool,
                  trans_b: bool, trans_c: bool):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.warp_tile_shape = seq(warp_tile_shape[0], warp_tile_shape[1],
                                    warp_tile_shape[2])
         self.interleaved_mma_shape = seq(32, 32, 4)

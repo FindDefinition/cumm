@@ -18,7 +18,7 @@ import numpy as np
 import pccm
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import bases, constants, layout, thread_map
 from cumm.gemm.core import MetaArray, metaseq, seq
@@ -53,7 +53,7 @@ class OutFragIterVolta(bases.GemmOutFragIterator):
         element_count = self.params.element_per_acc * self.params.acc_per_interleave_tile * self.params.mma_tile_iters[
             1]
         super().__init__(dtype, element_count, self.params.element_per_acc, -1)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
 
         self.warp_tile_shape = warp_tile_shape
 
@@ -208,7 +208,7 @@ class OutWarpTileIteratorVolta(bases.GemmOutWarpIterator):
         element_count = self.params.element_per_acc * self.params.acc_per_interleave_tile * self.params.mma_tile_iters[
             1]
         super().__init__(dtype, element_count, self.params.element_per_acc, -1)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
 
         self.tile_shape = tile_shape
         self.warp_tile_shape = warp_tile_shape

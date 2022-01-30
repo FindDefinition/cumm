@@ -21,7 +21,7 @@ from pccm.core import FunctionCode
 from pccm.targets.cuda_ptx import RegDType
 
 from cumm import dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView, TensorViewMath
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC, TensorViewMath
 from cumm.conv import bases, params
 from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
 from cumm.gemm import codeops, constants, layout, thread_map
@@ -369,7 +369,7 @@ class InputNPQIterator(bases.ConvInputIterator):
         self.optimized = optimized
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
-        self.add_dependency(TensorView, GemmBasicKernel, ConvEnum)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, ConvEnum)
         self.params = AnalyticParams(problem_size,
                                      input_layout,
                                      is_output=True,
@@ -613,7 +613,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
         self.optimized = optimized
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         if optimized:
             self.params = OutputNPQParams(dtype, tile_shape_mnk, problem_size,
                                           input_layout, tmap)
@@ -860,7 +860,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
 
         assert tmap.iterations.prod() * sub_tile_shape[0] < 32, "error"
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout)
         else:
@@ -1386,7 +1386,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         self.add_param_class("gload", self.gload, "GlobalLoad")
 
         assert tmap.iterations.prod() * sub_tile_shape[0] < 32, "error"
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout)
         else:
@@ -1853,7 +1853,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         assert tmap.iterations[1] == 1
-        self.add_dependency(TensorView, GemmBasicKernel, ConvEnum)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, ConvEnum)
         is_output = op_type == ConvOpType.kBackwardInput
         if op_type != ConvOpType.kForward:
             assert sub_tile_shape[
@@ -2367,7 +2367,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         assert tmap.iterations[1] == 1
-        self.add_dependency(TensorView, GemmBasicKernel, ConvEnum)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, ConvEnum)
         is_output = op_type == ConvOpType.kBackwardInput
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout)

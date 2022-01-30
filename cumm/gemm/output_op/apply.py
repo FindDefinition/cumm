@@ -15,7 +15,7 @@
 import pccm
 
 from cumm import dtypes
-from cumm.common import TensorView
+from cumm.common import TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.dtypes import DType
 from cumm.gemm import bases, core
@@ -25,7 +25,7 @@ class ApplyOutputOp(bases.GemmApply):
     def __init__(self, element_per_acc: int, output_op, out_frag_t: str,
                  inp_frag_t: str):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.element_per_acc = element_per_acc
         self.output_op = output_op
         self.out_frag_t = out_frag_t

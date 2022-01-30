@@ -20,11 +20,10 @@ from pccm.utils import project_is_editable, project_is_installed
 from .constants import PACKAGE_NAME
 from cumm.common import PyBind11, TensorView, TensorViewCPU
 from cumm.constants import PACKAGE_ROOT, CUMM_CPU_ONLY_BUILD
-
+from ccimport import compat 
 _TENSORVIEW_BIND_CODE_ANNO_PATH = PACKAGE_ROOT / "tensorview_bind_anno.pyi"
 with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
     _TENSORVIEW_BIND_CODE_ANNO = f.read()
-
 
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
@@ -32,6 +31,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_dependency(TensorView, PyBind11)
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
+        self.add_include("tensorview/nvrtcutils.h")
+        self.build_meta.add_libraries("nvrtc")
+        if not compat.InWindows:
+            self.build_meta.add_libraries("dl")
 
     @pccm.pybind.mark
     @pccm.static_function
@@ -63,6 +66,32 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("sync_all_event", &tv::CUDAKernelTimer::sync_all_event)
     .def_property_readonly("enable", &tv::CUDAKernelTimer::enable)
     .def("get_all_pair_duration", &tv::CUDAKernelTimer::get_all_pair_duration);
+
+  py::class_<tv::NVRTCProgram, std::shared_ptr<tv::NVRTCProgram>>(m, "NVRTCProgram")
+    .def(py::init(&tv::NVRTCProgram::create), py::arg("code"), py::arg("headers") = std::unordered_map<std::string, std::string>{}, 
+         py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
+         py::arg("name_exprs") = std::vector<std::string>{})
+    .def("ptx", &tv::NVRTCProgram::ptx)
+    .def("get_lowered_name", &tv::NVRTCProgram::get_lowered_name);
+  
+  py::class_<tv::NVRTCModule, std::shared_ptr<tv::NVRTCModule>> nvrtc_m(m, "NVRTCModule");
+  nvrtc_m.def(py::init(&tv::NVRTCModule::create), py::arg("code"), py::arg("headers") = std::unordered_map<std::string, std::string>{}, 
+         py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
+         py::arg("name_exprs") = std::vector<std::string>{})
+    .def(py::init([](std::shared_ptr<tv::NVRTCProgram> p) {
+        return std::make_shared<tv::NVRTCModule>(p);
+    }), py::arg("prog"))
+    .def("load", &tv::NVRTCModule::load)
+    .def_property_readonly("program", &tv::NVRTCModule::get_program)
+    .def("get_lowered_name", &tv::NVRTCModule::get_lowered_name)
+    .def("run_kernel", &tv::NVRTCModule::run_kernel);
+
+  py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")
+      .value("kTensor", tv::NVRTCModule::ArgType::kTensor)
+      .value("kArray", tv::NVRTCModule::ArgType::kArray)
+      .value("kScalar", tv::NVRTCModule::ArgType::kScalar)
+      .export_values();
+
   py::class_<tv::Tensor, std::shared_ptr<tv::Tensor>>(m, "Tensor")
     .def(py::init([](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed) {
         return tv::Tensor(tv::TensorShape(shape), tv::DType(dtype), device, pinned, managed);

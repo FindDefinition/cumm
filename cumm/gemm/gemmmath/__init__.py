@@ -16,7 +16,7 @@ import numpy as np
 import pccm
 
 from cumm import dtypes
-from cumm.common import TensorView
+from cumm.common import TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import core
 
@@ -25,7 +25,7 @@ class Clamp(pccm.ParameterizedClass):
     def __init__(self, dtype: dtypes.DType, out_dtype: dtypes.DType,
                  num_element: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.add_include("tensorview/gemm/math/all.h")
         self.dtype = dtype
         self.out_dtype = out_dtype
@@ -66,7 +66,7 @@ class UnaryIdentity(pccm.ParameterizedClass):
     def __init__(self, dtype: dtypes.DType, out_dtype: dtypes.DType,
                  num_element: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.add_include("tensorview/gemm/math/all.h")
         self.dtype = dtype
         self.out_dtype = out_dtype

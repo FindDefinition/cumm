@@ -15,7 +15,6 @@
 #pragma once
 
 #include "functional.h"
-#include <limits>
 namespace tv {
 
 namespace math {

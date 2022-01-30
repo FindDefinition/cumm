@@ -49,6 +49,54 @@ class CUDAKernelTimer:
         ...
 
 
+class NVRTCProgram:
+    def __init__(self,
+                 code: str,
+                 headers: Dict[str, str] = {},
+                 opts: List[str] = [],
+                 program_name: str = "kernel.cu") -> None:
+        ...
+
+    def ptx(self) -> str:
+        ...
+
+    def get_lowered_name(self, name: str) -> str:
+        ...
+
+
+class NVRTCModule:
+    kTensor = 0
+    kArray = 1
+    kScalar = 2
+
+    @overload
+    def __init__(self,
+                 code: str,
+                 headers: Dict[str, str] = {},
+                 opts: List[str] = [],
+                 program_name: str = "kernel.cu") -> None:
+        ...
+
+    @overload
+    def __init__(self, prog: NVRTCProgram) -> None:
+        ...
+
+    def load(self) -> "NVRTCModule":
+        ...
+
+    def run_kernel(self, name: str, blocks: List[int], threads: List[int],
+                   smem_size: int, stream: int, args: List[Tuple[Tensor,
+                                                                 int]]):
+        ...
+
+
+    @property 
+    def program(self) -> NVRTCProgram:
+        ...
+
+    def get_lowered_name(self, name: str) -> str:
+        ...
+
 class Tensor:
     @overload
     def __init__(self):
@@ -229,21 +277,24 @@ def zeros(shape: List[int],
           managed: bool = False) -> Tensor:
     ...
 
+
 @overload
 def from_blob(ptr: int,
-                      shape: List[int],
-                      stride: List[int],
-                      dtype: Union[np.dtype, int] = np.float32,
-                      device: int = -1) -> Tensor:
+              shape: List[int],
+              stride: List[int],
+              dtype: Union[np.dtype, int] = np.float32,
+              device: int = -1) -> Tensor:
     ...
+
 
 @overload
 def from_const_blob(ptr: int,
-                            shape: List[int],
-                            stride: List[int],
-                            dtype: Union[np.dtype, int] = np.float32,
-                            device: int = -1) -> Tensor:
+                    shape: List[int],
+                    stride: List[int],
+                    dtype: Union[np.dtype, int] = np.float32,
+                    device: int = -1) -> Tensor:
     ...
+
 
 @overload
 def from_blob(ptr: int,
@@ -251,6 +302,7 @@ def from_blob(ptr: int,
               dtype: Union[np.dtype, int] = np.float32,
               device: int = -1) -> Tensor:
     ...
+
 
 @overload
 def from_const_blob(ptr: int,

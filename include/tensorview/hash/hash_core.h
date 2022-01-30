@@ -14,8 +14,12 @@
 
 #pragma once
 
-#include <tensorview/tensorview.h>
+#include <tensorview/core/all.h>
+#ifdef __CUDACC_RTC__
+#include <tensorview/core/nvrtc_std.h>
+#else 
 #include <type_traits>
+#endif
 
 namespace tv {
 namespace hash {

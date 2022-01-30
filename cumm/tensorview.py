@@ -13,31 +13,17 @@
 # limitations under the License.
 
 from enum import Enum
-from typing import List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Optional
 
 import numpy as np
+from pccm import Argument
 
 from cumm.core_cc import tensorview_bind
 from cumm.core_cc.tensorview_bind import Tensor
-
-from cumm.core_cc.tensorview_bind import CUDAKernelTimer
-
-
-def get_numpy_view(ten: Tensor) -> np.ndarray:
-    if not ten.is_contiguous():
-        raise NotImplementedError(
-            "numpy_view only support contiguous tv::Tensor")
-    buf = ten.get_memoryview()
-    return np.frombuffer(buf, dtype=TENSOR_TO_NPDTYPE_MAP[ten.dtype]).reshape(
-        ten.shape)
-
-
-def numpy_view(self):
-    return get_numpy_view(self)
-
-
-Tensor.numpy_view = numpy_view
-
+from pccm.middlewares.pybind import _simple_template_type_parser, TemplateTypeStmt
+from dataclasses import dataclass
+from cumm.core_cc.tensorview_bind import CUDAKernelTimer, NVRTCModule as _NVRTCModule, NVRTCProgram
+from cumm.dtypes import get_npdtype_from_tvdtype
 bool_ = 0
 float16 = 1
 float32 = 2
@@ -59,6 +45,201 @@ custom64 = 103
 custom80 = 104
 custom96 = 105
 custom128 = 106
+
+_SIMPLE_TYPES_TO_TV_DTYPE = {
+    "int": int32,
+    "int8_t": int8,
+    "int16_t": int16,
+    "int32_t": int32,
+    "int64_t": int64,
+    "uint8_t": uint8,
+    "uint16_t": uint16,
+    "uint32_t": uint32,
+    "uint64_t": uint64,
+    "std::intptr_t": int64,
+    "std::uintptr_t": uint64,
+    "size_t": uint64,
+    "std::size_t": uint64,
+    "unsigned": uint32,
+    "long": int64,
+    "short": int16,
+    "float": float32,
+    "double": float64,
+    "unsigned long": uint64,
+    "unsigned int": uint32,
+    "__half": float16,
+    "tv::half_t": float16,
+    "at::Half": float16,
+}  # type: Dict[str, int]
+
+_VALID_CONTAINER_TYPES = {"tv::array", "std::array"}
+
+@dataclass
+class NVRTCArgMeta:
+    valid: bool 
+    simple_type: int
+    shape: List[int]
+
+    is_simple_ptr: bool = False
+
+
+class NVRTCKernelMeta:
+    def __init__(self, name: str, ns: str, args: List[Argument]):
+        self.name = name 
+        self.ns = ns 
+        self.args = args
+        self.arg_types = [_simple_template_type_parser(a.type_str, {}) for a in args]
+        self.simple_types: List[Optional[int]] = []
+        self.arg_metas: List[NVRTCArgMeta] = []
+        for meta in self.arg_types:
+            simple_tv_type = -1
+            is_simple_ptr = False
+            valid = meta.name != ""
+            shape: List[int] = []
+            if valid and not meta.is_ptr:
+                # determine scalar type
+                cur_meta = meta
+                while True:
+                    if len(cur_meta.args) == 0:
+                        if cur_meta.name in _SIMPLE_TYPES_TO_TV_DTYPE:
+                            simple_tv_type = _SIMPLE_TYPES_TO_TV_DTYPE[cur_meta.name]
+                        break
+                    is_valid_container = cur_meta.name in _VALID_CONTAINER_TYPES
+                    if not is_valid_container and len(cur_meta.args) > 0:
+                        valid = False
+                        break
+                    length = int(cur_meta.args[1].name)
+                    shape.append(length)
+                    cur_meta = cur_meta.args[0]
+            elif valid and meta.is_ptr:
+                if meta.name in _SIMPLE_TYPES_TO_TV_DTYPE:
+                    is_simple_ptr = True
+                    simple_tv_type = _SIMPLE_TYPES_TO_TV_DTYPE[meta.name]
+            if len(shape) == 0:
+                shape = [1]
+            # shape = shape[::-1]
+            self.arg_metas.append(NVRTCArgMeta(valid, simple_tv_type, shape, is_simple_ptr))
+
+    def __repr__(self) -> str:
+        return f"NVRTCKernelMeta[name={self.name},ns={self.ns},args={self.arg_metas}]"
+
+class NVRTCModule:
+    def __init__(self, code: Union[str, NVRTCProgram],
+                 headers: Optional[Dict[str, str]] = None,
+                 opts: Optional[List[str]] = None,
+                 program_name: str = "kernel.cu",
+                 name_exprs: Optional[List[str]] = None,
+                 name_to_meta: Optional[Dict[str, NVRTCKernelMeta]] = None) -> None:
+        if headers is None:
+            headers = {}
+        if opts is None:
+            opts = []
+        if name_exprs is None:
+            name_exprs = []
+        if isinstance(code, str):
+            self._mod = _NVRTCModule(code, headers, opts, program_name, name_exprs)
+        else:
+            self._mod = _NVRTCModule(code)
+        self.blocks = [0, 0, 0]
+        self.threads = [0, 0, 0]
+        self.smem_size = 0
+        self.stream = 0
+        self._name_exprs = name_exprs
+        self.name_to_meta = name_to_meta
+
+    def load(self):
+        return self._mod.load()
+
+    def prepare_launch( self, blocks: List[int], threads: List[int],
+                   smem_size: int = 0, stream: int = 0):
+        self.blocks = blocks
+        self.threads = threads
+        self.smem_size = smem_size
+        self.stream = stream
+        return self 
+
+    def run_kernel(self, name: str, *args: Union[Tensor, int, float, List[int], List[float], Tuple[float, ...], Tuple[int, ...]]):
+        assert np.prod(self.blocks) > 0
+        assert np.prod(self.threads) > 0
+        metas: List[NVRTCArgMeta] = [NVRTCArgMeta(False, -1, [])] * len(args)
+        if self.name_to_meta:
+            assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
+            assert len(args) == len(self.name_to_meta[name].args)
+            metas = self.name_to_meta[name].arg_metas
+        if self._name_exprs:
+            name = self.get_lowered_name(name)
+
+        kernel_args: List[Tuple[Tensor, int]] = []
+        for arg, meta in zip(args, metas):
+            if meta.valid:
+                # print(meta.shape)
+                if meta.is_simple_ptr:
+                    if not isinstance(arg, Tensor):
+                        raise ValueError("your arg must be tensor")
+                    if not arg.dtype == meta.simple_type:
+                        cur_dtype = get_npdtype_from_tvdtype(arg.dtype)
+                        expected_dtype = get_npdtype_from_tvdtype(meta.simple_type)
+                        raise ValueError(f"your tensor {arg.shape}|{cur_dtype}"
+                                        f" dtype not equal to {expected_dtype}")
+                    kernel_args.append((arg, _NVRTCModule.kTensor))
+                    continue
+                else:
+                    # we can't ensure arg isn't tv::Tensor.
+                    if not isinstance(arg, Tensor):
+                        assert not isinstance(arg, Tensor)
+                        arg_array = np.array(arg)
+                        if not arg_array.shape:
+                            arg_array = arg_array.reshape(1)
+                        assert list(arg_array.shape) == meta.shape
+                        # auto dtype cast
+                        # TODO prevent floats assigned to ints
+                        ten = empty(meta.shape, meta.simple_type, -1)
+                        ten.numpy_view()[:] = arg_array
+                        kernel_args.append((ten, _NVRTCModule.kScalar))
+                        continue
+            # meta isn't valid, use regular dtypes. 
+            if isinstance(arg, (int, float)):
+                dtype = float32 
+                if isinstance(arg, int):
+                    dtype = int64 
+                ten = empty([1], dtype, -1)
+                ten.numpy_view()[0] = arg
+                kernel_args.append((ten, _NVRTCModule.kScalar))
+            elif isinstance(arg, (list, tuple)):
+                dtype = np.float32 
+                if isinstance(arg[0], int):
+                    dtype = np.int64 
+                arg_np = np.array(arg, dtype=dtype)
+                ten = from_numpy(arg_np).clone()
+                kernel_args.append((ten, _NVRTCModule.kArray))
+            else:
+                assert isinstance(arg, Tensor)
+                kernel_args.append((arg, _NVRTCModule.kTensor))
+        
+        return self._mod.run_kernel(name, self.blocks, self.threads, self.smem_size, self.stream, kernel_args)
+
+    @property 
+    def program(self):
+        return self._mod.program
+
+    def get_lowered_name(self, name: str) -> str:
+        return self._mod.get_lowered_name(name)
+
+
+def get_numpy_view(ten: Tensor) -> np.ndarray:
+    if not ten.is_contiguous():
+        raise NotImplementedError(
+            "numpy_view only support contiguous tv::Tensor")
+    buf = ten.get_memoryview()
+    return np.frombuffer(buf, dtype=TENSOR_TO_NPDTYPE_MAP[ten.dtype]).reshape(
+        ten.shape)
+
+
+def numpy_view(self):
+    return get_numpy_view(self)
+
+
+Tensor.numpy_view = numpy_view
 
 NPDTYPE_TO_TENSOR_MAP = {
     np.dtype(np.float32): float32,

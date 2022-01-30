@@ -1018,7 +1018,7 @@ public:
 
   const TensorShape &shape() const { return shape_; }
   const TensorShape &strides() const { return stride_; }
-  int stride(int idx) const {
+  int64_t stride(int idx) const {
     if (idx < 0) {
       TV_ASSERT_RT_ERR(stride_.ndim() + idx < stride_.ndim(), idx, stride_);
       return stride_[stride_.ndim() + idx];
@@ -1030,7 +1030,7 @@ public:
   const TensorShape &sizes() const { return shape_; }
   const TensorShape &stride() const { return stride_; }
 
-  int dim(int idx) const {
+  int64_t dim(int idx) const {
     if (idx < 0) {
       TV_ASSERT_RT_ERR(shape_.ndim() + idx < shape_.ndim(), idx, shape_);
       return shape_[shape_.ndim() + idx];

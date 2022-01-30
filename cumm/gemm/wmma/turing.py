@@ -18,7 +18,7 @@ import numpy as np
 import pccm
 
 from cumm import dtypes
-from cumm.common import GemmBasic, TensorView
+from cumm.common import GemmBasic, TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import bases, constants, core, layout, thread_map
 from cumm.gemm.arch import tensorop
@@ -40,7 +40,7 @@ class WarpMmaTuring(bases.WarpMma):
                  trans_c: bool,
                  acc_is_rowmajor: bool = False):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.warp_tile_shape = seq(*warp_tile_shape)
         self.inst_shape = seq(*inst_shape)
 

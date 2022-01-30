@@ -19,7 +19,7 @@ import pccm
 from pccm.targets.cuda_ptx import RegDType
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC
 from cumm.constants import CUTLASS_MODE
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.cudasim import checkers
@@ -81,7 +81,7 @@ class WarpTileIterator(bases.GemmWarpIterator):
 
         super().__init__(dtype, element_count, self.sub_access_size)
 
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.add_param_class("ns1", smem_layout,
                              "SmemLayout")  # TODO add a real layout class
         self.add_param_class("ns2", lane_layout,
@@ -369,7 +369,7 @@ class SmemTileIteratorV2(bases.GemmSmemIterator):
 
         super().__init__(dtype, element_count, sub_tile_shape.prod(),
                          alignment)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.advance_axis = advance_axis
         self.num_threads = num_threads
@@ -741,7 +741,7 @@ class MaskTileIterator(bases.GemmInputIterator):
         self.read_only = read_only
         # shuffle_in_stride = False
         self.shuffle_in_stride = shuffle_in_stride
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.param_class = param_class
         self.add_param_class("maskiter", tmap, "ThreadMap")
         self.add_param_class("maskiter", param_class, "Params")

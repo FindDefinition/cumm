@@ -13,17 +13,21 @@
 // limitations under the License.
 
 #pragma once
-#include <cstdint>
 #ifdef TV_CUDA
-#include <cuda.h>
+// #include <cuda.h>
 #include <cuda_fp16.h>
 #endif
 #if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
 #include <cuda_bf16.h>
 #endif
+#include <tensorview/core/defs.h>
+#ifdef __CUDACC_RTC__
+#include <tensorview/core/nvrtc_std.h>
+#else
 #include <algorithm>
 #include <type_traits>
-
+#include <cstdint>
+#endif
 #define TV_UNKNOWN_DTYPE_STRING "unknown"
 
 namespace tv {
@@ -65,11 +69,11 @@ using bfloat162_t = __nv_bfloat162;
 
 namespace detail {
 
-constexpr bool strings_equal(char const *a, char const *b) {
+TV_HOST_DEVICE_INLINE constexpr bool strings_equal(char const *a, char const *b) {
   return *a == *b && (*a == '\0' || strings_equal(a + 1, b + 1));
 }
 
-template <typename T> constexpr DType get_custom_dtype() {
+template <typename T> TV_HOST_DEVICE_INLINE constexpr DType get_custom_dtype() {
   if (sizeof(T) == 2) {
     return custom16;
   } else if (sizeof(T) == 4) {
@@ -152,7 +156,7 @@ struct TypeToDtype<
 template <class T>
 constexpr DType type_v = detail::TypeToDtype<std::decay_t<T>>::dtype;
 
-template <typename T> constexpr const char *dtype_str(T t) {
+template <typename T> TV_HOST_DEVICE_INLINE constexpr const char *dtype_str(T t) {
   switch (t) {
   case DType::bool_:
     return "bool";
@@ -200,7 +204,7 @@ template <typename T> constexpr const char *dtype_str(T t) {
     return TV_UNKNOWN_DTYPE_STRING;
   }
 }
-template <typename T> constexpr const char *dtype_short_str(T t) {
+template <typename T> TV_HOST_DEVICE_INLINE constexpr const char *dtype_short_str(T t) {
   switch (t) {
   case DType::bool_:
     return "b1";

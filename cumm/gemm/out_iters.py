@@ -19,7 +19,7 @@ import numpy as np
 import pccm
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.cudasim import checkers
 from cumm.gemm import codeops, constants, layout, thread_map
@@ -62,7 +62,7 @@ class OutWarpTileIterator(GemmOutWarpIterator):
                          self.element_per_acc,
                          dtype.itemsize() * self.element_per_acc)
 
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.add_param_class("ns2", lane_layout,
                              "LaneLayout")  # TODO add a real layout class
 
@@ -219,7 +219,7 @@ class OutSmemLoader(GemmOutSmemLoader):
         super().__init__(dtype,
                          self.iterations.prod() * self.element_per_acc_output,
                          num_sub_access, min(16, alignment))
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.stride = stride
         self.add_member("pointer_", self.pointer)
@@ -448,7 +448,7 @@ class OutIterator(GemmOutputIterator):
                          self.iterations.prod() * access_length, access_length,
                          dtype.itemsize() * access_length,
                          access_per_vector)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.read_only = read_only
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.params = param_class
@@ -846,7 +846,7 @@ class OutFragIter(GemmOutFragIterator):
                  num_iteration: int):
         super().__init__(dtype, element_per_acc * num_iteration,
                          element_per_acc)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
 
         self.num_iteration = num_iteration
 

@@ -20,7 +20,7 @@ import pccm
 
 from cumm import dtypes
 from cumm import tensorview as tv
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC
 from cumm.conv import bases
 from cumm.gemm import codeops, constants, layout, thread_map
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
@@ -70,7 +70,7 @@ def get_gemm_trans_abc(op_type: bases.ConvOpType):
 class ConvProblemCommon(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(bases.ConvEnum, TensorView)
+        self.add_dependency(bases.ConvEnum, TensorViewNVRTC)
     
 
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
@@ -127,7 +127,7 @@ class ConvProblem(pccm.ParameterizedClass):
         self.layout_desp_weight = layout_desp_weight
         self.layout_desp_output = layout_desp_output
         self.mask_sparse = mask_sparse
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         # batch, input channel, output channel
         self.add_member("N, C, K", f"int")
         # HW

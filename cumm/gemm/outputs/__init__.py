@@ -19,7 +19,7 @@ import pccm
 
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
+from cumm.common import (GemmBasic, GemmBasicKernel, TensorViewNVRTC,
                          TensorViewKernel)
 from cumm.constants import CUTLASS_MODE
 from cumm.core_cc.csrc.arrayref import ArrayPtr
@@ -41,7 +41,7 @@ class OutputSmemStorage(pccm.ParameterizedClass):
     def __init__(self, shape: MetaArray[int], smem_padding_mn: MetaArray[int],
                  dtype_acc: dtypes.DType, frag_per_iter: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.shape = shape
         self.smem_padding_mn = smem_padding_mn
 

@@ -19,7 +19,7 @@ import pccm
 
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import GemmBasic, TensorView
+from cumm.common import GemmBasic, TensorViewNVRTC
 from cumm.gemm import constants
 from cumm.gemm.core import MetaArray, metaseq, seq
 
@@ -59,7 +59,7 @@ def rowmajor_inverse_list(index: int, shape: MetaArray[int]) -> MetaArray[int]:
 class VoltaTensorOpCrosswise(pccm.ParameterizedClass):
     def __init__(self, element_size: int, kblock: int = 32):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.element_size = element_size
         self.tile_shape = metaseq(8, 4)
         self.part_shape = metaseq(4, 4)
@@ -160,7 +160,7 @@ class VoltaTensorOpCrosswise(pccm.ParameterizedClass):
 class VoltaTensorOpCongruous(pccm.ParameterizedClass):
     def __init__(self, operand_a: bool, element_size: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.tile_shape = metaseq(4, 8)
         if operand_a:
             self.part_shape = metaseq(4, 4)
@@ -345,7 +345,7 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
     def __init__(self, element_size: int, crosswise: int):
         super().__init__()
         # crosswise == 128 / (element_size / 8) for congruous
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.access_size = 128
         # kCrosswise elements in the contiguous dimension would span to a
         # shared memory cache line.
@@ -616,7 +616,7 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
 class TensorOpMultiplicandColumnMajorInterleaved(pccm.ParameterizedClass):
     def __init__(self, element_size: int, interleave: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.access_size = 128
         self.interleave = interleave
         self.element_size = element_size
@@ -684,7 +684,7 @@ class TensorOpMultiplicandColumnMajorInterleaved(pccm.ParameterizedClass):
 class TensorOpMultiplicandRowMajorInterleaved(pccm.ParameterizedClass):
     def __init__(self, element_size: int, interleave: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.access_size = 128
         self.interleave = interleave
         self.element_size = element_size

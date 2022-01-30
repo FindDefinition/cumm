@@ -19,7 +19,7 @@ import pccm
 
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import GemmBasic, TensorView, TensorViewKernel
+from cumm.common import GemmBasic, TensorViewNVRTCKernel
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import constants
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
@@ -59,7 +59,7 @@ class MmaSync(pccm.ParameterizedClass):
                  trans_c: bool,
                  satfinite: bool = False):
         super().__init__()
-        self.add_dependency(TensorView, TensorViewKernel, GemmBasic)
+        self.add_dependency(TensorViewNVRTCKernel, GemmBasic)
         self.shape = shape
         self.num_threads = num_threads
         self.dtype_a = dtype_a

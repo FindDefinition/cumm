@@ -15,7 +15,6 @@
 import pccm
 
 from cumm import cudasim, dtypes
-from cumm.common import TensorView
 from cumm.constants import CUTLASS_MODE
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.dtypes import DType

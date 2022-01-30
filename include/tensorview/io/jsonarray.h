@@ -12,6 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+/*
+JsonArray Design
+
+meta_start_offset-meta_end_offset-tensors-meta(json)
+
+meta layout:
+
+{
+  user_meta: ...
+  tensor_offsets: ...
+}
+
+we can access single tensor without read all data of a json array.
+
+
+
+*/
+
 #pragma once
 #include <tuple>
 #include <vector>

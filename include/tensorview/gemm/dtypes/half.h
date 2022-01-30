@@ -66,9 +66,9 @@ enum
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-
+#ifdef TV_CUDA
 #include <cuda_fp16.h>
-
+#endif
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 // Optionally target F16C extentions to accelerate half-precision conversion.
@@ -351,11 +351,11 @@ struct alignas(2) half_t {
   half_t() : storage(0) { }
 
   /// Reinterpret cast from CUDA's half type
+#ifdef TV_CUDA
   TV_HOST_DEVICE_INLINE
   explicit half_t(half const & x): storage(reinterpret_cast<uint16_t const &>(x)) {
-
   }
-
+#endif
   /// Floating point conversion
   TV_HOST_DEVICE_INLINE
   explicit half_t(float x) {
@@ -380,13 +380,14 @@ struct alignas(2) half_t {
     storage = convert(x).storage;
   }
 
+#ifdef TV_CUDA
   /// Assignment
   TV_HOST_DEVICE_INLINE
   half_t & operator=(half const &x) {
     storage = reinterpret_cast<uint16_t const &>(x);
     return *this;
   }
-
+#endif
   /// Converts to float
   TV_HOST_DEVICE_INLINE
   operator float() const {
@@ -411,11 +412,13 @@ struct alignas(2) half_t {
     return (convert(*this) != 0.0f);
   }
 
+#ifdef TV_CUDA
   /// Bitcasts to CUDA's half type
   TV_HOST_DEVICE_INLINE
   half to_half() const {
     return reinterpret_cast<half const &>(storage);
   }
+#endif
 
   /// Accesses raw internal state
   TV_HOST_DEVICE_INLINE

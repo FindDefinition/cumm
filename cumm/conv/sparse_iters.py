@@ -21,7 +21,7 @@ from pccm.core import FunctionCode
 from pccm.targets.cuda_ptx import RegDType
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView, TensorViewMath
+from cumm.common import GemmBasic, GemmBasicKernel, TensorView, TensorViewMath, TensorViewNVRTC
 from cumm.conv import bases, params
 from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
 from cumm.gemm import codeops, constants, layout, thread_map
@@ -133,7 +133,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
             assert sub_tile_shape[0] == 1, "backward weight don't support sub tile shape"
         else:
             assert tmap.iterations[1] == 1
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         is_output = op_type == ConvOpType.kBackwardInput
         self.params = SparseParams(dtype, tile_shape_mnk, problem_size, tmap,
                                    is_output, increment_k_first)
@@ -680,7 +680,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
             assert sub_tile_shape[0] == 1, "backward weight don't support sub tile shape"
         else:
             assert tmap.iterations[1] == 1
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         is_output = op_type == ConvOpType.kBackwardInput
         self.params = SparseParams(dtype, tile_shape_mnk, problem_size, tmap,
                                    is_output, increment_k_first)

@@ -193,27 +193,30 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
 
     return sorted(list(set(flags))), nums
 
+def _get_cuda_include_lib():
+    if compat.InWindows:
+        nvcc_version = subprocess.check_output(["nvcc", "--version"
+                                                ]).decode("utf-8").strip()
+        nvcc_version_str = nvcc_version.split("\n")[3]
+        version_str: str = re.findall(r"release (\d+.\d+)",
+                                        nvcc_version_str)[0]
+        windows_cuda_root = Path(
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
+        if not windows_cuda_root.exists():
+            raise ValueError(f"can't find cuda in {windows_cuda_root}.")
+        include = windows_cuda_root / f"v{version_str}\\include"
+        lib64 = windows_cuda_root / f"v{version_str}\\lib\\x64"
+    else:
+        linux_cuda_root = Path("/usr/local/cuda")
+        include = linux_cuda_root / f"include"
+        lib64 = linux_cuda_root / f"lib64"
+    return include, lib64
 
 class CUDALibs(pccm.Class):
     def __init__(self):
         super().__init__()
         gpu_arch_flags, self.cuda_archs = _get_cuda_arch_flags()
-        if compat.InWindows:
-            nvcc_version = subprocess.check_output(["nvcc", "--version"
-                                                    ]).decode("utf-8").strip()
-            nvcc_version_str = nvcc_version.split("\n")[3]
-            version_str: str = re.findall(r"release (\d+.\d+)",
-                                          nvcc_version_str)[0]
-            windows_cuda_root = Path(
-                "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
-            if not windows_cuda_root.exists():
-                raise ValueError(f"can't find cuda in {windows_cuda_root}.")
-            include = windows_cuda_root / f"v{version_str}\\include"
-            lib64 = windows_cuda_root / f"v{version_str}\\lib\\x64"
-        else:
-            linux_cuda_root = Path("/usr/local/cuda")
-            include = linux_cuda_root / f"include"
-            lib64 = linux_cuda_root / f"lib64"
+        include, lib64 = _get_cuda_include_lib()
         self.build_meta.includes.append(include)
         self.build_meta.libraries.extend(["cudart"])
         self.build_meta.compiler_to_cflags["nvcc"] = gpu_arch_flags
@@ -311,6 +314,30 @@ class TensorViewKernel(pccm.Class):
         self.add_include("tensorview/cuda/device_ops.h")
         self.add_include("tensorview/gemm/debug.h")
 
+class TensorViewNVRTC(pccm.Class):
+    """a class that contains all tensorview features with nvrtc support.
+    """
+    def __init__(self):
+        super().__init__()
+        include, lib64 = _get_cuda_include_lib()
+        self.build_meta.add_includes(include, TENSORVIEW_INCLUDE_PATH)
+        self.build_meta.compiler_to_cflags["nvcc"] = ["-DTV_CUDA"]
+        self.add_include("tensorview/core/all.h")
+        self.add_include("tensorview/gemm/debug.h")
+
+
+class TensorViewNVRTCKernel(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorViewNVRTC)
+        self.add_include("tensorview/cuda/device_ops.h")
+        # self.add_include("tensorview/gemm/dtypes/all.h")
+        # self.add_include("tensorview/gemm/core/all.h")
+        # self.add_include("tensorview/gemm/arch/memory.h")
+        # self.add_include("tensorview/gemm/arch/transpose.h")
+        # self.add_include("tensorview/gemm/arch/semaphore.h")
+        # self.add_include("tensorview/hash/all.cu.h")
+        self.add_include("tensorview/gemm/arch/memory_sm75.h")
 
 class TensorViewHashKernel(pccm.Class):
     def __init__(self):
@@ -334,7 +361,6 @@ class GemmDTypes(pccm.Class):
 class GemmBasic(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_include("cuda.h")
         self.add_include("cuda_runtime_api.h"
                          )  # for __global__, __host__ and other cuda attrs.
         self.add_include("tensorview/gemm/core/all.h")

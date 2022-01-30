@@ -22,7 +22,12 @@
 
 
 #pragma once 
+
+#include <tensorview/core/defs.h>
 #ifdef __CUDACC_RTC__
+
+#include <cuda/std/cassert>
+
 typedef signed char int8_t;
 typedef signed short int16_t;
 typedef signed int int32_t;
@@ -141,8 +146,8 @@ template <typename> struct is_function;
 
 template <typename> struct is_function : public false_type {};
 
-#define _GLIBCXX_NOEXCEPT_PARM , bool _NE
-#define _GLIBCXX_NOEXCEPT_QUAL noexcept(_NE)
+#define _GLIBCXX_NOEXCEPT_PARM
+#define _GLIBCXX_NOEXCEPT_QUAL
 
 template <typename _Res, typename... _ArgTypes _GLIBCXX_NOEXCEPT_PARM>
 struct is_function<_Res(_ArgTypes...) _GLIBCXX_NOEXCEPT_QUAL>
@@ -292,6 +297,90 @@ forward(typename std::remove_reference<_Tp>::type &&__t) noexcept {
                 " substituting _Tp is an lvalue reference type");
   return static_cast<_Tp &&>(__t);
 }
+
+  template<typename, typename>
+    struct is_same
+    : public false_type { };
+
+  template<typename _Tp>
+    struct is_same<_Tp, _Tp>
+    : public true_type { };
+
+  // Primary template.
+  /// Define a member typedef @c type only if a boolean constant is true.
+  template<bool, typename _Tp = void>
+    struct enable_if
+    { };
+
+  // Partial specialization for true.
+  template<typename _Tp>
+    struct enable_if<true, _Tp>
+    { typedef _Tp type; };
+
+  template<typename... _Cond>
+    using _Require = typename enable_if<__and_<_Cond...>::value>::type;
+
+  template<bool _Cond, typename _Iftrue, typename _Iffalse>
+    using conditional_t = typename conditional<_Cond, _Iftrue, _Iffalse>::type;
+
+template <class T>
+struct numeric_limits;
+
+template <>
+struct numeric_limits<int32_t> {
+  TV_HOST_DEVICE_INLINE
+  static constexpr int32_t lowest() noexcept { return -2147483647 - 1;}
+  TV_HOST_DEVICE_INLINE
+  static constexpr int32_t max() noexcept { return 2147483647;}
+  static constexpr bool is_integer = true;
+};
+
+template <>
+struct numeric_limits<int16_t> {
+  TV_HOST_DEVICE_INLINE
+  static constexpr int16_t lowest() noexcept { return -32768;}
+  TV_HOST_DEVICE_INLINE
+  static constexpr int16_t max() noexcept { return 32767;}
+  static constexpr bool is_integer = true;
+};
+
+template <>
+struct numeric_limits<int8_t> {
+  TV_HOST_DEVICE_INLINE
+  static constexpr int8_t lowest() noexcept { return -128;}
+  TV_HOST_DEVICE_INLINE
+  static constexpr int8_t max() noexcept { return 127;}
+  static constexpr bool is_integer = true;
+};
+
+
+template <>
+struct numeric_limits<uint32_t> {
+  TV_HOST_DEVICE_INLINE
+  static constexpr uint32_t lowest() noexcept { return 0;}
+  TV_HOST_DEVICE_INLINE
+  static constexpr uint32_t max() noexcept { return 4294967295;}
+  static constexpr bool is_integer = true;
+};
+
+template <>
+struct numeric_limits<uint16_t> {
+  TV_HOST_DEVICE_INLINE
+  static constexpr uint16_t lowest() noexcept { return 0;}
+  TV_HOST_DEVICE_INLINE
+  static constexpr uint16_t max() noexcept { return 65535;}
+  static constexpr bool is_integer = true;
+};
+
+template <>
+struct numeric_limits<uint8_t> {
+  TV_HOST_DEVICE_INLINE
+  static constexpr uint8_t lowest() noexcept { return 0;}
+  TV_HOST_DEVICE_INLINE
+  static constexpr uint8_t max() noexcept { return 255;}
+  static constexpr bool is_integer = true;
+};
+
 
 template <typename T>
 TV_HOST_DEVICE_INLINE constexpr const T &min(const T &a, const T &b) {

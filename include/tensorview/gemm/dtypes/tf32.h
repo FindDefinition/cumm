@@ -33,6 +33,7 @@
 #include <limits>
 #include <cstdint>
 #endif
+#include "half.h"
 
 #include <tensorview/core/all.h>
 

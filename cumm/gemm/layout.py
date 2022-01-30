@@ -18,14 +18,14 @@ import numpy as np
 import pccm
 
 from cumm import dtypes
-from cumm.common import GemmBasic, TensorView
+from cumm.common import GemmBasic, TensorView, TensorViewNVRTC
 from cumm.gemm import constants
 
 
 class RowMajorInterleaved(pccm.ParameterizedClass):
     def __init__(self, interleave: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         # self.add_include("tensorview/gemm/core/layout.h")
         self.interleave = interleave
         self.index_t = str(dtypes.int32)
@@ -151,7 +151,7 @@ class ColumnMajorInterleaved(pccm.ParameterizedClass):
         self.static_stride = -1
 
     def python_ctor(self, stride):
-        new_obj = ColumnMajorInterleaved(self.interleave)
+        new_obj = ColumnMajorInterleaved(self.interleave, self.shape)
         new_obj.stride = stride
         return new_obj
 
@@ -182,7 +182,7 @@ class ColumnMajorInterleaved(pccm.ParameterizedClass):
         return code
 
     def from_shape_python(self, shape):
-        l = ColumnMajorInterleaved(self.interleave)
+        l = ColumnMajorInterleaved(self.interleave, self.shape)
         l.stride = shape[0] * self.interleave
         return l
 
@@ -246,7 +246,7 @@ class ColumnMajorInterleaved(pccm.ParameterizedClass):
 class RowMajor(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         # self.add_include("tensorview/gemm/core/layout.h")
         self.index_t = str(dtypes.int32)
         self.long_index_t = str(dtypes.int64)
@@ -339,7 +339,7 @@ class RowMajor(pccm.Class):
 class ColumnMajor(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         # self.add_include("tensorview/gemm/core/layout.h")
         self.index_t = str(dtypes.int32)
         self.long_index_t = str(dtypes.int64)
@@ -442,7 +442,7 @@ class TensorGeneric(pccm.ParameterizedClass):
     """
     def __init__(self, ndim: int, fast_divmod: bool = False):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.fast_divmod = fast_divmod
         self.ndim = ndim
         self.index_t = str(dtypes.int32)

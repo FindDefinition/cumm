@@ -18,7 +18,7 @@ import numpy as np
 import pccm
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, TensorView
+from cumm.common import GemmBasic, TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import bases, constants, core, layout, thread_map
 from cumm.gemm.arch import instmma
@@ -31,7 +31,7 @@ class WarpMmaSimt(bases.WarpMma):
                  trans_b: bool, trans_c: bool):
         # TODO merge mma sync
         super().__init__()
-        self.add_dependency(TensorView, layout.RowMajor, layout.ColumnMajor)
+        self.add_dependency(TensorViewNVRTC, layout.RowMajor, layout.ColumnMajor)
         self.thread_mma_shape = (thread_mma_shape[0], thread_mma_shape[1],
                                  thread_mma_shape[2])
         self.dtype_a = dtype_a

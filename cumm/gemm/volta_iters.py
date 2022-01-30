@@ -18,7 +18,7 @@ import numpy as np
 import pccm
 
 from cumm import dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.cudasim import checkers
 from cumm.gemm import bases, constants, layout, layout_tensorop, thread_map
@@ -36,7 +36,7 @@ class VoltaSmemTileIteratorCrosswise(bases.GemmSmemIterator):
         self.layout = layout_tensorop.VoltaTensorOpCrosswise(dtype.bitsize())
         super().__init__(dtype, tmap.element_per_acc * tmap.iterations.prod(),
                          self.layout.element_per_acc)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
 
         self.tile_shape_km = tile_shape_km
         self.tmap = tmap
@@ -213,7 +213,7 @@ class VoltaSmemTileIteratorCongruous(bases.GemmSmemIterator):
             operand_a, dtype.bitsize())
         super().__init__(dtype, tmap.element_per_acc * tmap.iterations.prod(),
                          self.layout.element_per_acc)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.operand_a = operand_a
         self.tile_shape_km = tile_shape_km
         self.tmap = tmap
@@ -394,7 +394,7 @@ class VoltaWarpTileIteratorCrosswise(bases.GemmWarpIterator):
             self.advance_axis] // self.inst_shape[self.advance_axis]
 
         super().__init__(dtype, element_count, 8)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
 
         self.tile_shape_km = tile_shape_km
         self.warp_tile_shape_km = warp_tile_shape_km
@@ -639,7 +639,7 @@ class VoltaWarpTileIteratorCongruous(bases.GemmWarpIterator):
             self.advance_axis] // self.inst_shape[self.advance_axis]
 
         super().__init__(dtype, element_count, 8)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
 
         self.tile_shape_km = tile_shape_km
         self.warp_tile_shape_km = warp_tile_shape_km

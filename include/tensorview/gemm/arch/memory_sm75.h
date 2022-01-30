@@ -26,7 +26,12 @@
 #pragma once
 #include <tensorview/core/all.h>
 #include <cuda_runtime_api.h>
-#include <cassert>
+
+#if defined(__CUDACC_RTC__)
+#include <cuda/std/cassert>
+#else
+#include <assert.h>
+#endif
 
 namespace tv {
 namespace gemm {

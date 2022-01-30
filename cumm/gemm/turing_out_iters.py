@@ -18,7 +18,7 @@ import numpy as np
 import pccm
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.cudasim import checkers
 from cumm.gemm import bases, constants, layout, thread_map
@@ -52,7 +52,7 @@ class OutFragIterTensorOp(bases.GemmOutFragIterator):
 
         super().__init__(dtype, element_count, self.params.element_per_acc,
                          dtype.bitsize() * self.params.element_per_acc // 8)
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.element_per_acc = self.params.element_per_acc
         self.warp_tile_shape = warp_tile_shape
 
@@ -130,7 +130,7 @@ class OutWarpTileIteratorTensorOp(bases.GemmOutWarpIterator):
 
         super().__init__(dtype, element_count, self.params.element_per_acc,
                          dtype.bitsize() * self.params.element_per_acc // 8)
-        self.add_dependency(TensorView, GemmBasicKernel, layout.RowMajor)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, layout.RowMajor)
 
         self.tile_shape = tile_shape
         self.warp_tile_shape = warp_tile_shape
@@ -274,7 +274,7 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
 
         super().__init__(dtype, element_count, self.params.element_per_acc,
                          dtype.bitsize() * self.params.element_per_acc // 8)
-        self.add_dependency(TensorView, GemmBasicKernel, layout.RowMajor)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, layout.RowMajor)
         self.out_count = out_count
         self.contig_lanes = contig_lanes
         self.spec_s32_168 = dtype == dtypes.int32 and out_count == 16 and tile_shape[
@@ -569,7 +569,7 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
 
         super().__init__(dtype, element_count, num_sub_access,
                          min(16, self.alignment))
-        self.add_dependency(TensorView, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.tile_shape = tile_shape
         self.spec_s32_168 = dtype == dtypes.int32 and access_length == 16 and tile_shape[
