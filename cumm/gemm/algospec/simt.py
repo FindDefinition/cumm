@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -379,23 +379,25 @@ class OutputSimt(bases.Output):
             self.shared_mem_alignment)
         shuffle = shuffle_stride == ShuffleStrideType.ShuffleAC
         out_iter_params = out_iters.OutIteratorParams(self.out_tmap, shuffle)
-        self._out_iter = out_iters.OutIterator(dtype_c,
-                                               self.out_tmap,
-                                               out_iter_params,
-                                               self.part_shape,
-                                               self.part_dilation,
-                                               output_op_count,
-                                               shuffle_in_stride=shuffle,
-                                               access_per_vector=access_per_vector)
-        self._const_out_iter = out_iters.OutIterator(dtype_c,
-                                                     self.out_tmap,
-                                                     out_iter_params,
-                                                     self.part_shape,
-                                                     self.part_dilation,
-                                                     output_op_count,
-                                                     read_only=True,
-                                                     shuffle_in_stride=shuffle,
-                                                     access_per_vector=access_per_vector)
+        self._out_iter = out_iters.OutIterator(
+            dtype_c,
+            self.out_tmap,
+            out_iter_params,
+            self.part_shape,
+            self.part_dilation,
+            output_op_count,
+            shuffle_in_stride=shuffle,
+            access_per_vector=access_per_vector)
+        self._const_out_iter = out_iters.OutIterator(
+            dtype_c,
+            self.out_tmap,
+            out_iter_params,
+            self.part_shape,
+            self.part_dilation,
+            output_op_count,
+            read_only=True,
+            shuffle_in_stride=shuffle,
+            access_per_vector=access_per_vector)
 
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"

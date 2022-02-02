@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -56,7 +56,7 @@ class LinearCombination(bases.GemmOutputOp):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("alpha_", self.dtype_comp, f"{self.dtype_comp}(1)")
         code.arg("beta_", self.dtype_comp, f"{self.dtype_comp}(0)")
         code.ctor_init("alpha", "alpha_")
@@ -79,7 +79,7 @@ class LinearCombination(bases.GemmOutputOp):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def set_k_partition(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("k_part, k_part_count", "int")
         code.raw(f"""
         if (k_part) {{
@@ -97,7 +97,7 @@ class LinearCombination(bases.GemmOutputOp):
                                const=True,
                                name="operator()")
     def call_op_source(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("accumulator", f"{self.fragment_acc_t} const&")
         code.arg("source", f"{self.fragment_out_t} const&")
         code.ret(f"{self.fragment_out_t}")
@@ -149,7 +149,7 @@ class LinearCombination(bases.GemmOutputOp):
                                const=True,
                                name="operator()")
     def call_op_nosource(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("accumulator", f"{self.fragment_acc_t} const&")
         code.ret(f"{self.fragment_out_t}")
         if not CUTLASS_MODE:

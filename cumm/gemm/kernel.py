@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -22,7 +22,8 @@ import pccm
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
 from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                         TensorViewKernel)
+                         TensorViewKernel, TensorViewNVRTC,
+                         TensorViewNVRTCKernel)
 from cumm.constants import (CUTLASS_DEBUG, CUTLASS_INPUT_ITER, CUTLASS_MODE,
                             CUTLASS_OUTPUT_ITER, CUTLASS_SMEM_WARP_ITER)
 from cumm.core_cc.csrc.arrayref import ArrayPtr
@@ -39,6 +40,30 @@ from cumm.gemm.wmma.simt import WarpMmaSimt
 
 def div_up(a, b):
     return (a + b - 1) // b
+
+
+class GemmNVRTCParams(pccm.Class):
+    """used for nvrtc kernels. all ptrs are void*, alpha and beta are float.
+    """
+    def __init__(self):
+        super().__init__()
+        self.add_member("m, n, k", "int")
+        self.add_member("ptr_A", f"const void*")
+        self.add_member("ptr_B", f"const void*")
+        self.add_member("ptr_C", f"void*")
+        self.add_member("ptr_D", f"const void*")
+
+        self.add_member("stride_A", f"int64_t")
+        self.add_member("stride_B", f"int64_t")
+        self.add_member("stride_C", f"int64_t")
+        self.add_member("stride_D", f"int64_t")
+
+        self.add_member("IndiceA", f"const int*")
+        self.add_member("IndiceBorC", f"const int*")
+
+        self.add_member("alpha, beta", f"float")
+        self.add_member("split_k_slice", f"int")
+        self.add_member("workspace", "void*")
 
 
 class GemmParams(pccm.ParameterizedClass):
@@ -58,7 +83,8 @@ class GemmParams(pccm.ParameterizedClass):
             have_workspace: bool = False,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, GemmUtilsCPU)
+
+        self.add_dependency(TensorViewNVRTC, GemmBasic, GemmUtilsCPU)
         self.add_param_class("gemmutils", GemmUtils(tile_shape), "GemmUtils")
         self.itera_params = itera_params
         self.iterb_params = iterb_params
@@ -174,9 +200,9 @@ class GemmParams(pccm.ParameterizedClass):
         new_obj.out_params_ = self.out_params.python_ctor(n)
         return new_obj
 
-    @pccm.cuda.constructor(inline=True)
+    @pccm.cuda.constructor(host=True, device=True, inline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if CUTLASS_MODE:
             code.raw(f"""
             CutlassGemm::ThreadblockSwizzle threadblock_swizzle;
@@ -281,10 +307,10 @@ class GemmParams(pccm.ParameterizedClass):
                 code.raw("out_params_ = OutIterParams(stride_C);")
 
         code.arg("m, n, k", "int")
-        code.arg("A", f" {self.dtype_a}*")
-        code.arg("B", f"{self.dtype_b}*")
+        code.arg("A", f"const {self.dtype_a}*")
+        code.arg("B", f"const {self.dtype_b}*")
         code.arg("C", f"{self.dtype_c}*")
-        code.arg("D", f"{self.dtype_c}*")
+        code.arg("D", f"const {self.dtype_c}*")
         code.arg("stride_A, stride_B, stride_C, stride_D", f"int64_t")
 
         if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
@@ -338,7 +364,8 @@ class GemmKernel(pccm.ParameterizedClass):
             splitk_parallel: bool = False,
             need_source: bool = True,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
-            access_per_vector: int = 1):
+            access_per_vector: int = 1,
+            is_nvrtc: bool = False):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -346,10 +373,9 @@ class GemmKernel(pccm.ParameterizedClass):
         slice K: multiple warp in k axis
         """
         super().__init__()
-        self.add_dependency(TensorView, TensorViewKernel, layout.RowMajor,
-                            layout.ColumnMajor, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
+                            layout.ColumnMajor, GemmBasicKernel, GemmUtilsCPU)
         self.add_param_class("gemmutils", GemmUtils(tile_shape), "GemmUtils")
-
         self.tile_shape = tile_shape
         self.shuffle_stride = shuffle_stride
         self.warp_tile_shape = warp_tile_shape
@@ -359,6 +385,7 @@ class GemmKernel(pccm.ParameterizedClass):
         self.splitk_parallel = splitk_parallel
         self.need_source = need_source
         self.access_per_vector = access_per_vector
+        self.is_nvrtc = is_nvrtc
         transpose_gemm = trans_c
         if transpose_gemm:
             self.dtype_a = dtype_b
@@ -423,7 +450,7 @@ class GemmKernel(pccm.ParameterizedClass):
         # self.out_tile_size = self.out_smem_storage.smem_size // dtype_acc.itemsize() // self.out_num_tile
         if cudasim.enable_debug():
             print(self.out_smem_storage.smem_size,
-                self.gemm_smem_storage.smem_size)
+                  self.gemm_smem_storage.smem_size)
         self.smem_size = max(self.out_smem_storage.smem_size,
                              self.gemm_smem_storage.smem_size)
         self.add_param_class("gemm_smem_storage", self.gemm_smem_storage,
@@ -433,12 +460,13 @@ class GemmKernel(pccm.ParameterizedClass):
         inp_iter_a_param = self.input_spec.input_iter_a.get_params()
         inp_iter_b_param = self.input_spec.input_iter_b.get_params()
         have_workspace = splitk_serial or splitk_parallel
-
+        self.have_workspace = have_workspace
         self.gemm_params = GemmParams(tile_shape, dtype_a, dtype_b, dtype_c,
                                       dtype_comp, trans_a, trans_b, trans_c,
                                       inp_iter_a_param, inp_iter_b_param,
                                       self.output_spec.out_iter.get_params(),
                                       have_workspace, shuffle_stride)
+        self.add_dependency(GemmNVRTCParams)
         self.add_param_class("gemm_params", self.gemm_params, "GemmParams")
 
         self.cutlass_smem_a_type = ("Mma::SmemIteratorA")
@@ -489,7 +517,7 @@ class GemmKernel(pccm.ParameterizedClass):
 
     @pccm.cuda.cuda_global_function  # (inline=True)
     def gemm_kernel(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if CUTLASS_MODE:
             code.arg("params", "CutlassGemm::GemmKernel::Params")
         else:
@@ -498,7 +526,8 @@ class GemmKernel(pccm.ParameterizedClass):
         arch_num = min_arch[0] * 100 + min_arch[1] * 10
         # use __CUDA_ARCH__ macro to reduce binary size
         # TODO this macro can't reduce compile time
-        with code.macro_if_(f"defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= {arch_num})"):
+        with code.macro_if_(
+                f"defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= {arch_num})"):
             if CUTLASS_MODE:
                 code.raw(f"""
                 CutlassGemm::ThreadblockSwizzle threadblock_swizzle;
@@ -543,7 +572,9 @@ class GemmKernel(pccm.ParameterizedClass):
                 int tile_offset_n = blockIdx.y;
                 int tile_offset_k = blockIdx.z;
                 """)
-                with code.if_("tile_offset_m >= params.grid_dims.x || tile_offset_n >= params.grid_dims.y"):
+                with code.if_(
+                        "tile_offset_m >= params.grid_dims.x || tile_offset_n >= params.grid_dims.y"
+                ):
                     code.raw(f"return;")
                 code.raw(f"""
                 tv::array<int, 2> block_offset_A{{tile_offset_m * {self.tile_shape[0]},
@@ -767,14 +798,16 @@ class GemmKernel(pccm.ParameterizedClass):
                             )
                         else:
                             code.raw(
-                                f"out.run(output_op, accumulators, out_iter_C);")
+                                f"out.run(output_op, accumulators, out_iter_C);"
+                            )
                 else:
                     if self.need_source:
                         code.raw(
                             f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
                         )
                     else:
-                        code.raw(f"out.run(output_op, accumulators, out_iter_C);")
+                        code.raw(
+                            f"out.run(output_op, accumulators, out_iter_C);")
 
                 if self.splitk_serial:
                     code.raw(f"""
@@ -798,6 +831,43 @@ class GemmKernel(pccm.ParameterizedClass):
             assert(0);
             """)
         code.macro_endif_()
+        return code
+
+    @pccm.cuda.cuda_global_function
+    def nvrtc_kernel(self):
+        """we must use dynamic parallism first to calculate
+        some kernel meta data, then launch regular kernel.
+
+        """
+        code = pccm.code()
+        if not self.is_nvrtc:
+            # kernel in kernel requires device linking, which isn't supported
+            # by pccm currently.
+            return code.make_invalid()
+        # return code.make_invalid()
+
+        code.arg("p", "GemmNVRTCParams")
+        code.arg("blocks", "dim3")
+        code.arg("stream", "cudaStream_t")
+        indice_args = ""
+        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
+            indice_args = "p.IndiceA, p.IndiceBorC, "
+        workspace_arg = ""
+        if self.have_workspace:
+            workspace_arg = ", p.workspace"
+
+        code.raw(f"""
+        GemmParams params(p.m, p.n, p.k, 
+            reinterpret_cast<const {self.dtype_a}*>(p.ptr_A),
+            reinterpret_cast<const {self.dtype_b}*>(p.ptr_B),
+            reinterpret_cast<{self.dtype_c}*>(p.ptr_C),
+            reinterpret_cast<const {self.dtype_c}*>(p.ptr_D),
+            p.stride_A, p.stride_B, p.stride_C, p.stride_D, {indice_args}
+            {self.dtype_comp}(p.alpha), {self.dtype_comp}(p.beta),
+            p.split_k_slice {workspace_arg});
+
+        gemm_kernel<<<blocks, dim3({self.num_threads}), {self.smem_size}, stream>>>(params);
+        """)
         return code
 
     # @lineprof.lineprof_wrapper

@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import os
 import sys
 from functools import partial
 from pathlib import Path
@@ -26,22 +27,22 @@ from pccm.core import CodeFormatter
 # from myclang import clangformat
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import GemmBasic, TensorView, TensorViewKernel
-from cumm.constants import CUTLASS_MODE
+from cumm.common import CummNVRTCLib, GemmBasic, TensorView, TensorViewKernel
+from cumm.constants import CUMM_MAXIMUM_NVRTC_CONV_NDIM, CUTLASS_MODE
 from cumm.conv import kernel
-from cumm.gemm.kernel import GemmKernel
 from cumm.conv.bases import (NCHW, NHWC, ConvEnum, ConvIterAlgo, ConvLayout,
                              ConvLayoutType, ConvMode, ConvOpType)
-from cumm.conv.params import (ConvProblem, ConvProblemCommon, gemm_abc_012_to_iwo,
-                              conv_iwo_012_to_abc, get_gemm_trans_abc)
+from cumm.conv.params import (ConvProblem, ConvProblemCommon,
+                              conv_iwo_012_to_abc, gemm_abc_012_to_iwo,
+                              get_gemm_trans_abc)
 from cumm.core_cc.csrc.arrayref import ArrayPtr
+from cumm.gemm import codeops
 from cumm.gemm.algospec import GemmAlgo
 from cumm.gemm.algospec.core import TensorOpParams
 from cumm.gemm.core.metaarray import MetaArray
-from cumm.gemm.main import GemmAlgoParams, GemmAlgoDesp, GemmMainUnitTest, GemmParams
-from cumm.gemm import codeops 
-import os
-
+from cumm.gemm.kernel import GemmKernel, GemmUtilsCPU
+from cumm.gemm.main import (GemmAlgoDesp, GemmAlgoParams, GemmMainUnitTest,
+                            GemmParams, NVRTCMode, NVRTCParams)
 
 
 class ConvAlgoDesp(GemmAlgoDesp):
@@ -52,7 +53,8 @@ class ConvAlgoDesp(GemmAlgoDesp):
         self.add_pybind_member("op_type", "int")
         self.add_pybind_member("iter_algo", "int")
         self.add_pybind_member("layout_i, layout_w, layout_o", "int")
-        self.add_pybind_member("interleave_i, interleave_w, interleave_o", "int")
+        self.add_pybind_member("interleave_i, interleave_w, interleave_o",
+                               "int")
         self.add_pybind_member("mask_sparse", "bool", "false")
         self.add_pybind_member("increment_k_first", "bool", "false")
 
@@ -62,7 +64,7 @@ class ConvAlgoDesp(GemmAlgoDesp):
     @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("ndim", "int")
         code.arg("op_type", "int")
         code.ctor_init("GemmAlgoDesp", "")
@@ -82,7 +84,7 @@ class ConvAlgoDesp(GemmAlgoDesp):
     @pccm.pybind.mark
     @pccm.member_function(name="__repr__")
     def repr(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         check_valid();
         std::stringstream ss;
@@ -112,7 +114,7 @@ class ConvAlgoDesp(GemmAlgoDesp):
     @pccm.pybind.mark
     @pccm.static_function
     def conv_iwo_012_to_abc(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("op_type", "int")
         code.raw(f"""
         if (op_type == {ConvOpType.kForward.value}){{
@@ -128,11 +130,10 @@ class ConvAlgoDesp(GemmAlgoDesp):
         """)
         return code.ret("std::array<int, 3>")
 
-
     @pccm.pybind.mark
     @pccm.static_function
     def gemm_abc_012_to_iwo(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("op_type", "int")
         code.raw(f"""
         if (op_type == {ConvOpType.kForward.value}){{
@@ -148,11 +149,10 @@ class ConvAlgoDesp(GemmAlgoDesp):
         """)
         return code.ret("std::array<int, 3>")
 
-
     @pccm.pybind.mark_prop_getter(prop_name="dtype_input")
     @pccm.member_function
     def dtype_input(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
         return dtypes[conv2gemm_inds[0]];
@@ -162,27 +162,27 @@ class ConvAlgoDesp(GemmAlgoDesp):
     @pccm.pybind.mark_prop_getter(prop_name="dtype_weight")
     @pccm.member_function
     def dtype_weight(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
         return dtypes[conv2gemm_inds[1]];
         """)
         return code.ret("int")
-    
+
     @pccm.pybind.mark_prop_getter(prop_name="dtype_output")
     @pccm.member_function
     def dtype_output(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
         return dtypes[conv2gemm_inds[2]];
         """)
         return code.ret("int")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.member_function
     def supported(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("m,n,k, C, K, mask_width", "int")
         code.raw(f"""
         bool res = GemmAlgoDesp::supported(m, n, k);
@@ -205,10 +205,10 @@ class ConvAlgoDesp(GemmAlgoDesp):
         """)
         return code.ret("bool")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.member_function
     def query_conv_workspace_size(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("m,n,k,split_k_slices,kv", "int")
         code.raw(f"""
         if (!mask_sparse){{
@@ -230,10 +230,10 @@ class ConvAlgoDesp(GemmAlgoDesp):
         """)
         return code.ret("int")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.member_function
     def supported_ldx_conv(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("ldi, ldw, ldo", "int")
         code.raw(f"""
         bool res = true;
@@ -255,12 +255,15 @@ class ConvAlgoDesp(GemmAlgoDesp):
         """)
         return code.ret("bool")
 
+
 class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(ConvAlgoDesp)
+        self.add_dependency(ConvAlgoDesp, CummNVRTCLib, NVRTCParams)
         self.add_pybind_member("conv_algo_desp", "ConvAlgoDesp")
-        self.add_pybind_member("input,weight,output", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
+        self.add_pybind_member("input,weight,output",
+                               "tv::Tensor",
+                               pyanno="cumm.tensorview.Tensor")
         self.add_pybind_member("split_k_slices", "int", "1")
         self.add_pybind_member("padding,stride,dilation", "std::vector<int>")
         self.add_pybind_member("alpha,beta", "float")
@@ -268,7 +271,10 @@ class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_pybind_member("mask_filter", "uint32_t")
         self.add_pybind_member("reverse_mask", "bool")
         self.add_pybind_member("verbose", "bool")
-        self.add_pybind_member("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer")
+        self.add_pybind_member("timer",
+                               "tv::CUDAKernelTimer",
+                               "tv::CUDAKernelTimer(false)",
+                               pyanno="cumm.tensorview.CUDAKernelTimer")
 
         self.add_pybind_member("workspace",
                                "tv::Tensor",
@@ -291,14 +297,28 @@ class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
                                "tv::Tensor()",
                                pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("stream", "std::uintptr_t", "0", pyanno="int")
+        self.add_pybind_member("nvrtc_params", "NVRTCParams", "NVRTCParams()")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def create_nvrtc_params(self):
+        code = pccm.code()
+        code.raw(f"""
+        return NVRTCParams();
+        """)
+        return code.ret("NVRTCParams")
 
     @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("ndim", "int")
         code.arg("op_type", "int")
-        code.arg("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer = CUDAKernelTimer(False)")
+        code.arg(
+            "timer",
+            "tv::CUDAKernelTimer",
+            "tv::CUDAKernelTimer(false)",
+            pyanno="cumm.tensorview.CUDAKernelTimer = CUDAKernelTimer(False)")
 
         code.ctor_init("conv_algo_desp", "ndim, op_type")
         code.ctor_init("input", "tv::Tensor()")
@@ -342,8 +362,18 @@ class ConvAlgoParams(GemmAlgoParams):
                  increment_k_first: bool = False,
                  access_per_vector: int = 1):
         trans_a, trans_b, trans_c = get_gemm_trans_abc(op_type)
-        super().__init__(ts, wts, num_stage, dtype_shorts, trans_a, trans_b, 
-            trans_c, algo, tensorop, splitk_serial, splitk_parallel, access_per_vector=access_per_vector)
+        super().__init__(ts,
+                         wts,
+                         num_stage,
+                         dtype_shorts,
+                         trans_a,
+                         trans_b,
+                         trans_c,
+                         algo,
+                         tensorop,
+                         splitk_serial,
+                         splitk_parallel,
+                         access_per_vector=access_per_vector)
         self.ndim = ndim
         self.op_type = op_type
         self.iter_algo = iter_algo
@@ -362,9 +392,9 @@ class ConvAlgoParams(GemmAlgoParams):
 
     def skipped(self):
         if self.op_type != ConvOpType.kForward and self.dtype_a.itemsize(
-            ) == 1:
+        ) == 1:
             return True
-            
+
         return super().skipped()
 
     def get_algo_name(self):
@@ -399,37 +429,27 @@ def gen_gemm_params(op_types: List[ConvOpType],
     for dts in dtypes_string:
         for op_type in op_types:
             if op_type == ConvOpType.kBackwardWeight:
-                p = ConvAlgoParams(ndim,
-                                op_type,
-                                iter_algo,
-                                ts,
-                                wts,
-                                stage,
-                                dts,
-                                li,
-                                lw,
-                                lo,
-                                algo,
-                                tensorop,
-                                True,
-                                splitk_parallel,
-                                mask_sparse,
-                                increment_k_first,
-                                access_per_vector)
+                p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
+                                   dts, li, lw, lo, algo, tensorop, True,
+                                   splitk_parallel, mask_sparse,
+                                   increment_k_first, access_per_vector)
             else:
                 p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
-                                dts, li, lw, lo, algo, tensorop,
-                                splitk_serial, splitk_parallel, mask_sparse,
-                                increment_k_first,
-                                access_per_vector)
+                                   dts, li, lw, lo, algo, tensorop,
+                                   splitk_serial, splitk_parallel, mask_sparse,
+                                   increment_k_first, access_per_vector)
 
             if not p.skipped():
                 res.append(p)
     return res
 
+
 ConvFwdAndBwdInput = [ConvOpType.kForward, ConvOpType.kBackwardInput]
 ConvBwdWeight = [ConvOpType.kBackwardWeight]
-ConvAllOp = [ConvOpType.kForward, ConvOpType.kBackwardInput, ConvOpType.kBackwardWeight]
+ConvAllOp = [
+    ConvOpType.kForward, ConvOpType.kBackwardInput, ConvOpType.kBackwardWeight
+]
+
 
 def gen_spwgrad_params(ts,
                        wts,
@@ -447,27 +467,15 @@ def gen_spwgrad_params(ts,
                        mask_sparse: bool = False,
                        increment_k_first: bool = False,
                        access_per_vector: int = 1):
-    p = ConvAlgoParams(ndim,
-                       ConvOpType.kBackwardWeight,
-                       iter_algo,
-                       ts,
-                       wts,
-                       stage,
-                       dtypes_string,
-                       li,
-                       lw,
-                       lo,
-                       algo,
-                       tensorop,
-                       True,
-                       splitk_parallel,
-                       mask_sparse,
-                       increment_k_first,
+    p = ConvAlgoParams(ndim, ConvOpType.kBackwardWeight, iter_algo, ts, wts,
+                       stage, dtypes_string, li, lw, lo, algo, tensorop, True,
+                       splitk_parallel, mask_sparse, increment_k_first,
                        access_per_vector)
     return [p]
 
 
-def gen_gemm_kernels(params: ConvAlgoParams):
+def gen_gemm_kernels(params: ConvAlgoParams,
+                     nvrtc_mode: NVRTCMode = NVRTCMode.Disabled):
     return kernel.ConvKernel(params.ndim,
                              params.op_type,
                              params.iter_algo,
@@ -488,16 +496,22 @@ def gen_gemm_kernels(params: ConvAlgoParams):
                              splitk_parallel=params.splitk_parallel,
                              mask_sparse=params.mask_sparse,
                              increment_k_first=params.increment_k_first,
-                             access_per_vector=params.access_per_vector)
+                             access_per_vector=params.access_per_vector,
+                             nvrtc_mode=nvrtc_mode)
+
 
 SHUFFLE_SIMT_PARAMS = []
 
 SHUFFLE_VOLTA_PARAMS = []
 SHUFFLE_TURING_PARAMS = []
+
+
 class ConvMainUnitTest(pccm.Class):
     def __init__(self, conv_params: Optional[List[ConvAlgoParams]] = None):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvParams, ConvProblemCommon)
+        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvParams,
+                            ConvProblemCommon, kernel.ConvNVRTCParams,
+                            GemmUtilsCPU, NVRTCParams)
         # unit test params: [ts, wts, stage, dtypes, trans, algo, tensorop]
         if conv_params is None:
             is_debug = os.getenv("CUMM_DEBUG", None)
@@ -509,32 +523,37 @@ class ConvMainUnitTest(pccm.Class):
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True),
                     # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
-                    
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32),
+                                     (32, 32, 32), 3, ConvIterAlgo.Optimized,
+                                     2, "f16,f16,f16,f32,f32", NHWC, NHWC,
+                                     NHWC, GemmAlgo.Turing,
+                                     TensorOpParams((16, 8, 8))),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16),
+                                     (32, 32, 8), 3, ConvIterAlgo.Optimized, 2,
+                                     "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC,
+                                     GemmAlgo.Simt, None),
+
                     # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
                     # *gen_gemm_params(ConvBwdWeight, (128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 64, 32), (32, 32, 16), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 64, 32), (32, 32, 16), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
 
-                    *gen_gemm_params(ConvBwdWeight, (128, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvBwdWeight, (128, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
                     # *gen_gemm_params(ConvBwdWeight, (64, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
                     # *gen_gemm_params(ConvBwdWeight, (128, 64, 32), (64, 32, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
@@ -545,7 +564,7 @@ class ConvMainUnitTest(pccm.Class):
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
                     # *gen_gemm_params(ConvBwdWeight, (128, 256, 32), (64, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    
+
                     # *gen_gemm_params(ConvFwdAndBwdInput, (64, 64, 32), (32, 32, 16), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOpParams((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
                     # *gen_gemm_params(ConvFwdAndBwdInput, (64, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
@@ -587,14 +606,12 @@ class ConvMainUnitTest(pccm.Class):
                     # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", GemmAlgo.Simt, None),
                     # *gen_gemm_params((128, 128, 32), (32, 64, 32), 2, "s8,s8,s32,s32,s32", GemmAlgo.SimtDP4A, None),
                 ]  # type: List[ConvAlgoParams]
-                volta_params: List[ConvAlgoParams] = [
-                ]
-                turing_params: List[ConvAlgoParams] = [
-                ]
+                volta_params: List[ConvAlgoParams] = []
+                turing_params: List[ConvAlgoParams] = []
             else:
                 simt_params: List[ConvAlgoParams] = [
                     *SHUFFLE_SIMT_PARAMS,
-                ] 
+                ]
                 volta_params: List[ConvAlgoParams] = [
                     *SHUFFLE_VOLTA_PARAMS,
                 ]
@@ -609,27 +626,33 @@ class ConvMainUnitTest(pccm.Class):
             self.all_params = conv_params
             self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
         self.ker_names = [k.get_algo_name() for k in self.all_kernels]
-        assert len(set(self.ker_names)) == len(self.ker_names), "kernel must unique"
+        assert len(set(self.ker_names)) == len(
+            self.ker_names), "kernel must unique"
 
     @staticmethod
     def _get_layout_types(ker: kernel.ConvKernel):
         p = ker.problem
-        return (p.layout_desp_input.layout_type, p.layout_desp_weight.layout_type, p.layout_desp_output.layout_type)
-    
+        return (p.layout_desp_input.layout_type,
+                p.layout_desp_weight.layout_type,
+                p.layout_desp_output.layout_type)
+
     @staticmethod
     def _get_layout_interleaves(ker: kernel.ConvKernel):
         p = ker.problem
-        return (p.layout_desp_input.interleave, p.layout_desp_weight.interleave, p.layout_desp_output.interleave)
+        return (p.layout_desp_input.interleave,
+                p.layout_desp_weight.interleave,
+                p.layout_desp_output.interleave)
 
     @staticmethod
     def _get_sparse_params(ker: kernel.ConvKernel):
         return (ker.mask_sparse, ker.increment_k_first)
 
-
     @staticmethod
-    def conv_select_helper_stage1(kernels: List[kernel.ConvKernel], code: pccm.FunctionCode):
+    def conv_select_helper_stage1(kernels: List[kernel.ConvKernel],
+                                  code: pccm.FunctionCode):
         ndim_op_iter_to_kers = codeops.group_by(
-            lambda x: (x.problem.ndim, x.problem.op_type, x.iter_algo), kernels)
+            lambda x: (x.problem.ndim, x.problem.op_type, x.iter_algo),
+            kernels)
         for ndim_op_iter, ndim_op_iter_kers in ndim_op_iter_to_kers.items():
             if_tests = [
                 f"algo_desp.ndim == {ndim_op_iter[0]}",
@@ -647,8 +670,10 @@ class ConvMainUnitTest(pccm.Class):
                     ]
                     with code.if_(" && ".join(if_tests)):
                         lii_lwi_loi_to_kers = codeops.group_by(
-                            ConvMainUnitTest._get_layout_interleaves, lilwlo_kers)
-                        for liilwiloi, liilwiloi_kers in lii_lwi_loi_to_kers.items():
+                            ConvMainUnitTest._get_layout_interleaves,
+                            lilwlo_kers)
+                        for liilwiloi, liilwiloi_kers in lii_lwi_loi_to_kers.items(
+                        ):
                             if_tests = [
                                 f"algo_desp.interleave_i == {liilwiloi[0]}",
                                 f"algo_desp.interleave_w == {liilwiloi[1]}",
@@ -656,9 +681,13 @@ class ConvMainUnitTest(pccm.Class):
                             ]
                             with code.if_(" && ".join(if_tests)):
                                 ms_ikf_mw_to_kers = codeops.group_by(
-                                    ConvMainUnitTest._get_sparse_params, liilwiloi_kers)
-                                for ms_ikf_mw, ms_ikf_mw_kers in ms_ikf_mw_to_kers.items():
-                                    assert len(ms_ikf_mw_kers) == 1, "find multiple kernels for one configuration"
+                                    ConvMainUnitTest._get_sparse_params,
+                                    liilwiloi_kers)
+                                for ms_ikf_mw, ms_ikf_mw_kers in ms_ikf_mw_to_kers.items(
+                                ):
+                                    assert len(
+                                        ms_ikf_mw_kers
+                                    ) == 1, "find multiple kernels for one configuration"
                                     if_tests = [
                                         f"algo_desp.mask_sparse == {pccm.boolean(ms_ikf_mw[0])}",
                                         f"algo_desp.increment_k_first == {pccm.boolean(ms_ikf_mw[1])}",
@@ -666,16 +695,17 @@ class ConvMainUnitTest(pccm.Class):
                                     with code.if_(" && ".join(if_tests)):
                                         yield ms_ikf_mw_kers
 
-
     @staticmethod
-    def conv_select_helper(kernels: List[Union[kernel.ConvKernel]], code: pccm.FunctionCode):
-        for kers in GemmMainUnitTest.matmul_select_helper_stage2(kernels, code, False, False):
+    def conv_select_helper(kernels: List[Union[kernel.ConvKernel]],
+                           code: pccm.FunctionCode):
+        for kers in GemmMainUnitTest.matmul_select_helper_stage2(
+                kernels, code, False, False):
             yield from ConvMainUnitTest.conv_select_helper_stage1(kers, code)
 
     @pccm.pybind.mark
     @pccm.static_function
     def extract_mnk(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("op_type", "int")
         code.arg("N, C, K", "int")
         code.arg("kernel_volume, in_prod, out_prod", "int")
@@ -691,15 +721,15 @@ class ConvMainUnitTest(pccm.Class):
     @pccm.pybind.mark
     @pccm.cuda.static_function
     def implicit_gemm2(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         for p, ker in zip(self.all_params, self.all_kernels):
             code.add_param_class("cp" + ker.get_algo_name(), ker.gemm_params,
                                  "ConvParams" + ker.get_algo_name())
             code.add_param_class(ker.get_algo_name(), ker,
                                  "Conv" + ker.get_algo_name())
-        code.arg("params",
-                 "ConvParams",
-                 pyanno="ConvParams")
+        code.arg("params", "ConvParams", pyanno="ConvParams")
+        code.add_dependency(TensorViewKernel)
+        ch_first = ConvLayoutType.ChannelFirst.value
         code.raw(f"""
         // auto rtxtimer = tv::CPUTimer<>();
         int groups = 1;
@@ -728,6 +758,231 @@ class ConvMainUnitTest(pccm.Class):
         auto dilation = params.dilation;
         auto mask_width = params.mask_width;
         auto evtimer = params.timer;
+        int io_dim = algo_desp.mask_sparse ? 2 : algo_desp.ndim + 2;
+        int weight_ndim = algo_desp.mask_sparse ? 3 : algo_desp.ndim + 2;
+        int dim_start =  algo_desp.layout_w == {ch_first} ? 2 : 1;
+        int ndim = algo_desp.ndim;
+        TV_ASSERT_RT_ERR(input.ndim() == io_dim, "error");
+        TV_ASSERT_RT_ERR(weight.ndim() == weight_ndim, "error");
+        TV_ASSERT_RT_ERR(output.ndim() == io_dim, "error");
+        if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) and split_k_slices > 1){{
+            TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
+        }}
+        int kernel_volume = 1;
+        int N = input.dim(0);
+        int K = weight.dim(0);
+        int C = algo_desp.layout_i == {ch_first} ? input.dim(1) : input.dim(io_dim - 1);
+        int K2 = algo_desp.layout_o == {ch_first} ? output.dim(1) : output.dim(io_dim - 1);
+        TV_ASSERT_RT_ERR(K2 == K, "error");
+        tv::array<int, 3> mnk;
+        auto inv_indices = ConvProblemCommon::gemm_abc_012_to_iwo(ConvEnum::OpType(algo_desp.op_type));
+        std::vector<tv::Tensor> conv_inputs{{input, weight, output}};
+        auto a_ten = conv_inputs[inv_indices[0]];
+        auto b_ten = conv_inputs[inv_indices[1]];
+        auto c_ten = conv_inputs[inv_indices[2]];
+        auto& nvrtc_params = params.nvrtc_params;
+        ConvNVRTCParams kernel_params;
+        kernel_params.ptr_A = a_ten.raw_data();
+        kernel_params.ptr_B = b_ten.raw_data();
+        kernel_params.ptr_C = c_ten.raw_data();
+        kernel_params.ptr_D = c_ten.raw_data();
+        kernel_params.alpha = params.alpha;
+        kernel_params.beta = params.beta;
+        kernel_params.ndim = ndim;
+
+        if (algo_desp.mask_sparse){{
+            if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
+                TV_ASSERT_RT_ERR(mask_width > 0 && mask_width % algo_desp.tile_shape[2] == 0, "error");
+
+            }}
+            TV_ASSERT_RT_ERR(!indices.empty(), "error");
+            TV_ASSERT_RT_ERR(!mask.empty(), "error");
+            TV_ASSERT_RT_ERR(!mask_argsort.empty(), "error");
+            kernel_volume = weight.dim(dim_start);
+            tv::check_shape(indices, {{kernel_volume, -1}});
+            N = indices.dim(1);
+            if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
+                TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_b) / 8 < std::numeric_limits<int32_t>::max(), 
+                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+
+            }}else if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
+                TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+            }}else{{
+                    TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+                        "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                    TV_ASSERT_RT_ERR(N == input.dim(0), "error");
+
+            }}
+            mnk = ConvProblemCommon::implicit_gemm_mnk(ConvEnum::OpType(algo_desp.op_type), N, C, K, kernel_volume, -1, -1, true);
+        }}else{{
+            TV_ASSERT_RT_ERR(algo_desp.ndim <= {CUMM_MAXIMUM_NVRTC_CONV_NDIM}, "ndim too large");
+            tv::array<int, {CUMM_MAXIMUM_NVRTC_CONV_NDIM}> ksize, padding_arr, stride_arr, dilation_arr, input_dims, output_dims;
+            TV_ASSERT_RT_ERR(ndim == padding.size() && ndim == stride.size() && ndim == dilation.size(), "error");
+            for (int i = dim_start; i < dim_start + ndim; ++i){{
+                ksize[i - dim_start] = weight.dim(i);
+                input_dims[i - dim_start] = input.dim(i);
+                output_dims[i - dim_start] = output.dim(i);
+            }}
+            for (int i = 0; i < ndim; ++i){{
+                padding_arr[i] = padding[i];
+                stride_arr[i] = stride[i];
+                dilation_arr[i] = dilation[i];
+            }}
+            kernel_volume = 1;
+            int in_prod = 1;
+            int out_prod = 1;
+            for (int i = 0; i < ndim; ++i){{
+                kernel_volume *= ksize[i];
+                in_prod *= input_dims[i];
+                out_prod *= output_dims[i];
+            }}
+            mnk = ConvProblemCommon::implicit_gemm_mnk(ConvEnum::OpType(algo_desp.op_type), N, C, K, kernel_volume, in_prod, out_prod, false);
+            kernel_params.input_dims = input_dims;
+            kernel_params.output_dims = output_dims;
+            kernel_params.ksize = ksize;
+            kernel_params.padding = padding_arr;
+            kernel_params.stride = stride_arr;
+            kernel_params.dilation = dilation_arr;
+        }}
+        TV_ASSERT_RT_ERR(algo_desp.supported(mnk[0], mnk[1], mnk[2], C, K, mask_width), "error");
+
+        int workspace_size = algo_desp.query_conv_workspace_size(mnk[0], mnk[1], mnk[2], split_k_slices, kernel_volume);
+
+        auto ctx = tv::Context();
+        ctx.set_cuda_stream(reinterpret_cast<cudaStream_t>(params.stream));
+        if (workspace_size > 0){{
+            if (!workspace.empty()){{
+                workspace.zero_(ctx);
+                TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
+                    "workspace at least", workspace_size, "bytes.");
+            }}else{{
+                workspace = tv::empty({{workspace_size}}, tv::uint8, 0);
+                workspace.zero_(ctx);
+            }}
+        }}
+        void* workspace_ptr = nullptr;
+        if (workspace.empty()){{
+            workspace_ptr = workspace.raw_data();
+        }}
+        if (nvrtc_params.module){{
+            TV_ASSERT_RT_ERR(nvrtc_params.kernel_name != "", "you must provide name of your kernel");
+            kernel_params.N = N;
+            kernel_params.C = C;
+            kernel_params.K = K;
+            kernel_params.kernel_volume = kernel_volume;
+            kernel_params.mode = ConvEnum::Mode::kCrossCorrelation;
+            kernel_params.split_k_slices = split_k_slices;
+            kernel_params.groups = groups;
+            kernel_params.workspace = workspace_ptr;
+
+            tv::array<int, 3> grid_dims_arr;
+            if (algo_desp.mask_sparse){{
+                kernel_params.C = C;
+                kernel_params.mask_out_ptr = mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>();
+                kernel_params.mask_width = mask_width;
+                kernel_params.mask_ptr = mask.data_ptr<uint32_t>();
+                kernel_params.reverse_mask = params.reverse_mask;
+                kernel_params.mask_filter = params.mask_filter;
+                grid_dims_arr = ConvUtils::get_spconv_logical_tile_count(mnk[0], mnk[1], mnk[2], 
+                                algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices, kernel_volume, algo_desp.op_type);
+            }}else{{
+                grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(mnk[0], mnk[1], mnk[2], 
+                                algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices);
+
+            }}
+            dim3 grid_dims;
+            grid_dims.x = grid_dims_arr[0];
+            grid_dims.y = grid_dims_arr[1];
+            grid_dims.z = grid_dims_arr[2];
+            if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
+                int num_reduced_mask = tv::div_up(kernel_params.N, kernel_params.mask_width);
+                TV_ASSERT_RT_ERR(mask.dim(0) >= num_reduced_mask, "error");
+            }}
+            std::string algo_name = algo_desp.__repr__();
+            auto kernel = nvrtc_params.module->kernel(nvrtc_params.kernel_name);
+            cudaStream_t stream = reinterpret_cast<cudaStream_t>(params.stream);
+            if (nvrtc_params.mode == {NVRTCMode.DynamicParallism.value}){{
+                {{
+                    tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
+                    std::vector<void*> args{{&kernel_params, &grid_dims, &params.stream}};
+                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, 1, 1, 1, 
+                        1, 1, 1, 0, stream, args.data(), 0));
+                }}
+
+            }}else if (nvrtc_params.mode == {NVRTCMode.KernelAndCPU.value}){{
+                // use kernel-cpu-kernel
+                auto init_kernel = nvrtc_params.module->kernel(nvrtc_params.init_kernel_name);
+                tv::Tensor temp_data = nvrtc_params.param_storage;
+                if (nvrtc_params.param_storage.empty()){{
+                    temp_data = tv::empty({{nvrtc_params.param_size}}, tv::uint8, 0);
+                }}else{{
+                    TV_ASSERT_RT_ERR(temp_data.nbytes() >= nvrtc_params.param_size, "your params storage too small");
+                }}
+                void* raw_data_ptr;
+                void* temp_data_ptr = temp_data.raw_data();
+                tv::Tensor temp_data_cpu = nvrtc_params.param_storage_cpu;
+
+                {{
+                    tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
+                    std::vector<void*> args{{&kernel_params, &temp_data_ptr}};
+                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
+                    if (nvrtc_params.param_storage_cpu.empty()){{
+                        temp_data_cpu = temp_data.cpu(ctx);
+                    }}else{{
+                        temp_data_cpu.copy_(temp_data, ctx);
+                    }}
+                    // we must sync here because following kernel launch requires cpu data.
+                    checkCudaErrors(cudaStreamSynchronize(stream));
+                    raw_data_ptr = temp_data_cpu.raw_data();
+                }}
+                {{
+                    tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
+                    std::vector<void*> args{{raw_data_ptr}};
+                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
+                        nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
+                }}
+            }}else if (nvrtc_params.mode == {NVRTCMode.Direct.value}){{
+                tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
+                std::vector<void*> args{{&kernel_params}};
+                TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
+                    nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
+
+            }}else if (nvrtc_params.mode == {NVRTCMode.ConstantMemory.value}){{
+                auto init_kernel = nvrtc_params.module->kernel(nvrtc_params.init_kernel_name);
+                tv::Tensor temp_data = nvrtc_params.param_storage;
+                if (nvrtc_params.param_storage.empty()){{
+                    temp_data = tv::empty({{nvrtc_params.param_size}}, tv::uint8, 0);
+                }}else{{
+                    TV_ASSERT_RT_ERR(temp_data.nbytes() >= nvrtc_params.param_size, "your params storage too small");
+                }}
+                void* temp_data_ptr = temp_data.raw_data();
+                {{
+                    tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
+                    std::vector<void*> args{{&kernel_params, &temp_data_ptr}};
+                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
+                }}
+                {{
+                    tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
+                    auto ptr = nvrtc_params.module->get_global_ptr(nvrtc_params.constant_name);
+                    auto constant_ten = tv::from_blob(ptr, {{nvrtc_params.param_size}}, tv::uint8, 0);
+                    constant_ten.copy_(temp_data, ctx);
+                    std::vector<void*> args{{}};
+                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
+                        nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
+                }}
+
+            }}else{{
+                TV_THROW_RT_ERR("not implemented");
+            }}
+            TV_CHECK_CUDA_ERR_V2(algo_name, "error with params", input.shape(), output.shape(), weight.shape());
+            return;
+        }}
+
         """)
 
         for kers in self.conv_select_helper(self.all_kernels, code):
@@ -758,15 +1013,6 @@ class ConvMainUnitTest(pccm.Class):
             code.raw(f"""
             // {ker.get_algo_name()}
             found = true;
-            TV_ASSERT_RT_ERR(input.ndim() == {io_ndim}, "error");
-            TV_ASSERT_RT_ERR(weight.ndim() == {weight_ndim}, "error");
-            TV_ASSERT_RT_ERR(output.ndim() == {io_ndim}, "error");
-            int N = input.dim(0);
-            int C = {'input.dim(1)' if p.layout_desp_input.is_channel_first() else f'input.dim({io_ndim - 1})'};
-            int K = weight.dim(0);
-            int K2 = {'output.dim(1)' if p.layout_desp_output.is_channel_first() else f'output.dim({io_ndim - 1})'};
-            TV_ASSERT_RT_ERR(K2 == K, "error");
-            tv::array<int, {p.ndim}> input_dims, output_dims;
             """)
             if p.mask_sparse:
                 if p.op_type == ConvOpType.kBackwardWeight:
@@ -806,6 +1052,7 @@ class ConvMainUnitTest(pccm.Class):
                     """)
             else:
                 code.raw(f"""
+                tv::array<int, {p.ndim}> input_dims, output_dims;
                 tv::array<int, {p.ndim}> ksize;
                 TV_ASSERT_RT_ERR({p.ndim} == padding.size() && {p.ndim} == stride.size() && {p.ndim} == dilation.size(), "error");
                 for (int i = {dim_start}; i < {dim_start + p.ndim}; ++i){{
@@ -824,37 +1071,11 @@ class ConvMainUnitTest(pccm.Class):
                 {param_cls_ns}::ConvProblem problem(N, C, K, input_dims, output_dims, ksize, padding_arr, stride_arr, dilation_arr, 
                     ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
                 """)
-            code.raw(f"""
-            auto mnk = problem.implicit_gemm_mnk(op_type);
-            TV_ASSERT_RT_ERR(algo_desp.supported(mnk[0], mnk[1], mnk[2], C, K, mask_width), "error");
-
-            int workspace_size = algo_desp.query_conv_workspace_size(mnk[0], mnk[1], mnk[2], split_k_slices, kernel_volume);
-
-            auto ctx = tv::Context();
-            ctx.set_cuda_stream(reinterpret_cast<cudaStream_t>(params.stream));
-            if (workspace_size > 0){{
-                if (!workspace.empty()){{
-                    workspace.zero_(ctx);
-                    TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
-                        "workspace at least", workspace_size, "bytes.");
-                }}else{{
-                    workspace = tv::empty({{workspace_size}}, tv::uint8, 0);
-                    workspace.zero_(ctx);
-                }}
-            }}
-            """)
-            input_names = ["input", "weight", "output"]
-            input_names = [input_names[i] for i in inv_indices]
-            code.raw(f"""
-            auto a_ten = {input_names[0]};
-            auto b_ten = {input_names[1]};
-            auto c_ten = {input_names[2]};
-            """)
             if p.mask_sparse:
                 mask_out_ptr = "mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>(), "
                 if p.op_type != ConvOpType.kForward:
                     mask_out_ptr = ""
-                
+
                 mask_width_str = "mask_width,"
                 if p.op_type != ConvOpType.kBackwardWeight:
                     mask_width_str = ""
@@ -933,11 +1154,11 @@ class ConvMainUnitTest(pccm.Class):
         }
         """)
         return code
-    
+
     @pccm.pybind.mark
     @pccm.static_function
     def get_all_conv_algo_desp(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         std::vector<ConvAlgoDesp> desps;
         """)
@@ -992,7 +1213,8 @@ class ConvMainUnitTest(pccm.Class):
         code.raw(f"""
         return desps;
         """)
-        return code.ret("std::vector<ConvAlgoDesp>", pyanno="List[ConvAlgoDesp]")
+        return code.ret("std::vector<ConvAlgoDesp>",
+                        pyanno="List[ConvAlgoDesp]")
 
     # @lineprof.lineprof_wrapper_cpp
     def implicit_gemm_python(self,

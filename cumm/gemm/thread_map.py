@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,9 +17,9 @@ from typing import List
 
 import numpy as np
 import pccm
-from cumm import cudasim
-from cumm import dtypes
-from cumm.common import TensorView
+
+from cumm import cudasim, dtypes
+from cumm.common import TensorViewNVRTC
 from cumm.gemm import constants
 from cumm.gemm.core import MetaArray, metaseq, seq
 
@@ -150,7 +150,7 @@ class PitchLinear(InputThreadMapBase):
     def __init__(self, tile_shape: MetaArray[int],
                  sub_tile_shape: MetaArray[int], num_threads: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.tile_shape = tile_shape
         self.sub_tile_shape = sub_tile_shape
         self.num_threads = num_threads
@@ -192,7 +192,7 @@ class PitchLinearWarpRaked(InputThreadMapBase):
                  sub_tile_shape: MetaArray[int], warp_shape: MetaArray[int],
                  num_threads: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.tile_shape = tile_shape
         self.sub_tile_shape = sub_tile_shape
         self.num_threads = num_threads
@@ -337,7 +337,7 @@ class Out5DLinear(pccm.ParameterizedClass):
                  part_dilation: MetaArray[int], warp_count: int,
                  element_per_acc: int):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
         self.part_shape = part_shape
         self.part_dilation = part_dilation
         iterations = partition_iteration(part_shape[1:4], warp_count)
@@ -363,8 +363,8 @@ class Out5DLinear(pccm.ParameterizedClass):
         self.iterations = metaseq(1, iterations[0], iterations[1], iters2d[0],
                                   iters2d[1])
         if cudasim.enable_debug():
-            print(self.remain, warp_count, self.warp_parts, part_shape, iterations,
-                self.iterations, iters2d, acc_shape)
+            print(self.remain, warp_count, self.warp_parts, part_shape,
+                  iterations, self.iterations, iters2d, acc_shape)
 
         self.delta = metaseq(1, delta[0], delta[1], delta2d[0], delta2d[1])
         self.acc_shape_2d = acc_shape

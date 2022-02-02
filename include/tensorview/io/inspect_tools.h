@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -195,7 +195,7 @@ inline Os &custom_obj_print(Os &os, const T &obj) {
 }
 
 template <typename F, class... Args>
-decltype(auto) function_print(F &&f, Args &&... args) {
+decltype(auto) function_print(F &&f, Args &&...args) {
   decltype(auto) tuple_args = std::forward_as_tuple(args...);
   std::cout << "Args: ";
   custom_obj_print(std::cout, tuple_args);
@@ -210,7 +210,7 @@ template <typename F> class FunctionIOPrinter {
 public:
   FunctionIOPrinter(F func, std::string name, std::string file, int64_t line)
       : func_(std::move(func)), name_(name), file_(file), line_(line) {}
-  template <class... Args> decltype(auto) operator()(Args &&... args) {
+  template <class... Args> decltype(auto) operator()(Args &&...args) {
     std::cout << file_ << "(" << line_ << ")(" << name_ << ")";
     return function_print(func_, args...);
   }
@@ -231,7 +231,7 @@ FunctionIOPrinter<F> function_io_printer(F &&f, std::string name,
 
 #define TV_PRINT_IO(func)                                                      \
   tv::function_io_printer(                                                     \
-      [&](auto &&... args) -> decltype(auto) {                                 \
+      [&](auto &&...args) -> decltype(auto) {                                  \
         return func(std::forward<decltype(args)>(args)...);                    \
       },                                                                       \
       #func, __FILE__, __LINE__)

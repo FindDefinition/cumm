@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -103,12 +103,15 @@ class InputTuring(bases.Input):
                 else:
                     inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator
                     w_iter_cls = input_iters.WeightIteratorDP4A
-                self.inp_iter_a = inp_iter_cls(dtype_a, problem.op_type,
-                                               tile_shape,
-                                               self.input_sub_tile_shape_a,
-                                               self.tmap_a, self.problem,
-                                               increment_k_first,
-                                               access_per_vector=access_per_vector)
+                self.inp_iter_a = inp_iter_cls(
+                    dtype_a,
+                    problem.op_type,
+                    tile_shape,
+                    self.input_sub_tile_shape_a,
+                    self.tmap_a,
+                    self.problem,
+                    increment_k_first,
+                    access_per_vector=access_per_vector)
             else:
                 inp_iter_cls = input_iters.ForwardDgradIOIterator
                 w_iter_cls = input_iters.WeightIteratorDP4A
@@ -139,7 +142,7 @@ class InputTuring(bases.Input):
                     inp_iter_cls = sparse_iters.ForwardDgradSparseIOIteratorV2Mask
 
                 else:
-                    inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator# V2Mask
+                    inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator  # V2Mask
 
                 self.inp_iter_a = inp_iter_cls(
                     dtype_a,
@@ -234,25 +237,25 @@ class AlgoSpecificTuring(object):
         assert algo == GemmAlgo.Turing
         trans_a, trans_b, trans_c = problem.get_gemm_trans_abc()
         self.input_spec = InputTuring(problem, iter_algo, tile_shape,
-                                    warp_tile_shape, dtype_a, dtype_b, algo,
-                                    mask_sparse, increment_k_first,
-                                    access_per_vector)
+                                      warp_tile_shape, dtype_a, dtype_b, algo,
+                                      mask_sparse, increment_k_first,
+                                      access_per_vector)
         self.mma_spec = MmaTuring(self.input_spec, tile_shape, warp_tile_shape,
-                                num_stage, dtype_a, dtype_b, dtype_acc,
-                                trans_a, trans_b, tensorop, algo)
+                                  num_stage, dtype_a, dtype_b, dtype_acc,
+                                  trans_a, trans_b, tensorop, algo)
         shuffle_stride = ShuffleStrideType.NoShuffle
         if mask_sparse and not problem.op_type == ConvOpType.kBackwardWeight:
             shuffle_stride = ShuffleStrideType.ShuffleAC
 
         self.output_spec = OutputTuring(self.mma_spec,
-                                      tile_shape,
-                                      warp_tile_shape,
-                                      num_stage,
-                                      dtype_c,
-                                      dtype_acc,
-                                      dtype_comp,
-                                      trans_c,
-                                      tensorop,
-                                      algo,
-                                      shuffle_stride=shuffle_stride,
-                                      access_per_vector=access_per_vector)
+                                        tile_shape,
+                                        warp_tile_shape,
+                                        num_stage,
+                                        dtype_c,
+                                        dtype_acc,
+                                        dtype_comp,
+                                        trans_c,
+                                        tensorop,
+                                        algo,
+                                        shuffle_stride=shuffle_stride,
+                                        access_per_vector=access_per_vector)

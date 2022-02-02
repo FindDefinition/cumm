@@ -252,6 +252,54 @@ template <typename T> TV_HOST_DEVICE_INLINE constexpr const char *dtype_short_st
     return TV_UNKNOWN_DTYPE_STRING;
   }
 }
+template <typename T> TV_HOST_DEVICE_INLINE constexpr int bit_size(T t) {
+  switch (t) {
+  case DType::bool_:
+    return 1;
+  case DType::float32:
+    return 32;
+  case DType::int8:
+    return 8;
+  case DType::int16:
+    return 16;
+  case DType::int32:
+    return 32;
+  case DType::float64:
+    return 64;
+  case DType::int64:
+    return 64;
+  case DType::uint8:
+    return 8;
+  case DType::uint16:
+    return 16;
+  case DType::uint32:
+    return 32;
+  case DType::uint64:
+    return 64;
+  case DType::float16:
+    return 16;
+  case DType::custom16:
+    return 16;
+  case DType::custom32:
+    return 32;
+  case DType::custom48:
+    return 48;
+  case DType::custom64:
+    return 64;
+  case DType::custom80:
+    return 80;
+  case DType::custom96:
+    return 96;
+  case DType::custom128:
+    return 128;
+  case DType::tf32:
+    return 32;
+  case DType::bfloat16:
+    return 16;
+  default:
+    return -1;
+  }
+}
 
 // we can define template specs to extend detail::TypeToString.
 template <typename T>

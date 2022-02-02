@@ -4,16 +4,18 @@ import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
 
-from cumm import tensorview as tv 
-from cumm.gemm.algospec.core import GemmAlgo, TensorOpParams
-from cumm.common import CUDALibs, TensorView, GemmBasic
-import pccm 
-from pathlib import Path 
-from cumm.gemm.main import GemmAlgoParams, GemmMainUnitTest
-from cumm import dtypes
+import pccm
 from codeai.distributed.example.file import upload_file
+
+from cumm import dtypes
+from cumm import tensorview as tv
+from cumm.common import CUDALibs, GemmBasic, TensorView
+from cumm.gemm.algospec.core import GemmAlgo, TensorOpParams
+from cumm.gemm.main import GemmAlgoParams, GemmMainUnitTest
+
 CUTLASS_ROOT = Path("/home/yy/Projects/cutlass")
-import numpy as np 
+import numpy as np
+
 
 class CutlassLib(pccm.Class):
     def __init__(self):
@@ -24,6 +26,7 @@ class CutlassLib(pccm.Class):
         self.add_include("random")
         self.build_meta.includes.append(CUTLASS_ROOT / "include")
         self.build_meta.includes.append(CUTLASS_ROOT / "tools/util/include")
+
 
 class CutlassGemm(pccm.ParameterizedClass):
     def __init__(self, params: GemmAlgoParams, num_out_width: int, arch: str):
@@ -41,17 +44,17 @@ class CutlassGemm(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.cuda.static_function
     def matmul(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("a,b", "tv::Tensor", pyanno="cumm.tensorview.Tensor")
         code.arg("split_k_slices", "int", default="1")
 
         op = "cutlass::arch::OpClassTensorOp"
         if self.params.tensorop is None or self.params.tensorop.shape[0] == 1:
             op = "cutlass::arch::OpClassSimt"
-        ts = self.params.ts 
+        ts = self.params.ts
         wts = self.params.wts
         top_shape = [1, 1, 1]
-        if self.params.tensorop is not None :
+        if self.params.tensorop is not None:
             top_shape = self.params.tensorop.shape
         code.raw(f"""
         using ElementAccumulator = {self.params.dtype_acc.cutlass};        
@@ -179,16 +182,28 @@ def cutlass_build_exec(cu: CutlassGemm):
 
     return output
 
+
 def cutlass_profile_win(cu: CutlassGemm):
     out_file_name = cutlass_build_exec(cu)
-    ncu_sections = ["ComputeWorkloadAnalysis", "InstructionStats", "LaunchStats", "MemoryWorkloadAnalysis", "MemoryWorkloadAnalysis_Chart",
-        "MemoryWorkloadAnalysis_Tables", "Occupancy", "SchedulerStats", "SourceCounters", "SpeedOfLight", "WarpStateStats"]
+    ncu_sections = [
+        "ComputeWorkloadAnalysis", "InstructionStats", "LaunchStats",
+        "MemoryWorkloadAnalysis", "MemoryWorkloadAnalysis_Chart",
+        "MemoryWorkloadAnalysis_Tables", "Occupancy", "SchedulerStats",
+        "SourceCounters", "SpeedOfLight", "WarpStateStats"
+    ]
     section_flags = sum([["--section", s] for s in ncu_sections], [])
-    cmds = ["ncu", "-o", str((out_file_name).parent / "profile"), *section_flags, "-f", str(out_file_name) + ".exe"]
+    cmds = [
+        "ncu", "-o",
+        str((out_file_name).parent / "profile"), *section_flags, "-f",
+        str(out_file_name) + ".exe"
+    ]
     print(" ".join(cmds))
     subprocess.check_call(cmds, env=os.environ, shell=True)
     target = "/home/yy"
-    upload_file("127.0.0.1:50073", Path(__file__).parent / "profile.ncu-rep", target + "/profile.ncu-rep", exist_ok=True)
+    upload_file("127.0.0.1:50073",
+                Path(__file__).parent / "profile.ncu-rep",
+                target + "/profile.ncu-rep",
+                exist_ok=True)
     return
 
 
@@ -243,20 +258,30 @@ def cutlass_test_gemm(cu: CutlassGemm, spk: int = 1):
     for i in range(1):
         c_tv = lib.CuTlassTest.CutlassGemm.matmul(a_tv, b_tv, 1)
         c_cpu = c_tv.cpu().numpy()
-        print(params.get_algo_name(), a.mean(), b.mean(), c.mean(), np.linalg.norm(c_cpu - c))
+        print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
+              np.linalg.norm(c_cpu - c))
+
 
 def cutlass_test_simt():
-    params = GemmAlgoParams((32, 512, 8), (32, 64, 8), 2, "f32,f32,f32,f32,f32", False, False, False, GemmAlgo.Simt, TensorOpParams((1, 1, 1)))
+    params = GemmAlgoParams((32, 512, 8), (32, 64, 8), 2,
+                            "f32,f32,f32,f32,f32", False, False, False,
+                            GemmAlgo.Simt, TensorOpParams((1, 1, 1)))
     main_cu = CutlassGemm(params, 32, "Sm61")
     cutlass_test_gemm(main_cu)
+
 
 def cutlass_test_simt_dp4a():
-    params = GemmAlgoParams((128, 64, 32), (64, 32, 32), 2, "s8,s8,s32,s32,s32", False, True, False, GemmAlgo.SimtDP4A, TensorOpParams((1, 1, 4)))
+    params = GemmAlgoParams((128, 64, 32), (64, 32, 32), 2,
+                            "s8,s8,s32,s32,s32", False, True, False,
+                            GemmAlgo.SimtDP4A, TensorOpParams((1, 1, 4)))
     main_cu = CutlassGemm(params, 32, "Sm61")
     cutlass_test_gemm(main_cu)
 
+
 def cutlass_test_turing():
-    params = GemmAlgoParams((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", False, True, False, GemmAlgo.Turing, TensorOpParams((16, 8, 8)))
+    params = GemmAlgoParams((64, 128, 64), (32, 64, 32), 2,
+                            "f16,f16,f16,f32,f32", False, True, False,
+                            GemmAlgo.Turing, TensorOpParams((16, 8, 8)))
     main_cu = CutlassGemm(params, 128, "Sm75")
     cutlass_test_gemm(main_cu)
 

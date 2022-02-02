@@ -1,28 +1,30 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from typing import List
+
 import pccm
 from pccm.core import FunctionCode
 
 from cumm import dtypes
 from cumm.common import GemmBasic, TensorView, TensorViewKernel
-from cumm.gemm import (thread_map)
-from cumm.gemm.frozen  import mask_iters
+from cumm.gemm import thread_map
 from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType
 from cumm.gemm.core import MetaArray, metaseq, seq
-import math
+from cumm.gemm.frozen import mask_iters
+
 
 class GatherKernel(pccm.ParameterizedClass):
     def __init__(self, dtype: dtypes.DType, tile_shape: MetaArray[int],
@@ -66,7 +68,7 @@ class GatherKernel(pccm.ParameterizedClass):
 
     @pccm.cuda.cuda_global_function(header_only=True)
     def kernel(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("input_ptr", f"const {self.dtype}*")
         code.arg("output_ptr", f"{self.dtype}*")
 
@@ -101,7 +103,7 @@ class GatherKernel(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.cuda.static_function
     def gather(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("output", "tv::Tensor")
         code.arg("input", "tv::Tensor")
         code.arg("indices", "tv::Tensor")
@@ -123,8 +125,11 @@ class GatherKernel(pccm.ParameterizedClass):
 
 
 class GatherKernelV2(pccm.ParameterizedClass):
-    def __init__(self, tile_shape_bytes: MetaArray[int],
-                 bytes_per_access: int, num_threads: int, dtype: dtypes.DType = dtypes.int8):
+    def __init__(self,
+                 tile_shape_bytes: MetaArray[int],
+                 bytes_per_access: int,
+                 num_threads: int,
+                 dtype: dtypes.DType = dtypes.int8):
         super().__init__()
         assert bytes_per_access <= 16
         tile_size = tile_shape_bytes.prod()
@@ -147,14 +152,23 @@ class GatherKernelV2(pccm.ParameterizedClass):
             dtype, tile_shape_bytes, sub_tile_shape, self.tmap, 1, True)
 
         self.tile_iter = mask_iters.MaskTileIteratorGather(
-            dtype, tile_shape_bytes, sub_tile_shape, self.tmap,
-            self.iter_param, 1, epa, False, False, True, have_output_ptr=True)
+            dtype,
+            tile_shape_bytes,
+            sub_tile_shape,
+            self.tmap,
+            self.iter_param,
+            1,
+            epa,
+            False,
+            False,
+            True,
+            have_output_ptr=True)
         self.add_param_class("iterpns", self.iter_param, "IterParams")
         self.add_param_class("iterns", self.tile_iter, "TileIterator")
 
     @pccm.cuda.cuda_global_function(header_only=True)
     def kernel(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("input_ptr", f"const {self.dtype}*")
         code.arg("output_ptr", f"{self.dtype}*")
 
@@ -180,10 +194,12 @@ class GatherKernelV2(pccm.ParameterizedClass):
         return code
 
 
-
 class Gather(pccm.ParameterizedClass):
-    def __init__(self, tile_shape_bytes: MetaArray[int],
-                 bytes_per_access: int, num_threads: int, dtype: dtypes.DType = dtypes.int8):
+    def __init__(self,
+                 tile_shape_bytes: MetaArray[int],
+                 bytes_per_access: int,
+                 num_threads: int,
+                 dtype: dtypes.DType = dtypes.int8):
         super().__init__()
         self.tile_shape_bytes = tile_shape_bytes
         self.bytes_per_access = bytes_per_access
@@ -193,7 +209,7 @@ class Gather(pccm.ParameterizedClass):
 
     @pccm.cuda.static_function(inline=True)
     def supported(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("channel_size", "int")
         code.arg("dtype", "int")
         code.raw(f"""
@@ -206,8 +222,9 @@ class Gather(pccm.ParameterizedClass):
 
     @pccm.cuda.static_function
     def gather(self):
-        code = pccm.FunctionCode()
-        kernel = GatherKernelV2(self.tile_shape_bytes, self.bytes_per_access, self.num_threads, self.dtype)
+        code = pccm.code()
+        kernel = GatherKernelV2(self.tile_shape_bytes, self.bytes_per_access,
+                                self.num_threads, self.dtype)
         code.add_param_class("kernel", kernel, "GatherKernel")
         code.add_param_class("kernel", kernel.iter_param, "IterParams")
 
@@ -238,9 +255,10 @@ class Gather(pccm.ParameterizedClass):
         """)
         return code
 
+
 class ScatterKernel(pccm.ParameterizedClass):
-    def __init__(self, tile_shape_bytes: MetaArray[int],
-                 bytes_per_access: int, num_threads: int, dtype: dtypes.DType):
+    def __init__(self, tile_shape_bytes: MetaArray[int], bytes_per_access: int,
+                 num_threads: int, dtype: dtypes.DType):
         super().__init__()
         self.add_include("tensorview/gemm/math/all.h")
         assert bytes_per_access <= 16
@@ -254,7 +272,8 @@ class ScatterKernel(pccm.ParameterizedClass):
         self.bytes_per_access = bytes_per_access
         self.add_dependency(TensorView, TensorViewKernel)
         self.dtype = dtype
-        self.tile_shape = seq(tile_shape_bytes[0], tile_shape_bytes[1] // dtype.itemsize())
+        self.tile_shape = seq(tile_shape_bytes[0],
+                              tile_shape_bytes[1] // dtype.itemsize())
         self.epa = epa
         sub_tile_shape = seq(1, epa)
         self.tmap = thread_map.PitchLinear(self.tile_shape, sub_tile_shape,
@@ -264,14 +283,25 @@ class ScatterKernel(pccm.ParameterizedClass):
             dtype, self.tile_shape, sub_tile_shape, self.tmap, 1, True)
 
         self.tile_iter = mask_iters.MaskTileIteratorGather(
-            dtype, self.tile_shape, sub_tile_shape, self.tmap,
-            self.iter_param, 1, epa, False, False, True, read_only=False, have_output_ptr=True, is_scatter=True)
+            dtype,
+            self.tile_shape,
+            sub_tile_shape,
+            self.tmap,
+            self.iter_param,
+            1,
+            epa,
+            False,
+            False,
+            True,
+            read_only=False,
+            have_output_ptr=True,
+            is_scatter=True)
         self.add_param_class("iterpns", self.iter_param, "IterParams")
         self.add_param_class("iterns", self.tile_iter, "TileIterator")
 
     @pccm.cuda.cuda_global_function(header_only=True)
     def kernel(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("input_ptr", f"const {self.dtype}*")
         code.arg("output_ptr", f"{self.dtype}*")
 
@@ -300,9 +330,10 @@ class ScatterKernel(pccm.ParameterizedClass):
         """)
         return code
 
+
 class Scatter(pccm.ParameterizedClass):
-    def __init__(self, tile_shape_bytes: MetaArray[int],
-                 bytes_per_access: int, num_threads: int, dtype: dtypes.DType):
+    def __init__(self, tile_shape_bytes: MetaArray[int], bytes_per_access: int,
+                 num_threads: int, dtype: dtypes.DType):
         super().__init__()
         self.tile_shape_bytes = tile_shape_bytes
         self.bytes_per_access = bytes_per_access
@@ -312,7 +343,7 @@ class Scatter(pccm.ParameterizedClass):
 
     @pccm.cuda.static_function(inline=True)
     def supported(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("channel_size", "int")
         code.arg("dtype", "int")
         code.raw(f"""
@@ -323,8 +354,9 @@ class Scatter(pccm.ParameterizedClass):
 
     @pccm.cuda.static_function
     def scatter(self):
-        code = pccm.FunctionCode()
-        kernel = ScatterKernel(self.tile_shape_bytes, self.bytes_per_access, self.num_threads, self.dtype)
+        code = pccm.code()
+        kernel = ScatterKernel(self.tile_shape_bytes, self.bytes_per_access,
+                               self.num_threads, self.dtype)
         code.add_param_class("kernel", kernel, "ScatterKernel")
         code.add_param_class("kernel", kernel.iter_param, "IterParams")
 
@@ -355,6 +387,7 @@ class Scatter(pccm.ParameterizedClass):
         """)
         return code
 
+
 class GatherAll(pccm.Class):
     def __init__(self):
         super().__init__()
@@ -366,19 +399,24 @@ class GatherAll(pccm.Class):
             for tile_m in [1, 2, 4, 8]:
                 for byte_per_access in [4, 8, 16]:
                     for num_threads in [64, 128, 256]:
-        # for tile_size_k_bytes in [512]:
-        #     for tile_m in [8]:
-        #         for byte_per_access in [4]:
-        #             for num_threads in [128]:
-
+                        # for tile_size_k_bytes in [512]:
+                        #     for tile_m in [8]:
+                        #         for byte_per_access in [4]:
+                        #             for num_threads in [128]:
 
                         if num_threads * byte_per_access > tile_size_k_bytes * tile_m:
                             continue
-                        key = (tile_m, tile_size_k_bytes, byte_per_access, num_threads)
+                        key = (tile_m, tile_size_k_bytes, byte_per_access,
+                               num_threads)
                         if key not in uniques:
-                            self.kernels.append(Gather(seq(tile_m, tile_size_k_bytes), byte_per_access, num_threads))
+                            self.kernels.append(
+                                Gather(seq(tile_m, tile_size_k_bytes),
+                                       byte_per_access, num_threads))
                         uniques.add(key)
-        self.add_member("param_to_function_", "std::unordered_map<int64_t, std::function<void(tv::Tensor, tv::Tensor, tv::Tensor, std::uintptr_t)>>")
+        self.add_member(
+            "param_to_function_",
+            "std::unordered_map<int64_t, std::function<void(tv::Tensor, tv::Tensor, tv::Tensor, std::uintptr_t)>>"
+        )
 
     def _get_alias_of_ker(self, ker: Gather):
         return f"Gather{ker.tile_shape_bytes[0]}_{ker.tile_shape_bytes[1]}_{ker.bytes_per_access}_{ker.num_threads}"
@@ -394,7 +432,9 @@ class GatherAll(pccm.Class):
         int64_t key;
         """)
         for k in self.kernels:
-            key = (k.tile_shape_bytes[0] << 0) | (k.tile_shape_bytes[1] << 16) | (k.bytes_per_access << 32) | (k.num_threads << 48)
+            key = (k.tile_shape_bytes[0] << 0) | (
+                k.tile_shape_bytes[1] << 16) | (k.bytes_per_access << 32) | (
+                    k.num_threads << 48)
             code.raw(f"""
             param_to_function_[{key}] = {self._get_alias_of_ker(k)}::gather;
             """)
@@ -417,7 +457,7 @@ class GatherAll(pccm.Class):
     @pccm.pybind.mark
     @pccm.static_function
     def supported(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("bytes_per_access", "int")
         code.arg("channel_size", "int")
         code.arg("dtype", "int")
@@ -430,22 +470,22 @@ class GatherAll(pccm.Class):
     @pccm.pybind.mark
     @pccm.static_function
     def stream_synchronize(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stream", "std::uintptr_t", "0")
         code.raw(f"""
         checkCudaErrors(cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream)));
         """)
         return code
 
-
     @pccm.pybind.mark
     @pccm.member_function
     def gather(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("output", "tv::Tensor")
         code.arg("input", "tv::Tensor")
         code.arg("indices", "tv::Tensor")
-        code.arg("tile_m, tile_k_bytes, bytes_per_access, num_threads", "int64_t")
+        code.arg("tile_m, tile_k_bytes, bytes_per_access, num_threads",
+                 "int64_t")
         code.arg("stream", "std::uintptr_t", "0", pyanno="int")
         code.raw(f"""
         int64_t key = (tile_m << 0) | (tile_k_bytes << 16) | (bytes_per_access << 32) | (num_threads << 48);
@@ -454,6 +494,7 @@ class GatherAll(pccm.Class):
         return method_iter->second(output, input, indices, stream);
         """)
         return code
+
 
 class ScatterAll(pccm.Class):
     def __init__(self):
@@ -466,19 +507,26 @@ class ScatterAll(pccm.Class):
             for tile_m in [1, 2, 4, 8]:
                 for byte_per_access in [4, 8, 16]:
                     for num_threads in [128, 256]:
-        # for tile_size_k_bytes in [256]:
-        #     for tile_m in [8]:
-        #         for byte_per_access in [16]:
-        #             for num_threads in [128]:
+                        # for tile_size_k_bytes in [256]:
+                        #     for tile_m in [8]:
+                        #         for byte_per_access in [16]:
+                        #             for num_threads in [128]:
 
                         for dtype in [dtypes.float32]:
                             if num_threads * byte_per_access > tile_size_k_bytes * tile_m:
                                 continue
-                            key = (tile_m, tile_size_k_bytes, byte_per_access, num_threads, dtype)
+                            key = (tile_m, tile_size_k_bytes, byte_per_access,
+                                   num_threads, dtype)
                             if key not in uniques:
-                                self.kernels.append(Scatter(seq(tile_m, tile_size_k_bytes), byte_per_access, num_threads, dtype))
+                                self.kernels.append(
+                                    Scatter(seq(tile_m, tile_size_k_bytes),
+                                            byte_per_access, num_threads,
+                                            dtype))
                             uniques.add(key)
-        self.add_member("param_to_function_", "std::unordered_map<int64_t, std::function<void(tv::Tensor, tv::Tensor, tv::Tensor, std::uintptr_t)>>")
+        self.add_member(
+            "param_to_function_",
+            "std::unordered_map<int64_t, std::function<void(tv::Tensor, tv::Tensor, tv::Tensor, std::uintptr_t)>>"
+        )
 
     def _get_alias_of_ker(self, ker: Scatter):
         return f"Scatter{ker.dtype.shortcut()}{ker.tile_shape_bytes[0]}_{ker.tile_shape_bytes[1]}_{ker.bytes_per_access}_{ker.num_threads}"
@@ -491,7 +539,9 @@ class ScatterAll(pccm.Class):
             ns = f"s{ker.dtype.shortcut()}{ker.tile_shape_bytes[0]}_{ker.tile_shape_bytes[1]}_{ker.bytes_per_access}_{ker.num_threads}"
             code.add_param_class(ns, ker, self._get_alias_of_ker(ker))
         for k in self.kernels:
-            key = (k.tile_shape_bytes[0] << 0) | (k.tile_shape_bytes[1] << 8) | (k.bytes_per_access << 24) | (k.num_threads << 32) | (k.dtype.tv_dtype << 48)
+            key = (k.tile_shape_bytes[0] << 0) | (
+                k.tile_shape_bytes[1] << 8) | (k.bytes_per_access << 24) | (
+                    k.num_threads << 32) | (k.dtype.tv_dtype << 48)
             code.raw(f"""
             param_to_function_[{key}] = {self._get_alias_of_ker(k)}::scatter;
             """)
@@ -507,7 +557,8 @@ class ScatterAll(pccm.Class):
         uniques = set()
 
         for k in self.kernels:
-            key = (k.tile_shape_bytes[0], k.tile_shape_bytes[1], k.bytes_per_access, k.num_threads)
+            key = (k.tile_shape_bytes[0], k.tile_shape_bytes[1],
+                   k.bytes_per_access, k.num_threads)
             if key in uniques:
                 continue
             uniques.add(key)
@@ -521,8 +572,9 @@ class ScatterAll(pccm.Class):
     @pccm.pybind.mark
     @pccm.member_function
     def supported_scatter(self):
-        code = pccm.FunctionCode()
-        code.arg("tile_m, tile_k_bytes, bytes_per_access, num_threads", "int64_t")
+        code = pccm.code()
+        code.arg("tile_m, tile_k_bytes, bytes_per_access, num_threads",
+                 "int64_t")
         code.arg("channel_size", "int")
         code.arg("dtype", "int")
         code.raw(f"""
@@ -539,7 +591,7 @@ class ScatterAll(pccm.Class):
     @pccm.pybind.mark
     @pccm.static_function
     def stream_synchronize(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stream", "std::uintptr_t", "0")
         code.raw(f"""
         checkCudaErrors(cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream)));
@@ -549,11 +601,12 @@ class ScatterAll(pccm.Class):
     @pccm.pybind.mark
     @pccm.member_function
     def scatter(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("output", "tv::Tensor")
         code.arg("input", "tv::Tensor")
         code.arg("indices", "tv::Tensor")
-        code.arg("tile_m, tile_k_bytes, bytes_per_access, num_threads", "int64_t")
+        code.arg("tile_m, tile_k_bytes, bytes_per_access, num_threads",
+                 "int64_t")
         code.arg("stream", "std::uintptr_t", "0", pyanno="int")
         code.raw(f"""
         int64_t dtype = int64_t( input.dtype());

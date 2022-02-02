@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -25,7 +25,6 @@
 #include <functional>
 #include <type_traits>
 #include <utility>
-
 #endif
 
 namespace tv {
@@ -100,8 +99,7 @@ constexpr F mp_for_each_impl(mp_list<Ts...>, F &&f) {
   //        std::forward<F>(f);
 }
 
-template <class F>
-constexpr F mp_for_each_impl(mp_list<>, F &&f) {
+template <class F> constexpr F mp_for_each_impl(mp_list<>, F &&f) {
   return std::forward<F>(f);
 }
 #endif
@@ -154,8 +152,7 @@ constexpr auto mp_rename_v = detail::mp_rename_v_impl<A, B>::value;
 
 template <class L> using mp_size = mp_rename<L, mp_length>;
 #ifndef __CUDACC_RTC__
-template <class L, class F>
-constexpr F mp_for_each(F &&f) {
+template <class L, class F> constexpr F mp_for_each(F &&f) {
   return detail::mp_for_each_impl(mp_rename<L, mp_list>(), std::forward<F>(f));
 }
 #endif

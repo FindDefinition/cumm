@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,13 +21,15 @@ from pccm.core import FunctionCode
 from pccm.targets.cuda_ptx import RegDType
 
 from cumm import dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorViewNVRTC, TensorViewMath
+from cumm.common import (GemmBasic, GemmBasicKernel, TensorViewMath,
+                         TensorViewNVRTC)
 from cumm.conv import bases, params
 from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
 from cumm.gemm import codeops, constants, layout, thread_map
-from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.arch.memory import GlobalLoad
-from cumm.gemm.mask import Mask 
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.mask import Mask
+
 
 def div_up(a: int, b: int) -> int:
     return (a + b - 1) // b
@@ -69,11 +71,11 @@ class AnalyticParams(bases.ConvIterParams):
 
     # @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     # def defctor(self):
-    #     return pccm.FunctionCode()
+    #     return pccm.code()
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("problem", "ConvProblem const&")
         code.arg("layout", "Layout const&")
         code.ctor_init("layout", "layout")
@@ -129,11 +131,11 @@ class IOOptParams(bases.ConvIterParams):
 
     # @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     # def defctor(self):
-    #     return pccm.FunctionCode()
+    #     return pccm.code()
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("problem", "ConvProblem const&")
         code.arg("layout", "Layout const&")
         code.ctor_init("layout", "layout")
@@ -241,11 +243,11 @@ class WeightOptParams(bases.ConvIterParams):
 
     # @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     # def defctor(self):
-    #     return pccm.FunctionCode()
+    #     return pccm.code()
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("problem", "ConvProblem const&")
         code.arg("layout", "Layout const&")
         code.ctor_init("layout", "layout")
@@ -314,7 +316,6 @@ class WeightOptParams(bases.ConvIterParams):
         inc_c_reset = -gemm_iters_k * filter_c_delta{mul_stride_if_bwd} * {self.dtype.bitsize()} / 8;
         """)
         return code
-
 
     def python_ctor(self, problem: params.ConvProblem, layout: LAYOUT_TYPES):
         new_obj = WeightOptParams(self.dtype, self.tile_shape, self.problem,
@@ -399,7 +400,7 @@ class InputNPQIterator(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params const&")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -448,9 +449,7 @@ class InputNPQIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def npqrs_to_nhwc(self):
         code = FunctionCode()
         code.arg("npq", f"const tv::array<int, {self.ndim + 1}>&")
@@ -474,9 +473,7 @@ class InputNPQIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def at(self):
         code = FunctionCode()
         code.arg("stride, contig", "int")
@@ -489,9 +486,7 @@ class InputNPQIterator(bases.ConvInputIterator):
 
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
         code = FunctionCode()
         code.arg("indexes", f"const tv::array<int, {self.ndim + 2}>&")
@@ -506,9 +501,7 @@ class InputNPQIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.ret(self.const_access_pointer)
@@ -521,7 +514,7 @@ class InputNPQIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -573,7 +566,7 @@ class OutputNPQParams(bases.ConvIterParams):
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("problem", "ConvProblem const&")
         code.arg("layout", "Layout const&")
         code.ctor_init("layout", "layout")
@@ -654,7 +647,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params const&")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -720,9 +713,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
                 """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
         code = FunctionCode()
         if self.optimized:
@@ -743,9 +734,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
             """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.ret(self.const_access_pointer)
@@ -764,9 +753,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def at(self):
         code = FunctionCode()
         if self.optimized:
@@ -782,7 +769,7 @@ class OutputNPQIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -816,7 +803,6 @@ class OutputNPQIterator(bases.ConvInputIterator):
         return code
 
 
-
 class WeightIteratorDP4A(bases.ConvInputIterator):
     """
     fwd: NHWC -> NPQRSC @ KRSC, k = RSC
@@ -845,7 +831,10 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         element_count = self.thread_access_shape[0] * self.thread_access_shape[
             1] * sub_tile_shape.prod()
         self.tile_shape_mnk = tile_shape_mnk
-        super().__init__(dtype, element_count, sub_tile_shape[1], access_per_vector=access_per_vector)
+        super().__init__(dtype,
+                         element_count,
+                         sub_tile_shape[1],
+                         access_per_vector=access_per_vector)
         self.sub_tile_shape = sub_tile_shape
         self.op_type = op_type
         self.optimized = optimized
@@ -855,9 +844,10 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         self.mask_sparse = problem_size.mask_sparse
         if op_type == ConvOpType.kForward:
             assert tmap.iterations[1] == 1
-        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(), level="L2", prefetch_size=128)
+        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(),
+                                level="L2",
+                                prefetch_size=128)
         self.add_param_class("gload", self.gload, "GlobalLoad")
-
 
         assert tmap.iterations.prod() * sub_tile_shape[0] < 32, "error"
         self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
@@ -890,7 +880,9 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             self.add_member("reduce_channel_offset_", "int")
             if self.increment_k_first and self.problem_size.mask_sparse:
                 self.add_member("reduce_channel_offset_backup_", "int")
-                self.add_member("mask_backup_", f"tv::array<uint32_t, {self.access_per_vector}>")
+                self.add_member(
+                    "mask_backup_",
+                    f"tv::array<uint32_t, {self.access_per_vector}>")
         else:
             self.add_member(
                 "reduce_channel_offsets_",
@@ -903,7 +895,8 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             self.add_member("filter_kernel_idxes_",
                             f"tv::array<int, {self.ndim}>")
         if optimized:
-            self.add_member("mask_", f"tv::array<uint32_t, {self.access_per_vector}>")
+            self.add_member("mask_",
+                            f"tv::array<uint32_t, {self.access_per_vector}>")
         # if problem_size.mask_sparse:
 
     def get_params(self) -> pccm.ParameterizedClass:
@@ -911,7 +904,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params const&")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -967,7 +960,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                         uint32_t pred = thread_offset[0] + s * {self.tmap.delta[0]} + ss < problem_size.K;
                         """)
                         with code.range_("v", self.access_per_vector,
-                                        "TV_PRAGMA_UNROLL"):
+                                         "TV_PRAGMA_UNROLL"):
 
                             code.raw(f"""
                             mask_[v] |= (pred << (s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + c * {self.tmap.sub_tile_shape[0]} + ss));
@@ -975,7 +968,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
                     else:
                         with code.range_("v", self.access_per_vector,
-                                        "TV_PRAGMA_UNROLL"):
+                                         "TV_PRAGMA_UNROLL"):
                             code.raw(f"""
                             uint32_t pred = (thread_offset[0] + s * {self.tmap.delta[0]} + ss < problem_size.K)
                                 && (thread_offset[1] + c * {self.tmap.delta[1]} + v * {self.element_per_acc} < problem_size.C);
@@ -1034,13 +1027,13 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             }}
             """)
             if self.op_type == ConvOpType.kForward:
-            # if self.tmap.iterations[1] == 1:
+                # if self.tmap.iterations[1] == 1:
                 # we assume tmap.iterations[1] always 1
                 # so just set mask to zero if k out of range.
                 code.raw(f"""
                 TV_PRAGMA_UNROLL
                 for (int v = 0; v < {self.access_per_vector}; ++v){{
-                    mask_[v] = thread_offset[1] + v * {self.element_per_acc} >= problem_size.{C_or_K} ? 0 : mask_[v];
+                    mask_[v] = reduce_channel_offset_ + v * {self.element_per_acc} >= problem_size_.{C_or_K} ? 0 : mask_[v];
                 }}
                 """)
             else:
@@ -1081,7 +1074,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         else:
             with self.tmap.tmap_loop(code, "s"):
                 with code.range_("ss", self.tmap.sub_tile_shape[0],
-                                    "TV_PRAGMA_UNROLL"):
+                                 "TV_PRAGMA_UNROLL"):
                     code.raw(f"""
                     if (reduce_channel_offset_ + s * {self.tmap.delta[0]} + ss >= problem_size_.K){{
                         uint32_t mask = ((1u << {self.tmap.iterations[1]}) - 1) << (s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + ss);
@@ -1133,7 +1126,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
     def clear_mask_if_not_pred(self):
         code = pccm.cuda.PTXCode()
         if not self.optimized:
-            return code 
+            return code
         code.arg("pred", "bool")
         code.arg("v", "int")
         code.raw(f"""
@@ -1178,7 +1171,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         """
         code = pccm.cuda.PTXCode()
         if not self.optimized:
-            return code 
+            return code
 
         code.arg("pred", "bool")
         code.arg("v", "int")
@@ -1207,9 +1200,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def at(self):
         code = FunctionCode()
         if self.optimized:
@@ -1229,9 +1220,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             raise NotImplementedError
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
         code = FunctionCode()
         if not self.optimized:
@@ -1247,9 +1236,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
             """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.ret(self.const_access_pointer)
@@ -1274,7 +1261,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -1284,7 +1271,8 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                              "TV_PRAGMA_UNROLL"):
                 with code.range_("ss", str(self.sub_tile_shape[0]),
                                  "TV_PRAGMA_UNROLL"):
-                    with code.range_("v", self.access_per_vector, "TV_PRAGMA_UNROLL"):
+                    with code.range_("v", self.access_per_vector,
+                                     "TV_PRAGMA_UNROLL"):
                         if not self.optimized:
                             assert self.access_per_vector == 1
                             code.raw(f"""
@@ -1320,7 +1308,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_invalid(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if not self.optimized:
             return code
         with self.tmap.tmap_loop(code, "s"):
@@ -1341,8 +1329,9 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         return code
+
 
 class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
     """
@@ -1372,7 +1361,10 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         element_count = self.thread_access_shape[0] * self.thread_access_shape[
             1] * sub_tile_shape.prod()
         self.tile_shape_mnk = tile_shape_mnk
-        super().__init__(dtype, element_count, sub_tile_shape[1], access_per_vector=access_per_vector)
+        super().__init__(dtype,
+                         element_count,
+                         sub_tile_shape[1],
+                         access_per_vector=access_per_vector)
         self.sub_tile_shape = sub_tile_shape
         self.op_type = op_type
         self.optimized = optimized
@@ -1382,7 +1374,9 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         self.mask_sparse = problem_size.mask_sparse
         if op_type == ConvOpType.kForward:
             assert tmap.iterations[1] == 1
-        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(), level="L2", prefetch_size=128)
+        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(),
+                                level="L2",
+                                prefetch_size=128)
         self.add_param_class("gload", self.gload, "GlobalLoad")
 
         assert tmap.iterations.prod() * sub_tile_shape[0] < 32, "error"
@@ -1394,7 +1388,9 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
                                           input_layout, tmap,
                                           increment_k_first)
         self.tmap = tmap
-        self.mask_cls = Mask(seq(self.tmap.iterations[0], self.tmap.iterations[1], self.sub_tile_shape[0], self.access_per_vector))
+        self.mask_cls = Mask(
+            seq(self.tmap.iterations[0], self.tmap.iterations[1],
+                self.sub_tile_shape[0], self.access_per_vector))
         self.add_param_class("mask", self.mask_cls, "Mask")
 
         self.add_param_class("tmap", tmap, "ThreadMap")
@@ -1440,7 +1436,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params const&")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -1491,9 +1487,13 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
                 for c in range(self.tmap.iterations[1]):
                     for ss in range(self.tmap.sub_tile_shape[0]):
                         for v in range(self.access_per_vector):
-                            pred = (f"(thread_offset[0] + {s * self.tmap.delta[0] + ss} < problem_size.K) && (thread_offset[1]"
-                                    f" + {c * self.tmap.delta[1] + v * self.element_per_acc} < problem_size.C)")
-                            code.raw(f"mask_.set_coord({pred}, {s}, {c}, {ss}, {v});")
+                            pred = (
+                                f"(thread_offset[0] + {s * self.tmap.delta[0] + ss} < problem_size.K) && (thread_offset[1]"
+                                f" + {c * self.tmap.delta[1] + v * self.element_per_acc} < problem_size.C)"
+                            )
+                            code.raw(
+                                f"mask_.set_coord({pred}, {s}, {c}, {ss}, {v});"
+                            )
             code.raw(
                 f"pointer_ += (thread_offset[0] * params.layout.strides[0] + thread_offset[1]) * {self.dtype.bitsize()} / 8;"
             )
@@ -1538,12 +1538,13 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
             }}
             """)
             if self.op_type == ConvOpType.kForward:
-            # if self.tmap.iterations[1] == 1:
+                # if self.tmap.iterations[1] == 1:
                 # we assume tmap.iterations[1] always 1
                 # so just set mask to zero if k out of range.
                 for v in range(self.access_per_vector):
                     pred = f"reduce_channel_offset_ + {v * self.element_per_acc} >= problem_size_.{C_or_K}"
-                    self.mask_cls.clear_mask_if_pred_template(code, pred, (None, None, None, v))
+                    self.mask_cls.clear_mask_if_pred_template(
+                        code, pred, (None, None, None, v))
 
                 # code.raw(f"""
                 # TV_PRAGMA_UNROLL
@@ -1556,7 +1557,8 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
                 for s in range(self.tmap.iterations[0]):
                     for ss in range(self.tmap.sub_tile_shape[0]):
                         pred = f"reduce_channel_offset_ + {s * self.tmap.delta[0] + ss} >= problem_size_.K"
-                        self.mask_cls.clear_mask_if_pred_template(code, pred, (s, None, ss, None))
+                        self.mask_cls.clear_mask_if_pred_template(
+                            code, pred, (s, None, ss, None))
 
                 # with self.tmap.tmap_loop(code, "s"):
                 #     with code.range_("ss", self.tmap.sub_tile_shape[0],
@@ -1587,7 +1589,8 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         if self.op_type == ConvOpType.kForward:
             for v in range(self.access_per_vector):
                 pred = f"reduce_channel_offset_ + {v * self.element_per_acc} >= problem_size_.{C_or_K}"
-                self.mask_cls.clear_mask_if_pred_template(code, pred, (None, None, None, v))
+                self.mask_cls.clear_mask_if_pred_template(
+                    code, pred, (None, None, None, v))
 
             # code.raw(f"""
             # TV_PRAGMA_UNROLL
@@ -1599,7 +1602,8 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
             for s in range(self.tmap.iterations[0]):
                 for ss in range(self.tmap.sub_tile_shape[0]):
                     pred = f"reduce_channel_offset_ + {s * self.tmap.delta[0] + ss} >= problem_size_.K"
-                    self.mask_cls.clear_mask_if_pred_template(code, pred, (s, None, ss, None))
+                    self.mask_cls.clear_mask_if_pred_template(
+                        code, pred, (s, None, ss, None))
 
             # with self.tmap.tmap_loop(code, "s"):
             #     with code.range_("ss", self.tmap.sub_tile_shape[0],
@@ -1674,9 +1678,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def at(self):
         code = FunctionCode()
         if self.optimized:
@@ -1696,9 +1698,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
             raise NotImplementedError
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
         code = FunctionCode()
         if not self.optimized:
@@ -1715,9 +1715,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
             """)
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.ret(self.const_access_pointer)
@@ -1742,7 +1740,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -1761,7 +1759,8 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
                         code.raw(f"""
                         {self.access_t} const *access_ptr = get(s, c, ss) + pointer_offset / {self.element_per_acc};
                         """)
-                    with code.range_("v", self.access_per_vector, "TV_PRAGMA_UNROLL"):
+                    with code.range_("v", self.access_per_vector,
+                                     "TV_PRAGMA_UNROLL"):
                         if not self.optimized:
                             assert self.access_per_vector == 1
                             code.raw(f"""
@@ -1797,7 +1796,7 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_invalid(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if not self.optimized:
             return code
         with self.tmap.tmap_loop(code, "s"):
@@ -1818,8 +1817,9 @@ class WeightIteratorDP4AV2Mask(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         return code
+
 
 class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
     """
@@ -1902,7 +1902,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params const&")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -2105,9 +2105,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def at(self):
         code = FunctionCode()
         if self.optimized:
@@ -2143,9 +2141,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def npqrs_to_nhwc(self):
         code = FunctionCode()
         code.arg("npq", "const int*")
@@ -2164,9 +2160,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def nhwrs_to_npqk(self):
         code = FunctionCode()
         code.arg("npq", "const int*")
@@ -2186,9 +2180,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
         code = FunctionCode()
         if not self.optimized:
@@ -2233,9 +2225,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
 
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.ret(self.const_access_pointer)
@@ -2254,7 +2244,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -2331,7 +2321,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         return code
 
 
@@ -2411,7 +2401,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params const&")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -2604,9 +2594,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def at(self):
         code = FunctionCode()
         if self.optimized:
@@ -2640,9 +2628,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def npqrs_to_nhwc(self):
         code = FunctionCode()
         code.arg("npq", "const int*")
@@ -2661,9 +2647,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def nhwrs_to_npqk(self):
         code = FunctionCode()
         code.arg("npq", "const int*")
@@ -2683,9 +2667,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"tv::array<int, {self.ndim + 2}>")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
         code = FunctionCode()
         if not self.optimized:
@@ -2730,9 +2712,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
 
         return code.ret(f"bool")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.ret(self.const_access_pointer)
@@ -2751,7 +2731,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -2797,5 +2777,5 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_mask(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         return code

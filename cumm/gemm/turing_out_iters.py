@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -161,7 +161,7 @@ class OutWarpTileIteratorTensorOp(bases.GemmOutWarpIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("ptr", self.pointer)
         code.arg("warp_offset_m,warp_offset_n,lane_idx", "int")
         code.ctor_init("pointer_",
@@ -328,7 +328,7 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("ptr", self.pointer)
         code.arg("warp_offset_m,warp_offset_n,lane_idx", "int")
         code.ctor_init("layout_", f"{self.stride_in_access}")
@@ -394,7 +394,7 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_warp_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         for i in range(self.pointer_count):
             code.raw(f"""
             auto offset_{i} = layout_(
@@ -548,7 +548,7 @@ class OutWarpTileIteratorTensorOpMixed(bases.GemmOutWarpIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("pointer_offset", f"int")
         for i in range(self.pointer_count):
             code.raw(
@@ -781,7 +781,7 @@ class OutSmemLoaderMixed(bases.GemmOutSmemLoader):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("pointer_offset", f"int")
         for i in range(self.loads_per_access):
             code.raw(

@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,8 +19,8 @@ import pccm
 
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import (GemmBasic, GemmBasicKernel, TensorViewNVRTC,
-                         TensorViewKernel)
+from cumm.common import (GemmBasic, GemmBasicKernel, TensorViewKernel,
+                         TensorViewNVRTC)
 from cumm.constants import CUTLASS_MODE
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import (constants, layout, mask_iters, out_iters, thread_map,
@@ -99,7 +99,7 @@ class Output(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("smem_storage", "OutputStorage*")
         code.arg("thread_idx,warp_idx_k,warp_m,warp_n,lane_idx", "int")
         code.ctor_init(
@@ -122,7 +122,7 @@ class Output(pccm.ParameterizedClass):
         return new_obj
 
     def call_template(self, have_source: bool, self_reduce: bool):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("output_op", f"OutputOp const&")
         code.arg("accumulators", f"{self.accumulator_fragment} const&")
         code.arg("out_iter", f"OutIter&")

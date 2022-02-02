@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -89,20 +89,21 @@ template <> struct type_to_format<uint16_t> {
   static constexpr auto value = make_const_string("%hu");
 };
 
-
 template <class T, size_t N>
-TV_HOST_DEVICE_INLINE constexpr auto generate_array_format(){
+TV_HOST_DEVICE_INLINE constexpr auto generate_array_format() {
   // [%d, %d, %d, %d]
   auto elem_fmt = type_to_format<T>::value;
   int elem_fmt_size = elem_fmt.size();
-  tv::const_string<2 + (type_to_format<T>::value).size() * N + 2 * (N - 1)> res{};
+  tv::const_string<2 + (type_to_format<T>::value).size() * N + 2 * (N - 1)>
+      res{};
   res[0] = '[';
   res[res.size() - 1] = ']';
-  for (int i = 0; i < N; ++i){
-    for (int j = 1 + i * (elem_fmt_size + 2); j < 1 + i * (elem_fmt_size + 2) + elem_fmt_size; ++j){
+  for (int i = 0; i < N; ++i) {
+    for (int j = 1 + i * (elem_fmt_size + 2);
+         j < 1 + i * (elem_fmt_size + 2) + elem_fmt_size; ++j) {
       res[j] = elem_fmt[j - (1 + i * (elem_fmt_size + 2))];
     }
-    if (i != N - 1){
+    if (i != N - 1) {
       res[1 + i * (elem_fmt_size + 2) + elem_fmt_size] = ',';
       res[1 + i * (elem_fmt_size + 2) + elem_fmt_size + 1] = ' ';
     }
@@ -110,17 +111,13 @@ TV_HOST_DEVICE_INLINE constexpr auto generate_array_format(){
   return res;
 }
 
-template <class T, size_t N> 
-struct type_to_format<array<T, N>> {
+template <class T, size_t N> struct type_to_format<array<T, N>> {
   static constexpr auto value = generate_array_format<T, N>();
 };
 
-
-template <class T, size_t N> 
-struct type_to_format<T[N]> {
+template <class T, size_t N> struct type_to_format<T[N]> {
   static constexpr auto value = generate_array_format<T, N>();
 };
-
 
 template <char Sep, class... Ts> struct types_to_format;
 
@@ -130,9 +127,10 @@ template <char Sep, class T> struct types_to_format<Sep, T> {
 
 template <char Sep, class T, class... Ts>
 struct types_to_format<Sep, T, Ts...> {
-  static constexpr auto value = type_to_format<std::decay_t<T>>::value + const_string<1>(Sep) + types_to_format<Sep, Ts...>::value;
+  static constexpr auto value = type_to_format<std::decay_t<T>>::value +
+                                const_string<1>(Sep) +
+                                types_to_format<Sep, Ts...>::value;
 };
-
 
 } // namespace detail
 
@@ -150,9 +148,10 @@ TV_HOST_DEVICE_INLINE void printf2_once(Ts... args) {
   // should use tv::ssprint.
   static constexpr auto fmt = detail::types_to_format<Sep, Ts...>::value;
 #if defined(__CUDA_ARCH__)
-  if ((threadIdx.x == Tx && threadIdx.y == 0 && threadIdx.z == 0 && blockIdx.x == 0 && blockIdx.y == 0))
+  if ((threadIdx.x == Tx && threadIdx.y == 0 && threadIdx.z == 0 &&
+       blockIdx.x == 0 && blockIdx.y == 0))
     printf(fmt.c_str(), args...);
-#else 
+#else
   printf(fmt.c_str(), args...);
 #endif
 }
@@ -165,7 +164,7 @@ TV_HOST_DEVICE_INLINE void printf2_block_once(Ts... args) {
 #if defined(__CUDA_ARCH__)
   if ((blockIdx.x == 0 && blockIdx.y == 0))
     printf(fmt.c_str(), args...);
-#else 
+#else
   printf(fmt.c_str(), args...);
 #endif
 }
@@ -178,68 +177,70 @@ TV_HOST_DEVICE_INLINE void printf2_thread_once(Ts... args) {
 #if defined(__CUDA_ARCH__)
   if ((threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0))
     printf(fmt.c_str(), args...);
-#else 
+#else
   printf(fmt.c_str(), args...);
 #endif
 }
 
-
 namespace detail {
 
 template <char Sep = ' ', typename T, size_t N, int... Indexes, class... Ts>
-TV_HOST_DEVICE_INLINE void printf2_array_impl(array<T, N> arg, mp_list_int<Indexes...>, Ts&&... args) {
+TV_HOST_DEVICE_INLINE void
+printf2_array_impl(array<T, N> arg, mp_list_int<Indexes...>, Ts &&...args) {
   // this function should only be used for cuda code. host code
   // should use tv::ssprint.
-  static constexpr auto fmt = detail::types_to_format<Sep, array<T, N>, Ts...>::value;
+  static constexpr auto fmt =
+      detail::types_to_format<Sep, array<T, N>, Ts...>::value;
   printf(fmt.c_str(), arg[Indexes]..., args...);
 }
 
 template <char Sep = ' ', typename T, size_t N, int... Indexes, class... Ts>
-TV_HOST_DEVICE_INLINE void printf2_array_impl(T const (&arg)[ N ], mp_list_int<Indexes...>, Ts&&... args) {
+TV_HOST_DEVICE_INLINE void
+printf2_array_impl(T const (&arg)[N], mp_list_int<Indexes...>, Ts &&...args) {
   // this function should only be used for cuda code. host code
   // should use tv::ssprint.
-  static constexpr auto fmt = detail::types_to_format<Sep, array<T, N>, Ts...>::value;
+  static constexpr auto fmt =
+      detail::types_to_format<Sep, array<T, N>, Ts...>::value;
   printf(fmt.c_str(), arg[Indexes]..., args...);
 }
 
-}
-
-
-template <char Sep = ' ', typename T, size_t N, class... Ts>
-TV_HOST_DEVICE_INLINE void printf2_array(array<T, N> arg, Ts&&... args) {
-  // this function should only be used for cuda code. host code
-  // should use tv::ssprint.
-  return detail::printf2_array_impl<Sep>(arg, mp_make_list_c_sequence<int, N>{}, std::forward<Ts>(args)...);
-
-}
+} // namespace detail
 
 template <char Sep = ' ', typename T, size_t N, class... Ts>
-TV_HOST_DEVICE_INLINE void printf2_array(T const (&arg)[ N ], Ts&&... args) {
+TV_HOST_DEVICE_INLINE void printf2_array(array<T, N> arg, Ts &&...args) {
   // this function should only be used for cuda code. host code
   // should use tv::ssprint.
-  return detail::printf2_array_impl<Sep>(arg, mp_make_list_c_sequence<int, N>{}, std::forward<Ts>(args)...);
-
+  return detail::printf2_array_impl<Sep>(arg, mp_make_list_c_sequence<int, N>{},
+                                         std::forward<Ts>(args)...);
 }
 
+template <char Sep = ' ', typename T, size_t N, class... Ts>
+TV_HOST_DEVICE_INLINE void printf2_array(T const (&arg)[N], Ts &&...args) {
+  // this function should only be used for cuda code. host code
+  // should use tv::ssprint.
+  return detail::printf2_array_impl<Sep>(arg, mp_make_list_c_sequence<int, N>{},
+                                         std::forward<Ts>(args)...);
+}
 
 template <char Sep = ' ', unsigned Tx = 0, class... Ts>
-TV_HOST_DEVICE_INLINE void printf2_array_once(Ts&&... args) {
+TV_HOST_DEVICE_INLINE void printf2_array_once(Ts &&...args) {
 #if defined(__CUDA_ARCH__)
-  if ((threadIdx.x == Tx && threadIdx.y == 0 && threadIdx.z == 0 && blockIdx.x == 0 && blockIdx.y == 0))
+  if ((threadIdx.x == Tx && threadIdx.y == 0 && threadIdx.z == 0 &&
+       blockIdx.x == 0 && blockIdx.y == 0))
     printf2_array(args...);
-#else 
+#else
   printf2_array(std::forward<Ts>(args)...);
 #endif
 }
 
 template <char Sep = ' ', class... Ts>
-TV_HOST_DEVICE_INLINE void printf2_array_block_once(Ts&&... args) {
+TV_HOST_DEVICE_INLINE void printf2_array_block_once(Ts &&...args) {
   // this function should only be used for cuda code. host code
   // should use tv::ssprint.
 #if defined(__CUDA_ARCH__)
   if ((blockIdx.x == 0 && blockIdx.y == 0))
     printf2_array(args...);
-#else 
+#else
   printf2_array(std::forward<Ts>(args)...);
 #endif
 }

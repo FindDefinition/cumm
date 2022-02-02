@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -229,7 +229,7 @@ class OutWarpTileIteratorVolta(bases.GemmOutWarpIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if not self.params.is_float_acc:
             code.raw(f"""
             int quad_id = lane_idx / {self.lanes_in_quad}; // 0000 1111 2222 3333 ....

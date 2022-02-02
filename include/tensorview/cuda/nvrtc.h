@@ -41,9 +41,9 @@ public:
   NVRTCProgram(std::string code,
                std::unordered_map<std::string, std::string> headers = {},
                std::vector<std::string> opts = {},
-               std::string program_name = "kernel.cu",
+               std::string program_name = "kernel",
                std::vector<std::string> name_exprs = {})
-      : code_(code), headers_(headers), program_name_(program_name),
+      : code_(code), headers_(headers), program_name_(program_name + ".cu"),
         name_exprs_(name_exprs) {
     std::vector<const char *> header_buffers;
     std::vector<const char *> header_names;
@@ -80,9 +80,18 @@ public:
     size_t logSize;
     TV_NVRTC_SAFE_CALL(nvrtcGetProgramLogSize(prog_, &logSize));
     std::string log(logSize, '0');
-    TV_NVRTC_SAFE_CALL(nvrtcGetProgramLog(prog_, &log[0]));
-    tv::ssprint(log);
+    auto nvrtc_compile_res = nvrtcGetProgramLog(prog_, &log[0]);
+    if (compileResult != NVRTC_SUCCESS) {
+      tv::ssprint(log);
+    }
+    TV_NVRTC_SAFE_CALL(nvrtc_compile_res);
+    compile_log_ = log;
     TV_ASSERT_RT_ERR(compileResult == NVRTC_SUCCESS, "nvrtc compile failed.");
+    // post check
+    for (size_t i = 0; i < name_exprs_.size(); ++i) {
+      get_lowered_name(name_exprs_[i]);
+    }
+
 #else
     TV_THROW_RT_ERR("you must compile with CUDA first to use nvrtc program");
 #endif
@@ -91,9 +100,10 @@ public:
   create(std::string code,
          std::unordered_map<std::string, std::string> headers = {},
          std::vector<std::string> opts = {},
-         std::string program_name = "kernel.cu",
+         std::string program_name = "kernel",
          std::vector<std::string> name_exprs = {}) {
-    return std::make_shared<NVRTCProgram>(code, headers, opts, program_name, name_exprs);
+    return std::make_shared<NVRTCProgram>(code, headers, opts, program_name,
+                                          name_exprs);
   }
   ~NVRTCProgram() {
 #ifdef TV_CUDA
@@ -117,13 +127,17 @@ public:
 #endif
   }
 
+  std::string compile_log() const { return compile_log_; }
+
+  std::string program_name() const { return program_name_; }
+
   std::string get_lowered_name(std::string name) {
 #ifdef TV_CUDA
-    const char* lowered_name;
+    const char *lowered_name;
     TV_NVRTC_SAFE_CALL(nvrtcGetLoweredName(prog_,
-                                        name.c_str(), // name expression
-                                        &lowered_name // lowered name
-                                        ));
+                                           name.c_str(), // name expression
+                                           &lowered_name // lowered name
+                                           ));
     return std::string(lowered_name);
 #else
     return "";
@@ -133,10 +147,10 @@ public:
 private:
 #ifdef TV_CUDA
   nvrtcProgram prog_ = nullptr;
-#else
-  void *prog_ = nullptr;
 #endif
   std::string code_;
+  std::string compile_log_;
+
   std::unordered_map<std::string, std::string> headers_;
   std::string program_name_;
   std::vector<std::string> name_exprs_;
@@ -144,23 +158,27 @@ private:
 
 class NVRTCModule {
 public:
-  enum ArgType { kTensor = 0, kArray = 1, kScalar = 2 };
+  enum ArgType { kTensor = 0, kArray = 1, kScalar = 2, kTensorView = 3 };
 
-  NVRTCModule(std::shared_ptr<NVRTCProgram> program)
-      : program_(program), module_(nullptr) {
+  NVRTCModule(std::shared_ptr<NVRTCProgram> program,
+              std::string cudadevrt_path = "")
+      : program_(program), module_(nullptr), cudadevrt_path_(cudadevrt_path) {
     TV_ASSERT_RT_ERR(program, "program ptr must not empty");
 #ifndef TV_CUDA
     TV_THROW_RT_ERR("you must compile with CUDA first to use NVRTCModule");
 #endif
+    ptx_name_ = program->program_name() + ".ptx";
   }
   static std::shared_ptr<NVRTCModule>
   create(std::string code,
          std::unordered_map<std::string, std::string> headers = {},
          std::vector<std::string> opts = {},
-         std::string program_name = "kernel.cu",
-         std::vector<std::string> name_exprs = {}) {
+         std::string program_name = "kernel",
+         std::vector<std::string> name_exprs = {},
+         std::string cudadevrt_path = "") {
     return std::make_shared<NVRTCModule>(
-        NVRTCProgram::create(code, headers, opts, program_name, name_exprs));
+        NVRTCProgram::create(code, headers, opts, program_name, name_exprs),
+        cudadevrt_path);
   }
 
   NVRTCModule &load() {
@@ -169,8 +187,24 @@ public:
       TV_THROW_RT_ERR("this module is already compiled");
     }
     auto ptx = program_->ptx();
-    TV_CUDA_RESULT_CHECK(
-        wrapper_.cuModuleLoadDataEx(&module_, ptx.data(), 0, 0, 0));
+    if (!cudadevrt_path_.empty()) {
+      size_t cubinSize;
+      void *cubin;
+      TV_CUDA_RESULT_CHECK(wrapper_.cuDrvLinkCreate(0, 0, 0, &linkState_));
+      TV_CUDA_RESULT_CHECK(wrapper_.cuDrvLinkAddFile(
+          linkState_, CU_JIT_INPUT_LIBRARY, cudadevrt_path_.c_str(), 0, 0, 0));
+      TV_CUDA_RESULT_CHECK(
+          wrapper_.cuDrvLinkAddData(linkState_, CU_JIT_INPUT_PTX, &ptx[0],
+                                    ptx.size(), ptx_name_.c_str(), 0, 0, 0));
+      TV_CUDA_RESULT_CHECK(
+          wrapper_.cuDrvLinkComplete(linkState_, &cubin, &cubinSize));
+      TV_CUDA_RESULT_CHECK(
+          wrapper_.cuDrvModuleLoadDataEx(&module_, cubin, 0, 0, 0));
+
+    } else {
+      TV_CUDA_RESULT_CHECK(
+          wrapper_.cuDrvModuleLoadDataEx(&module_, ptx.data(), 0, 0, 0));
+    }
 #endif
     return *this;
   }
@@ -181,7 +215,7 @@ public:
     TV_ASSERT_RT_ERR(module_ != nullptr, "moculde must be loaded");
     CUfunction k = nullptr;
     TV_CUDA_RESULT_CHECK(
-        wrapper_.cuModuleGetFunction(&k, module_, name.c_str()));
+        wrapper_.cuDrvModuleGetFunction(&k, module_, name.c_str()));
     return k;
   }
 #endif
@@ -228,25 +262,55 @@ public:
         TV_THROW_RT_ERR("not implemented");
       }
     }
-    TV_CUDA_RESULT_CHECK(wrapper_.cuLaunchKernel(
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvLaunchKernel(
         kernel(name), blocks[0], blocks[1], blocks[2], threads[0], threads[1],
         threads[2], smem_size, stream, params.data(), 0));
 #endif
   }
+#ifdef TV_CUDA
+  const CUDADriverWrapper &get_driver_wrapper() { return wrapper_; }
+
+  CUresult cuDrvLaunchKernel(CUfunction f, uint32_t gridDimX, uint32_t gridDimY,
+                             uint32_t gridDimZ, uint32_t blockDimX,
+                             uint32_t blockDimY, uint32_t blockDimZ,
+                             uint32_t sharedMemBytes, CUstream hStream,
+                             void **kernelParams, void **extra) const {
+    return wrapper_.cuDrvLaunchKernel(
+        f, gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
+        sharedMemBytes, hStream, kernelParams, extra);
+  }
+
+  void *get_global_ptr(std::string name) const {
+    size_t bytes;
+    CUdeviceptr ptr;
+    TV_CUDA_RESULT_CHECK(
+        wrapper_.cuDrvModuleGetGlobal(&ptr, &bytes, module_, name.c_str()));
+    return reinterpret_cast<void *>(ptr);
+  }
+
+#endif
 
   ~NVRTCModule() {
 #ifdef TV_CUDA
     if (module_ != nullptr) {
-      wrapper_.cuModuleUnload(module_);
+      wrapper_.cuDrvModuleUnload(module_);
     }
+    if (linkState_ != nullptr) {
+      wrapper_.cuDrvLinkDestroy(linkState_);
+    }
+
 #endif
   }
 
 private:
   std::shared_ptr<NVRTCProgram> program_;
+  std::string cudadevrt_path_;
+  std::string ptx_name_;
+
 #ifdef TV_CUDA
   CUmodule module_ = nullptr;
   CUDADriverWrapper wrapper_;
+  CUlinkState linkState_ = nullptr;
 #else
   void *module_ = nullptr;
 #endif

@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -354,6 +354,17 @@ class OutSmemLoader(GemmOutSmemLoader):
         return code
 
 
+def _add_out_iter_params_members(c: pccm.Class, long_index_t: str):
+    c.add_member("stride", str(long_index_t))
+    c.add_member("increment_row", str(long_index_t))
+    c.add_member("increment_group", str(long_index_t))
+    c.add_member("increment_cluster", str(long_index_t))
+    c.add_member("advance_row", str(long_index_t))
+    c.add_member("advance_group", str(long_index_t))
+    c.add_member("advance_cluster", str(long_index_t))
+    c.add_member("advance_tile", str(long_index_t))
+
+
 class OutIteratorParams(pccm.ParameterizedClass):
     def __init__(self,
                  tmap: thread_map.Out5DLinear,
@@ -363,14 +374,7 @@ class OutIteratorParams(pccm.ParameterizedClass):
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.long_index_t = dtypes.int64
         self.shuffle_in_stride = shuffle_in_stride
-        self.add_member("stride", str(self.long_index_t))
-        self.add_member("increment_row", str(self.long_index_t))
-        self.add_member("increment_group", str(self.long_index_t))
-        self.add_member("increment_cluster", str(self.long_index_t))
-        self.add_member("advance_row", str(self.long_index_t))
-        self.add_member("advance_group", str(self.long_index_t))
-        self.add_member("advance_cluster", str(self.long_index_t))
-        self.add_member("advance_tile", str(self.long_index_t))
+        _add_out_iter_params_members(self, str(self.long_index_t))
         if self.shuffle_in_stride:
             self.add_member("indice_ptr_", "const int*")
 
@@ -404,17 +408,16 @@ class OutIteratorParams(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def default_ctor(self):
-        return pccm.FunctionCode()
+        return pccm.code()
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", "int")
         code.ctor_init("stride", "stride_")
         if self.shuffle_in_stride:
-            code.arg("indice_ptr", "const int*")
+            code.arg("indice_ptr", "const int*", "nullptr")
             code.ctor_init("indice_ptr_", "indice_ptr")
-
         code.raw("""
         auto increment_params = ThreadMap::iteration_inc_params(stride);
         auto advance_params = ThreadMap::iteration_advance_params(stride);
@@ -446,8 +449,7 @@ class OutIterator(GemmOutputIterator):
 
         super().__init__(dtype,
                          self.iterations.prod() * access_length, access_length,
-                         dtype.itemsize() * access_length,
-                         access_per_vector)
+                         dtype.itemsize() * access_length, access_per_vector)
         self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.read_only = read_only
         self.add_param_class("tmap", tmap, "ThreadMap")
@@ -465,9 +467,10 @@ class OutIterator(GemmOutputIterator):
 
         # self.add_member("pointer_bkp_", self.pointer)
         self.add_member("params_", "Params const&")
-        self.add_member("column_masks_",
-                        "bool",
-                        array=f"[{self.iterations[4]}][{self.access_per_vector}]")
+        self.add_member(
+            "column_masks_",
+            "bool",
+            array=f"[{self.iterations[4]}][{self.access_per_vector}]")
         self.add_member("extent_row_, thread_start_row_", self.index_t)
         self.add_member("counts_", "int", array="[3]")
         if self.shuffle_in_stride:
@@ -565,7 +568,7 @@ class OutIterator(GemmOutputIterator):
         return new_obj
 
     def load_store_with_offset_template(self, store: bool):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         const_frag = "const" if store else ""
         const_mem = "" if store else "const"
 
@@ -600,9 +603,9 @@ class OutIterator(GemmOutputIterator):
                             {self.dtype} {const_mem} *memory_pointer = cur_pointer + offset;
                             """)
                         with code.range_("column", str(self.iterations[4]),
-                                        "TV_PRAGMA_UNROLL"):
+                                         "TV_PRAGMA_UNROLL"):
                             with code.range_("v", self.access_per_vector,
-                                            "TV_PRAGMA_UNROLL"):
+                                             "TV_PRAGMA_UNROLL"):
                                 code.raw(
                                     f"bool guard = row_guard && column_masks_[column][v];"
                                 )
@@ -633,7 +636,7 @@ class OutIterator(GemmOutputIterator):
                             """)
 
                         with code.range_("column", str(self.iterations[4]),
-                                        "TV_PRAGMA_UNROLL"):
+                                         "TV_PRAGMA_UNROLL"):
                             code.raw(
                                 f"bool guard = row_guard && column_masks_[column][0];"
                             )
@@ -673,7 +676,7 @@ class OutIterator(GemmOutputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store_with_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("frag",
                  f"{self.fragment_t} const &").arg("offset", str(self.index_t))
         if self.read_only:
@@ -682,7 +685,7 @@ class OutIterator(GemmOutputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("frag", f"{self.fragment_t} &").arg("offset",
                                                      str(self.index_t))
         return self.load_store_with_offset_template(False)

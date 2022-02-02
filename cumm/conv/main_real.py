@@ -1,24 +1,22 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
-from pathlib import Path
-from typing import Dict, List, Tuple
-
+import os
 import sys
 import time
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pccm
@@ -32,8 +30,12 @@ from cumm.conv.bases import NCHW, NHWC, ConvIterAlgo, ConvOpType
 from cumm.conv.main import ConvMainUnitTest, gen_gemm_kernels
 from cumm.conv.params import ConvProblem
 from cumm.gemm import kernel
-import os 
+from cumm.gemm.main import NVRTCMode
+from cumm.nvrtc import CummNVRTCModule
+
 os.environ["CUMM_DEBUG"] = "1"
+torch.backends.cuda.matmul.allow_tf32 = False
+torch.backends.cudnn.allow_tf32 = False
 
 
 def _asdv_test_simt_python():
@@ -228,6 +230,7 @@ def _asdv_test_simt_python():
             print(params.get_algo_name(), np.linalg.norm(dw_cpu - dw_ref_nhwc),
                   "Time=", op_duration)
 
+
 def _asdv_test_simt_python_v2():
     np.random.seed(12315)
     main_cu = ConvMainUnitTest()
@@ -246,14 +249,34 @@ def _asdv_test_simt_python_v2():
     lib_object = lib.cumm.conv.main.ConvMainUnitTest()
     algo_cls = lib.cumm.conv.main.ConvAlgoDesp
     params_cls = lib.cumm.conv.main.ConvParams
-
-    for params in main_cu.all_params[:1]:
+    a = tv.zeros([3], tv.int32, 0)
+    nvrtc_mode = NVRTCMode.ConstantMemory
+    for params in main_cu.all_params:
         if params.mask_sparse:
             continue
         # NCHW -> KCRS @ NCRSPQ = NKPQ
         print(params.get_algo_name())
         ndim = params.ndim
         ker = gen_gemm_kernels(params)
+        ker_nvrtc = gen_gemm_kernels(params, nvrtc_mode=nvrtc_mode)
+        ker_nvrtc.namespace = "wtf"
+        t = time.time()
+        custom_names = []
+        if nvrtc_mode == NVRTCMode.ConstantMemory:
+            custom_names = ["&wtf::params_raw"]
+        mod = CummNVRTCModule([ker_nvrtc],
+                              cudadevrt_path="",
+                              verbose=False,
+                              custom_names=custom_names)
+        print(ker_nvrtc.get_sizeof_conv_param_key())
+        # breakpoint()
+        # print(mod.get_ptx())
+
+        mod.load()
+        print(mod.kernels)
+        print("RTC COMPILE TIME", time.time() - t)
+        # breakpoint()
+
         # print("START", params.get_algo_name())
         if ndim == 3:
             HW = [56] * ndim
@@ -262,7 +285,7 @@ def _asdv_test_simt_python_v2():
 
         RS = [1] * ndim
         N = 1
-        C = 15
+        C = 128
         K = 128
         padding = [RS[0] // 2] * ndim
         stride = [1] * ndim
@@ -402,14 +425,62 @@ def _asdv_test_simt_python_v2():
         params_cpp.dilation = dilation
 
         params_cpp.beta = 0.0
+        use_dyn_parallel = False
+        nvrtc_params = params_cls.create_nvrtc_params()
+        nvrtc_params.module = mod.get_cpp_object()
+        nvrtc_params.mode = nvrtc_mode.value
+        if nvrtc_mode == NVRTCMode.DynamicParallism:
+            nvrtc_params.kernel_name = mod.get_lowered_name(
+                "wtf::nvrtc_kernel")
+            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
+            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
+
+        elif nvrtc_mode == NVRTCMode.KernelAndCPU:
+            nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
+            nvrtc_params.init_kernel_name = mod.get_lowered_name(
+                "wtf::nvrtc_kernel_cpu_out")
+            nvrtc_params.param_size = mod.const_values[
+                "wtf::kSizeOfConvParams"]
+
+            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
+            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
+            nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
+                                                  tv.uint8, 0)
+            nvrtc_params.param_storage_cpu = tv.empty(
+                [nvrtc_params.param_size], tv.uint8, -1, pinned=True)
+
+        elif nvrtc_mode == NVRTCMode.Direct:
+            nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
+            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
+            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
+        elif nvrtc_mode == NVRTCMode.ConstantMemory:
+            nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
+            nvrtc_params.init_kernel_name = mod.get_lowered_name(
+                "wtf::nvrtc_kernel_cpu_out")
+            nvrtc_params.param_size = mod.const_values[
+                "wtf::kSizeOfConvParams"]
+
+            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
+            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
+            nvrtc_params.constant_name = mod.get_lowered_name(
+                "&wtf::params_raw")
+            nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
+                                                  tv.uint8, 0)
+
+        else:
+            raise NotImplementedError
+        kt = tv.KernelTimer()
+        params_cpp.timer = kt._timer
+        params_cpp.nvrtc_params = nvrtc_params
 
         # print("CUDA PREPARED")
-        for i in range(10):
+        for i in range(1):
             lib_object.implicit_gemm2(params_cpp)  # type: tv.Tensor
-            print(time.time() - t)
+
+            # print(time.time() - t)
             if i != 9:
                 t = time.time()
-
+        print(kt.get_all_pair_time())
         op_duration = time.time() - t
         if params.op_type == ConvOpType.kForward:
             output_cpu = output_tv.cpu().numpy()

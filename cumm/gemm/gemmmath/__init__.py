@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,7 +35,7 @@ class Clamp(pccm.ParameterizedClass):
                                forceinline=True,
                                name="operator()")
     def call_operator(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         argument_t = core.array_type(self.dtype, self.num_element)
         code.arg("src", f"const {argument_t} &")
         code.raw(f"""
@@ -76,7 +76,7 @@ class UnaryIdentity(pccm.ParameterizedClass):
                                forceinline=True,
                                name="operator()")
     def call_operator(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         argument_t = core.array_type(self.dtype, self.num_element)
         code.arg("src", f"const {argument_t} &")
         code.raw(f"""

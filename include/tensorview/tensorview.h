@@ -18,8 +18,8 @@
 #include "dtypes.h"
 #include "mp_helper.h"
 
-#include "core/defs.h"
 #include "core/array.h"
+#include "core/defs.h"
 
 #include "prettyprint.h"
 #include <algorithm>
@@ -43,7 +43,6 @@
 
 namespace tv {
 
-
 #ifdef TV_CUDA
 struct GPU {
   GPU(cudaStream_t s = 0) : mStream(s) {}
@@ -52,7 +51,6 @@ struct GPU {
 };
 #endif
 struct CPU {};
-
 
 template <typename T> struct DefaultPtrTraits { typedef T *type; };
 
@@ -154,7 +152,8 @@ struct ShapeBase : public vecarray<Tindex, MaxDim> {
   ShapeBase(const std::vector<int64_t> &arr)
       : vecarray<Tindex, MaxDim>(arr.begin(), arr.end()) {}
 
-  TV_HOST_DEVICE ShapeBase<MaxDim, Tindex> &operator=(const ShapeBase<MaxDim, Tindex> &shape) {
+  TV_HOST_DEVICE ShapeBase<MaxDim, Tindex> &
+  operator=(const ShapeBase<MaxDim, Tindex> &shape) {
     TV_ASSERT(shape.ndim() <= MaxDim);
     for (size_t i = 0; i < shape.ndim(); ++i) {
       this->array_[i] = shape[i];
@@ -270,9 +269,8 @@ TV_HOST_DEVICE_INLINE unsigned rowArrayIdx(std::vector<TV_GLOBAL_INDEX> &shape,
   return offset;
 }
 
-inline TV_GLOBAL_INDEX
-rowArrayIdx(std::vector<TV_GLOBAL_INDEX> &shape,
-            std::vector<TV_GLOBAL_INDEX> &indexes_vec) {
+inline TV_GLOBAL_INDEX rowArrayIdx(std::vector<TV_GLOBAL_INDEX> &shape,
+                                   std::vector<TV_GLOBAL_INDEX> &indexes_vec) {
   TV_GLOBAL_INDEX offset = 0;
   TV_GLOBAL_INDEX m = 1;
   for (int i = shape.size() - 1; i >= 0; --i) {
@@ -334,7 +332,7 @@ TV_HOST_DEVICE_INLINE Index rowArrayIdxInv(Index index, Index *output,
 
 template <typename Index, unsigned NDim>
 TV_HOST_DEVICE_INLINE Index rowArrayIdxInvStride(Index index, Index *output,
-                                           const Index *stride) {
+                                                 const Index *stride) {
   TV_PRAGMA_UNROLL
   for (int i = 0; i < NDim; ++i) {
     output[i] = index / stride[i];
@@ -342,7 +340,6 @@ TV_HOST_DEVICE_INLINE Index rowArrayIdxInvStride(Index index, Index *output,
   }
   return index;
 }
-
 
 template <typename Index>
 TV_HOST_DEVICE Index rowArrayIdxInv(Index index, Index *output,
@@ -356,12 +353,13 @@ TV_HOST_DEVICE Index rowArrayIdxInv(Index index, Index *output,
 }
 
 template <typename Index, unsigned NDim>
-TV_HOST_DEVICE_INLINE constexpr Index rowArrayIdxStride(Index index, const array<Index, NDim>& stride) {
+TV_HOST_DEVICE_INLINE constexpr Index
+rowArrayIdxStride(Index index, const array<Index, NDim> &stride) {
   array<Index, NDim> res{};
   TV_PRAGMA_UNROLL
   for (int i = NDim - 1; i >= 0; --i) {
     res[i] = index / stride[i];
-    if (i > 0){
+    if (i > 0) {
       index -= res[i] * stride[i];
     }
   }
@@ -758,7 +756,8 @@ struct TensorView {
     TV_REQUIRE(i4 >= 0 && i4 < shape_[3],
                "index-%d(%d) out-of-range: [0, %d)\n", 3, int(i4), shape_[3]);
 #endif
-    return ptr_[i1 * stride_[0] + i2 * stride_[1] + i3 * stride_[2] + i4 * stride_[3]];
+    return ptr_[i1 * stride_[0] + i2 * stride_[1] + i3 * stride_[2] +
+                i4 * stride_[3]];
   }
 
   TV_HOST_DEVICE_INLINE T &operator[](int idx) const {

@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,7 +24,9 @@ from pccm.targets.cuda_ptx import RegDType
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
 from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                         TensorViewKernel)
+                         TensorViewKernel, TensorViewNVRTC,
+                         TensorViewNVRTCKernel)
+from cumm.constants import CUMM_MAXIMUM_NVRTC_CONV_NDIM
 from cumm.conv import input_iters
 from cumm.conv.algospec import get_algo_spec
 from cumm.conv.bases import (LAYOUT_TYPES, ConvEnum, ConvIterAlgo,
@@ -38,6 +40,7 @@ from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases
 from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.main import NVRTCMode
 from cumm.gemm.outputs import Output, OutputSmemStorage
 from cumm.gemm.utils import GemmUtilsCPU
 
@@ -45,14 +48,15 @@ from cumm.gemm.utils import GemmUtilsCPU
 def div_up(a, b):
     return (a + b - 1) // b
 
+
 class ConvUtils(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView)
+        self.add_dependency(TensorViewNVRTC)
 
-    @pccm.static_function
+    @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def get_spconv_logical_tile_count(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("m,n,k,tile_m, tile_n, split_k_slice, kv, op_type", "int")
         code.ret("tv::array<int, 3>")
         code.raw(f"""
@@ -75,6 +79,40 @@ class ConvUtils(pccm.Class):
         """)
         return code
 
+
+class ConvNVRTCParams(pccm.Class):
+    """used for nvrtc kernels. all ptrs are void*, alpha and beta are float.
+    """
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(ConvEnum)
+        self.add_member("ptr_A", f"const void*")
+        self.add_member("ptr_B", f"const void*")
+        self.add_member("ptr_C", f"void*")
+        self.add_member("ptr_D", f"const void*")
+
+        self.add_member("alpha, beta", f"float")
+        self.add_member("workspace", "void*")
+
+        self.add_member("mask_ptr", f"const uint32_t*")
+        self.add_member("mask_out_ptr", f"uint32_t*")
+        self.add_member("mask_filter", f"uint32_t")
+        self.add_member("reverse_mask", f"bool")
+        self.add_member("mask_width", f"int")
+
+        # conv problem
+        # we pre-alloc 5d data, so we only support at most 4d convolutions
+        self.add_member("ndim, N, C, K", "int")
+        self.add_member(
+            "input_dims, output_dims, ksize, padding, stride, dilation",
+            f"tv::array<int, {CUMM_MAXIMUM_NVRTC_CONV_NDIM}>")
+        self.add_member("kernel_volume", f"int")
+
+        self.add_member("mode", f"ConvEnum::Mode")
+        self.add_member("split_k_slices", f"int")
+        self.add_member("groups", f"int")
+
+
 class ConvParams(pccm.ParameterizedClass):
     def __init__(self,
                  problem: ConvProblem,
@@ -93,7 +131,8 @@ class ConvParams(pccm.ParameterizedClass):
                  mask_sparse: bool = False,
                  increment_k_first: bool = True):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvUtils, GemmUtilsCPU)
+        self.add_dependency(TensorViewNVRTC, GemmBasic, ConvEnum, ConvUtils,
+                            GemmUtilsCPU)
         self.ndim = problem.ndim
         self.op_type = problem.op_type
         self.problem = problem
@@ -129,7 +168,7 @@ class ConvParams(pccm.ParameterizedClass):
         self.add_member("ptr_A", f"const {dtype_a}*")
         self.add_member("ptr_B", f"const {dtype_b}*")
         self.add_member("ptr_C", f"{dtype_c}*")
-        self.add_member("ptr_D", f"{dtype_c}*")
+        self.add_member("ptr_D", f"const {dtype_c}*")
         if mask_sparse:
             self.add_member("mask_ptr", f"const uint32_t*")
             if problem.op_type == ConvOpType.kForward:
@@ -220,14 +259,14 @@ class ConvParams(pccm.ParameterizedClass):
         new_obj.out_params_ = self.out_params.python_ctor(n)
         return new_obj
 
-    @pccm.cuda.constructor
+    @pccm.cuda.constructor(host=True, device=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("problem", "ConvProblem")
         code.arg("A", f"const {self.dtype_a}*")
         code.arg("B", f"const {self.dtype_b}*")
         code.arg("C", f"{self.dtype_c}*")
-        code.arg("D", f"{self.dtype_c}*")
+        code.arg("D", f"const {self.dtype_c}*")
         if self.mask_sparse:
             code.arg("mask_ptr", f"const uint32_t*")
             code.arg("mask_argsort_ptr", f"const int*")
@@ -245,7 +284,6 @@ class ConvParams(pccm.ParameterizedClass):
         code.arg("split_k_slice", "int", "1")
         if self.have_workspace:
             code.arg("workspace", "void*", "nullptr")
-
 
         code.ctor_init("problem", "problem")
         if self.op_type == ConvOpType.kForward:
@@ -330,9 +368,11 @@ class ConvParams(pccm.ParameterizedClass):
                 #     f"TV_ASSERT_RT_ERR(problem.C % {self.tile_shape[1]} == 0, \"error\");"
                 # )
             else:
-                code.raw(
-                    f"TV_ASSERT_INVALID_ARG(gemm_k_iterations % problem.kernel_volume == 0, \"error\");"
-                )
+                code.raw(f"""
+                #if !defined(__CUDACC_RTC__) && !defined(__NVCC__)
+                TV_ASSERT_INVALID_ARG(gemm_k_iterations % problem.kernel_volume == 0, \"error\");
+                #endif
+                """)
                 # code.raw(
                 #     f"TV_ASSERT_RT_ERR(problem.{C_or_K} % (split_k_slice * {self.tile_shape[2]}) == 0, \"error\");"
                 # )
@@ -352,7 +392,7 @@ class ConvParams(pccm.ParameterizedClass):
         grid_dims.z = grid_dims_arr[2];
         """)
         # code.raw(f"""
-        # tv::ssprint("gemm_k_size", m, n, k, split_k_slice, gemm_k_iterations, 
+        # tv::ssprint("gemm_k_size", m, n, k, split_k_slice, gemm_k_iterations,
         #     "GX", grid_dims.x, "GY", grid_dims.y, "GZ", grid_dims.z);
         # """)
         if self.mask_sparse and not self.op_type == ConvOpType.kBackwardWeight:
@@ -396,7 +436,8 @@ class ConvKernel(pccm.ParameterizedClass):
                  need_source: bool = True,
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
-                 access_per_vector: int = 1):
+                 access_per_vector: int = 1,
+                 nvrtc_mode: NVRTCMode = NVRTCMode.Disabled):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -409,9 +450,13 @@ class ConvKernel(pccm.ParameterizedClass):
         2. conv kernel simulation is very slow.
         """
         super().__init__()
-        self.add_dependency(TensorView, TensorViewKernel, layout.RowMajor,
-                            layout.ColumnMajor, GemmBasicKernel)
+        self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
+                            layout.ColumnMajor, GemmBasicKernel,
+                            ConvNVRTCParams)
         self.need_source = need_source
+        self.nvrtc_mode = nvrtc_mode
+        self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
+
         problem = ConvProblem(ndim, op_type, layout_desp_input,
                               layout_desp_weight, layout_desp_output,
                               mask_sparse)
@@ -425,6 +470,7 @@ class ConvKernel(pccm.ParameterizedClass):
         self.splitk_serial = splitk_serial
         self.splitk_parallel = splitk_parallel
         have_workspace = splitk_serial or splitk_parallel
+        self.have_workspace = have_workspace
         transpose_gemm = trans_c
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
@@ -452,13 +498,10 @@ class ConvKernel(pccm.ParameterizedClass):
         self.algo = algo
         self.shuffle_stride = ShuffleStrideType.NoShuffle
         self.access_per_vector = access_per_vector
-        algo_spec = get_algo_spec(self.algo)(problem, tile_shape,
-                                             warp_tile_shape, num_stage,
-                                             dtype_a, dtype_b, dtype_c,
-                                             dtype_acc, dtype_comp, iter_algo,
-                                             tensorop, algo, mask_sparse,
-                                             increment_k_first,
-                                             access_per_vector)
+        algo_spec = get_algo_spec(self.algo)(
+            problem, tile_shape, warp_tile_shape, num_stage, dtype_a, dtype_b,
+            dtype_c, dtype_acc, dtype_comp, iter_algo, tensorop, algo,
+            mask_sparse, increment_k_first, access_per_vector)
         self.algo_spec = algo_spec
         self.input_spec = algo_spec.input_spec
         self.mma_spec = algo_spec.mma_spec
@@ -508,14 +551,28 @@ class ConvKernel(pccm.ParameterizedClass):
         inp_iter_a_param = self.input_spec.input_iter_a.get_params()
         inp_iter_b_param = self.input_spec.input_iter_b.get_params()
 
-        self.gemm_params = ConvParams(problem, tile_shape, dtype_a, dtype_b,
-                                      dtype_c, dtype_comp,
-                                      self.input_spec.layout_a,
-                                      self.input_spec.layout_b, self.layout_c,
-                                      inp_iter_a_param, inp_iter_b_param,
-                                      self.output_spec.out_iter.get_params(),
-                                      have_workspace, mask_sparse, increment_k_first)
+        self.gemm_params = ConvParams(
+            problem, tile_shape, dtype_a, dtype_b, dtype_c, dtype_comp,
+            self.input_spec.layout_a, self.input_spec.layout_b, self.layout_c,
+            inp_iter_a_param, inp_iter_b_param,
+            self.output_spec.out_iter.get_params(), have_workspace,
+            mask_sparse, increment_k_first)
         self.add_param_class("conv_params", self.gemm_params, "ConvParams")
+        self.add_param_class("conv_params", self.gemm_params.problem,
+                             "ConvProblem")
+        self.conv_param_key = "kSizeOfConvParams"
+        # use constexpr int to save metadata to ptx in nvrtc.
+        self.add_code_before_class(f"""
+        constexpr int {self.conv_param_key} = sizeof(ConvParams);
+        constexpr int kNumThreads = {self.num_threads};
+        constexpr int kSmemSize = {self.smem_size};
+        """)
+        if self.nvrtc_mode == NVRTCMode.ConstantMemory:
+            self.add_code_before_class(f"""
+            __constant__ tv::array<uint8_t, sizeof(ConvParams)> params_raw;
+            """)
+
+        # self.add_static_const("kSizeOfConvParams", "int", "sizeof(ConvParams)")
         # first_input_clear: for gemm, we don't need to clear frag in every input load
         # but gemm need it. gemm clear frag in iter.load, so we don't need
         # initial clear in mma.
@@ -539,9 +596,13 @@ class ConvKernel(pccm.ParameterizedClass):
 
         self.add_param_class("mma", self.mma_container, "Mma")
         self.add_param_class("output", self.output, "Output")
-        
+
     def support_splitk(self):
         return self.splitk_serial or self.splitk_parallel
+
+    def get_sizeof_conv_param_key(self):
+        assert self.namespace is not None
+        return self.namespace + "::" + self.conv_param_key
 
     def get_algo_name(self):
         res = f"{self.algo.value}_{self.dtype_a.shortcut()}{self.dtype_b.shortcut()}{self.dtype_c.shortcut()}"
@@ -577,13 +638,26 @@ class ConvKernel(pccm.ParameterizedClass):
     def conv_kernel(self):
         code = pccm.cuda.PTXCode()
         # code.add_pre_attr(f"__launch_bounds__({self.num_threads}, 4)")
-        code.arg("params", "ConvParams")
+        if self.is_nvrtc:
+            if self.nvrtc_mode != NVRTCMode.ConstantMemory:
+                if self.nvrtc_mode == NVRTCMode.Direct:
+                    code.arg("conv_nvrtc_params", "ConvNVRTCParams")
+                    self._nvrtc_params_template(code, "conv_nvrtc_params")
+                else:
+                    code.arg("params", "ConvParams")
+            else:
+                code.raw(f"""
+                ConvParams& params = *(reinterpret_cast<ConvParams*>(params_raw.data()));
+                """)
+        else:
+            code.arg("params", "ConvParams")
+
         min_arch = get_min_arch_of_algo(self.algo)
         arch_num = min_arch[0] * 100 + min_arch[1] * 10
         # use __CUDA_ARCH__ macro to reduce binary size
         # TODO this macro can't reduce compile time
-        with code.macro_if_(f"defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= {arch_num})"):
-
+        with code.macro_if_(
+                f"defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= {arch_num})"):
             code.raw(f"""
             constexpr bool kSplitKSerial = {pccm.boolean(self.splitk_serial)};
             extern __shared__ uint8_t SharedStorage[];
@@ -647,7 +721,8 @@ class ConvKernel(pccm.ParameterizedClass):
             """)
             if self.mask_sparse:
                 if not self.problem.op_type == ConvOpType.kBackwardWeight:
-                    num_mask_per_thread = self.tile_shape[0] // constants.WARP_SIZE
+                    num_mask_per_thread = self.tile_shape[
+                        0] // constants.WARP_SIZE
                     assert num_mask_per_thread > 0
                     code.raw(f"""
                     uint32_t kmask = 0;
@@ -785,7 +860,8 @@ class ConvKernel(pccm.ParameterizedClass):
                             f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
                         )
                     else:
-                        code.raw(f"out.run(output_op, accumulators, out_iter_C);")
+                        code.raw(
+                            f"out.run(output_op, accumulators, out_iter_C);")
             else:
                 if self.need_source:
                     code.raw(
@@ -817,6 +893,109 @@ class ConvKernel(pccm.ParameterizedClass):
             """)
         code.macro_endif_()
         return code
+
+    def _nvrtc_params_template(self,
+                               code: pccm.FunctionCode,
+                               param_name: str = "p"):
+        ndim = self.problem.ndim
+        p = param_name
+        if not self.mask_sparse:
+            code.raw(f"""
+            ConvProblem problem({p}.N, {p}.C, {p}.K, 
+                tv::arrayops::slice<0, {ndim}>({p}.input_dims), 
+                tv::arrayops::slice<0, {ndim}>({p}.output_dims), 
+                tv::arrayops::slice<0, {ndim}>({p}.ksize), 
+                tv::arrayops::slice<0, {ndim}>({p}.padding), 
+                tv::arrayops::slice<0, {ndim}>({p}.stride), 
+                tv::arrayops::slice<0, {ndim}>({p}.dilation), 
+                {p}.mode, {p}.split_k_slices, {p}.groups);
+            """)
+        else:
+            code.raw(f"""
+            ConvProblem problem({p}.N, {p}.C, {p}.K, {p}.kernel_volume, {p}.mode, {p}.split_k_slices, {p}.groups);
+            """)
+        args = [
+            "problem",
+            f"reinterpret_cast<const {self.dtype_a}*>({p}.ptr_A)",
+            f"reinterpret_cast<const {self.dtype_b}*>({p}.ptr_B)",
+            f"reinterpret_cast<{self.dtype_c}*>({p}.ptr_C)",
+            f"reinterpret_cast<const {self.dtype_c}*>({p}.ptr_D)",
+        ]
+        if self.mask_sparse:
+            args.extend([
+                f"{p}.mask_ptr, {p}.mask_argsort_ptr, {p}.indice_ptr",
+            ])
+            if self.problem.op_type == ConvOpType.kForward:
+                args.append(f"{p}.mask_out_ptr")
+            args.extend([
+                f"{p}.mask_filter, {p}.reverse_mask, {p}.indice_ptr",
+            ])
+            if self.problem.op_type == ConvOpType.kBackwardWeight:
+                args.append(f"{p}.mask_width")
+        args.append(
+            f"{self.dtype_comp}({p}.alpha), {self.dtype_comp}({p}.beta), {p}.split_k_slices"
+        )
+        if self.have_workspace:
+            args.append(f"{p}.workspace")
+        code.raw(f"""
+        ConvParams params({", ".join(args)});
+        """)
+
+    def nvrtc_kernel_template(self, dynamic_parallism: bool = True):
+        """we must use dynamic parallism first to calculate
+        some kernel meta data, then launch regular kernel.
+
+        """
+        code = pccm.code()
+        code.arg("p", "ConvNVRTCParams")
+        if not dynamic_parallism:
+            code.arg("out", "ConvParams*")
+        else:
+            code.arg("blocks", "dim3")
+            code.arg("stream", "cudaStream_t")
+
+        self._nvrtc_params_template(code)
+        if dynamic_parallism:
+            code.raw(f"""
+            conv_kernel<<<blocks, dim3({self.num_threads}), {self.smem_size}, stream>>>(params);
+            """)
+        else:
+            code.raw(f"""
+            out[0] = params;
+            """)
+
+        return code
+
+    # @pccm.cuda.cuda_global_function
+    # def conv_kernel(self):
+    #     """we use dynamic parallism first to calculate
+    #     some kernel meta data, then launch regular kernel.
+    #     """
+    #     code = pccm.cuda.PTXCode()
+    #     # code.add_pre_attr(f"__launch_bounds__({self.num_threads}, 4)")
+    #     code.arg("params", "ConvParams")
+
+    #     return self.conv_kernel_template(code, True)
+
+    @pccm.cuda.cuda_global_function
+    def nvrtc_kernel(self):
+        """we use dynamic parallism first to calculate
+        some kernel meta data, then launch regular kernel.
+        """
+        res = self.nvrtc_kernel_template(True)
+        if self.nvrtc_mode != NVRTCMode.DynamicParallism:
+            return res.make_invalid()
+        return res
+
+    @pccm.cuda.cuda_global_function
+    def nvrtc_kernel_cpu_out(self):
+        """we use a kernel to calculate metadata, then copy to
+        cpu, finally use that parameter to launch gemm kernel.
+        """
+        res = self.nvrtc_kernel_template(False)
+        if self.nvrtc_mode != NVRTCMode.ConstantMemory and self.nvrtc_mode != NVRTCMode.KernelAndCPU:
+            return res.make_invalid()
+        return res
 
     # @lineprof.lineprof_wrapper
     async def conv_kernel_python(self, params: ConvParams):

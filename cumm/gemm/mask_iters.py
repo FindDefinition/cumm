@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -326,7 +326,7 @@ class WarpTileIterator(bases.GemmWarpIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def set_kgroup_index(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("wmma_k", "int")
         if self.partk > 1:
             code.raw("wmma_k_index_ = wmma_k;")
@@ -626,7 +626,6 @@ class MaskTileIteratorParams(pccm.ParameterizedClass):
         self.tmap = tmap
         self.thread_access_shape = tmap.iterations
         self.iteration_delta = tmap.delta
-
         self.shuffle_in_stride = shuffle_in_stride
 
         #  self.add_member("stride_", str(self.index_t))
@@ -650,13 +649,14 @@ class MaskTileIteratorParams(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def default_ctor(self):
-        return pccm.FunctionCode()
+        return pccm.code()
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode(f"""
+        code = pccm.code()
+        code.raw(f"""
         inc_strided_ = stride * {self.iteration_delta[strided]} * sizeof({self.dtype});
         """)
         if self.advance_axis == 0:
@@ -678,7 +678,7 @@ class MaskTileIteratorParams(pccm.ParameterizedClass):
         code.arg("stride", "int")
         code.ctor_init("stride_", "stride")
         if self.shuffle_in_stride:
-            code.arg("indice_ptr", f"{self.index_t} const *")
+            code.arg("indice_ptr", f"{self.index_t} const *", "nullptr")
             code.ctor_init("indice_ptr_", "indice_ptr")
         return code
 
@@ -807,7 +807,7 @@ class MaskTileIterator(bases.GemmInputIterator):
     def ctor(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         int residue_size = (extent[{self.advance_axis}] - threadblock_offset[{self.advance_axis}]) %
                         {self.tile_shape[self.advance_axis]};
@@ -967,7 +967,7 @@ class MaskTileIterator(bases.GemmInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def update_indices(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if not self.shuffle_in_stride:
             return code
         code.raw(f"""
@@ -1000,7 +1000,7 @@ class MaskTileIterator(bases.GemmInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def tile_increment(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         with code.if_("is_residue_tile_"):
             if self.last_residual:
                 if self.advance_axis == 1:
@@ -1098,7 +1098,7 @@ class MaskTileIterator(bases.GemmInputIterator):
     def get(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode()
+        code = pccm.code()
         const = "const" if self.read_only else ""
         if self.sub_tile_shape[strided] == 1:
             indice_s = "indices_[s] + " if self.shuffle_in_stride else ""
@@ -1166,7 +1166,7 @@ class MaskTileIterator(bases.GemmInputIterator):
     def valid(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.sub_tile_shape[0] == 1:
             code.raw(f"""
             int scalar_index =
@@ -1244,7 +1244,7 @@ class MaskTileIterator(bases.GemmInputIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store_with_pointer_offset(self):
         if self.read_only:
-            return pccm.FunctionCode()
+            return pccm.code()
         code = pccm.FunctionCode(f"""
         store_with_byte_offset(frag, pointer_offset * sizeof({self.dtype}));
         """)
@@ -1386,7 +1386,7 @@ class MaskTileIterator(bases.GemmInputIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store_with_byte_offset(self):
         if self.read_only:
-            return pccm.FunctionCode()
+            return pccm.code()
         return self.loadstore_with_byte_offset_template(True)
 
     def load_with_byte_offset_python(self, frag: ArrayPtr, byte_offset: int):
@@ -1442,7 +1442,7 @@ class MaskTileIterator(bases.GemmInputIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store(self):
         if self.read_only:
-            return pccm.FunctionCode()
+            return pccm.code()
         code = pccm.FunctionCode(f"""
         store_with_byte_offset(frag, 0);
         """)

@@ -37,12 +37,10 @@ namespace transform {
 
 /// Transforms a fragment by doing a transpose
 template <int ElementCount, typename TransposeShape, typename Element>
-struct Transpose{
+struct Transpose {
   // we need a empty function before c++17.
   TV_DEVICE_INLINE
-  void transform(Element* dst, const Element* src) {
-
-  }
+  void transform(Element *dst, const Element *src) {}
 };
 
 /// Specialization for int8_t 4x4 transpose
@@ -58,9 +56,9 @@ struct Transpose<ElementCount, tv::mp_list_int<4, 4>, int8_t> {
       "Shape needs to be multiple of 16 elements to do a 4x4 transpose");
 
   TV_DEVICE_INLINE
-  void transform(Element* dst, const Element* src) {
-    const int* src_int = reinterpret_cast<const int*>(src);
-    int* dst_int = reinterpret_cast<int*>(dst);
+  void transform(Element *dst, const Element *src) {
+    const int *src_int = reinterpret_cast<const int *>(src);
+    int *dst_int = reinterpret_cast<int *>(dst);
 
     TV_PRAGMA_UNROLL
     for (int i = 0;
@@ -124,7 +122,7 @@ struct Transpose<ElementCount, tv::mp_list_int<4, 4>, int8_t> {
     }
   }
 };
-} // namespace math
+} // namespace transform
 
 } // namespace gemm
 } // namespace tv

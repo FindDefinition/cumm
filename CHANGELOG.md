@@ -1,9 +1,14 @@
 # Changelog
 
+## [0.3.0] - 2022-02-02
+### Added
+* Add nvrtc support for conv kernel.
+### Changed
+* format all code
+
 ## [0.2.8] - 2021-12-8
 ### Fixed
 * Fix missing sm37 in supported arch
-
 
 ## [0.2.7] - 2021-12-8
 ### Added

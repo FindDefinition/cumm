@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple
 import pccm
 from ccimport import compat
 
-from cumm.constants import TENSORVIEW_INCLUDE_PATH, CUMM_CPU_ONLY_BUILD
+from cumm.constants import CUMM_CPU_ONLY_BUILD, TENSORVIEW_INCLUDE_PATH
 
 
 def get_executable_path(executable: str) -> str:
@@ -44,7 +44,6 @@ _GPU_NAME_TO_ARCH = {
     r"(NVIDIA )?H100": "90",
     r"(NVIDIA )?A100": "80",
     r"(NVIDIA )?RTX A[0-9]000": "86",
-
     r"(NVIDIA )?TESLA H100": "90",
     r"(NVIDIA )?TESLA A100": "80",
     r"(NVIDIA )?TESLA V100": "70",
@@ -57,7 +56,8 @@ _GPU_NAME_TO_ARCH = {
     r"(NVIDIA )?TITAN X": "52",
     r"(NVIDIA )?GeForce RTX 30[0-9]0( Ti)?": "86",
     r"(NVIDIA )?GeForce RTX 20[0-9]0( Ti)?": "75",
-    r"(NVIDIA )?GeForce GTX 16[0-9]0( Ti)?": "75", # FIXME GTX 1660 don't have Tensor Core?
+    r"(NVIDIA )?GeForce GTX 16[0-9]0( Ti)?":
+    "75",  # FIXME GTX 1660 don't have Tensor Core?
     r"(NVIDIA )?GeForce GTX 10[0-9]0( Ti)?": "61",
     r"(NVIDIA )?GeForce GTX 9[0-9]0( Ti)?": "52",
 }
@@ -86,7 +86,10 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
         ('Ampere', '8.0;8.6+PTX'),
     ])
 
-    supported_arches = ['3.5', '3.7', '5.0', '5.2', '6.0', '6.1', '7.0', '7.2', '7.5', '8.0', '8.6', '9.0']
+    supported_arches = [
+        '3.5', '3.7', '5.0', '5.2', '6.0', '6.1', '7.0', '7.2', '7.5', '8.0',
+        '8.6', '9.0'
+    ]
     supported_arches += ['5.3', '6.2', '7.2', '8.7']
     valid_arch_strings = supported_arches + [
         s + "+PTX" for s in supported_arches
@@ -98,11 +101,12 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
     # See cmake/Modules_CUDA_fix/upstream/FindCUDA/select_compute_arch.cmake
     _arch_list = os.getenv('CUMM_CUDA_ARCH_LIST', None)
     _cuda_version = os.getenv('CUMM_CUDA_VERSION', None)
-    _enable_cross_compile_aarch64 = os.getenv('CUMM_CROSS_COMPILE_TARGET', None) == "aarch64"
+    _enable_cross_compile_aarch64 = os.getenv('CUMM_CROSS_COMPILE_TARGET',
+                                              None) == "aarch64"
 
     if _arch_list is not None and _arch_list.lower() == "all":
-        msg = ( "you must provide CUDA version by CUMM_CUDA_VERSION, "
-                "for example, export CUMM_CUDA_VERSION=\"10.2\"")
+        msg = ("you must provide CUDA version by CUMM_CUDA_VERSION, "
+               "for example, export CUMM_CUDA_VERSION=\"10.2\"")
         assert _cuda_version is not None, msg
         cuda_ver_tuple = _cuda_version.split(".")
         if len(cuda_ver_tuple) == 2:
@@ -173,7 +177,8 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
     flags = []
     nums: List[Tuple[int, int]] = []
     if not arch_list:
-        raise ValueError("can't find arch or can't recogize your GPU. "
+        raise ValueError(
+            "can't find arch or can't recogize your GPU. "
             "use env CUMM_CUDA_ARCH_LIST to specify your gpu arch. "
             "for example, export CUMM_CUDA_ARCH_LIST=\"8.0;8.6+PTX\"")
     for arch in arch_list:
@@ -193,13 +198,14 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
 
     return sorted(list(set(flags))), nums
 
+
 def _get_cuda_include_lib():
     if compat.InWindows:
         nvcc_version = subprocess.check_output(["nvcc", "--version"
                                                 ]).decode("utf-8").strip()
         nvcc_version_str = nvcc_version.split("\n")[3]
         version_str: str = re.findall(r"release (\d+.\d+)",
-                                        nvcc_version_str)[0]
+                                      nvcc_version_str)[0]
         windows_cuda_root = Path(
             "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
         if not windows_cuda_root.exists():
@@ -211,6 +217,7 @@ def _get_cuda_include_lib():
         include = linux_cuda_root / f"include"
         lib64 = linux_cuda_root / f"lib64"
     return include, lib64
+
 
 class CUDALibs(pccm.Class):
     def __init__(self):
@@ -226,7 +233,10 @@ class CUDALibs(pccm.Class):
         self.build_meta.libpaths.append(lib64)
         # self.build_meta.compiler_to_cflags["nvcc"] += ["-keep", "-lineinfo", "--source-in-ptx"]
         # http://www.ssl.berkeley.edu/~jimm/grizzly_docs/SSL/opt/intel/cc/9.0/lib/locale/en_US/mcpcom.msg
-        self.build_meta.compiler_to_cflags["nvcc"].extend(["-Xcudafe", "\"--diag_suppress=implicit_return_from_non_void_function\""])
+        self.build_meta.compiler_to_cflags["nvcc"].extend([
+            "-Xcudafe",
+            "\"--diag_suppress=implicit_return_from_non_void_function\""
+        ])
 
 
 class TensorViewCPU(pccm.Class):
@@ -279,10 +289,21 @@ class TensorView(pccm.Class):
         super().__init__()
         if not CUMM_CPU_ONLY_BUILD:
             self.add_dependency(CUDALibs, TensorViewCPU)
-            self.build_meta.compiler_to_cflags["nvcc,clang++,g++"] = ["-DTV_CUDA"]
+            self.build_meta.compiler_to_cflags["nvcc,clang++,g++"] = [
+                "-DTV_CUDA"
+            ]
             self.build_meta.compiler_to_cflags["cl"] = ["/DTV_CUDA"]
         else:
             self.add_dependency(TensorViewCPU)
+
+
+class CummNVRTCLib(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorView)
+        self.add_include("tensorview/cuda/nvrtc.h")
+        # self.build_meta.add_cflags("nvcc", "-dc")
+
 
 class CompileInfo(pccm.Class):
     def __init__(self):
@@ -295,10 +316,10 @@ class CompileInfo(pccm.Class):
         self.add_include("vector", "tuple")
         self.add_include("string")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.static_function
     def get_compiled_cuda_arch(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         std::vector<std::tuple<int, int>> res;
         """)
@@ -307,12 +328,14 @@ class CompileInfo(pccm.Class):
         code.raw(f"return res;")
         return code.ret("std::vector<std::tuple<int, int>>")
 
+
 class TensorViewKernel(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("tensorview/cuda/kernel_all.h")
         self.add_include("tensorview/cuda/device_ops.h")
         self.add_include("tensorview/gemm/debug.h")
+
 
 class TensorViewNVRTC(pccm.Class):
     """a class that contains all tensorview features with nvrtc support.
@@ -323,7 +346,6 @@ class TensorViewNVRTC(pccm.Class):
         self.build_meta.add_includes(include, TENSORVIEW_INCLUDE_PATH)
         self.build_meta.compiler_to_cflags["nvcc"] = ["-DTV_CUDA"]
         self.add_include("tensorview/core/all.h")
-        self.add_include("tensorview/gemm/debug.h")
 
 
 class TensorViewNVRTCKernel(pccm.Class):
@@ -331,13 +353,15 @@ class TensorViewNVRTCKernel(pccm.Class):
         super().__init__()
         self.add_dependency(TensorViewNVRTC)
         self.add_include("tensorview/cuda/device_ops.h")
+        self.add_include("tensorview/gemm/debug.h")
         # self.add_include("tensorview/gemm/dtypes/all.h")
         # self.add_include("tensorview/gemm/core/all.h")
         # self.add_include("tensorview/gemm/arch/memory.h")
         # self.add_include("tensorview/gemm/arch/transpose.h")
         # self.add_include("tensorview/gemm/arch/semaphore.h")
         # self.add_include("tensorview/hash/all.cu.h")
-        self.add_include("tensorview/gemm/arch/memory_sm75.h")
+        # self.add_include("tensorview/gemm/arch/memory_sm75.h")
+
 
 class TensorViewHashKernel(pccm.Class):
     def __init__(self):
@@ -350,6 +374,7 @@ class TensorViewMath(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("tensorview/math/all.h")
+
 
 class GemmDTypes(pccm.Class):
     def __init__(self):
@@ -385,6 +410,7 @@ class PyBind11(pccm.Class):
         # self.add_include("pybind11/eigen.h")
         self.add_include("pybind11/stl_bind.h")
 
+
 class BoostGeometryLib(pccm.Class):
     def __init__(self):
         super().__init__()
@@ -399,6 +425,7 @@ class NlohmannJson(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("tensorview/thirdparty/nlohmann/json.hpp")
+
 
 class TslRobinMap(pccm.Class):
     def __init__(self):

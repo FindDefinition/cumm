@@ -24,15 +24,17 @@ namespace tv {
 
 #ifdef TV_CUDA
 template <typename TimeT = std::chrono::microseconds> struct CudaContextTimer {
-  CudaContextTimer(bool enable = true): enable_(enable) {
-    if (enable_){{
-      checkCudaErrors(cudaDeviceSynchronize());
-      mCurTime = std::chrono::steady_clock::now();
-    }}
+  CudaContextTimer(bool enable = true) : enable_(enable) {
+    if (enable_) {
+      {
+        checkCudaErrors(cudaDeviceSynchronize());
+        mCurTime = std::chrono::steady_clock::now();
+      }
+    }
   }
   typename TimeT::rep report() {
     typename TimeT::rep res;
-    if (enable_){
+    if (enable_) {
       checkCudaErrors(cudaDeviceSynchronize());
       auto duration = std::chrono::duration_cast<TimeT>(
           std::chrono::steady_clock::now() - mCurTime);
@@ -41,10 +43,11 @@ template <typename TimeT = std::chrono::microseconds> struct CudaContextTimer {
     }
     return res;
   }
-  CudaContextTimer<TimeT>& enable(){
+  CudaContextTimer<TimeT> &enable() {
     enable_ = true;
     return *this;
   }
+
 private:
   std::chrono::time_point<std::chrono::steady_clock> mCurTime;
   bool enable_;

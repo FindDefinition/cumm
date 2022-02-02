@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,7 +17,7 @@
 #include <tensorview/core/all.h>
 #ifdef __CUDACC_RTC__
 #include <tensorview/core/nvrtc_std.h>
-#else 
+#else
 #include <type_traits>
 #endif
 
@@ -59,12 +59,12 @@ using itemsize_to_unsigned_t = typename detail::SizeToInt<K, false>::type;
 template <typename K>
 using to_unsigned_t = typename detail::MapTypeToUnsignedInt<K>::type;
 
-
 template <typename K>
-constexpr to_unsigned_t<K> empty_key_v =
-    std::numeric_limits<to_unsigned_t<K>>::max();
+constexpr to_unsigned_t<K>
+    empty_key_v = std::numeric_limits<to_unsigned_t<K>>::max();
 
-template <typename K, typename V, to_unsigned_t<K> EmptyKey = empty_key_v<K>> struct pair {
+template <typename K, typename V, to_unsigned_t<K> EmptyKey = empty_key_v<K>>
+struct pair {
   K first;
   V second;
   using key_type_uint = to_unsigned_t<K>;

@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -13,17 +13,19 @@
 # limitations under the License.
 
 from typing import List, Optional, Tuple
+
+import numpy as np
 import pccm
-import numpy as np 
-from cumm.gemm.core.metaarray import MetaArray, seq
+
 from cumm.gemm.codeops import div_up
-from cumm.gemm.layout_tensorop import to_stride_list, rowmajor_inverse_list
+from cumm.gemm.core.metaarray import MetaArray, seq
+from cumm.gemm.layout_tensorop import rowmajor_inverse_list, to_stride_list
 
 
 class Mask(pccm.ParameterizedClass):
     def __init__(self, shape: MetaArray[int]):
         super().__init__()
-        self.shape = shape 
+        self.shape = shape
         for s in shape:
             assert (s & (s - 1) == 0) and s != 0, f"{s} must be power of 2"
 
@@ -33,10 +35,10 @@ class Mask(pccm.ParameterizedClass):
         self.add_member("mask_", f"tv::array<uint32_t, {self.num_mask_32}>")
 
     def get_masks(self, *idxes: Optional[int]):
-        assert len(idxes) == len(self.shape )
+        assert len(idxes) == len(self.shape)
         masks = [0] * self.num_mask_32
         refined_idxes: List[List[int]] = []
-        refined_shape: MetaArray[int] = MetaArray(*[0] * len(self.shape ))
+        refined_shape: MetaArray[int] = MetaArray(*[0] * len(self.shape))
         prod: int = 1
         for i, idx in enumerate(idxes):
             if idx is None:
@@ -57,17 +59,20 @@ class Mask(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor(host=True, device=True, forceinline=True)
     def ctor(self):
-        return pccm.FunctionCode()
+        return pccm.code()
 
     @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def clear(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"mask_.clear();")
-        return code 
+        return code
 
-    @pccm.cuda.member_function(const=True, host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(const=True,
+                               host=True,
+                               device=True,
+                               forceinline=True)
     def query(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("idx", "int")
         if self.num_mask_32 == 1:
             code.raw(f"""
@@ -77,9 +82,12 @@ class Mask(pccm.ParameterizedClass):
         code.raw(f"return mask_[idx >> 5] & (1u << (idx & 0b11111))")
         return code.ret("uint32_t")
 
-    @pccm.cuda.member_function(const=True, host=True, device=True, forceinline=True)
+    @pccm.cuda.member_function(const=True,
+                               host=True,
+                               device=True,
+                               forceinline=True)
     def query_coord(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         strs: List[str] = []
         for i in range(len(self.shape)):
             code.arg(f"idx{i}", "int")
@@ -91,7 +99,7 @@ class Mask(pccm.ParameterizedClass):
 
     @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("pred", "uint32_t")
         code.arg("idx", "int")
 
@@ -107,7 +115,7 @@ class Mask(pccm.ParameterizedClass):
 
     @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def set_coord(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("pred", "uint32_t")
         strs: List[str] = []
         for i in range(len(self.shape)):
@@ -120,7 +128,7 @@ class Mask(pccm.ParameterizedClass):
 
     @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def clear_if_pred(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("pred", "uint32_t")
         strs: List[str] = []
         for i in range(len(self.shape)):
@@ -132,7 +140,8 @@ class Mask(pccm.ParameterizedClass):
         """)
         return code
 
-    def clear_mask_if_pred_template(self, code: pccm.FunctionCode, pred: str, idxes: Tuple[Optional[int], ...]):
+    def clear_mask_if_pred_template(self, code: pccm.FunctionCode, pred: str,
+                                    idxes: Tuple[Optional[int], ...]):
         # TODO use asm may faster?
         clear_masks = self.get_masks(*idxes)
         for j in range(len(clear_masks)):
@@ -149,9 +158,11 @@ class Mask(pccm.ParameterizedClass):
                 code.raw(f"""
                 mask_.mask_[{j}] = {pred} ? 0u : mask_.mask_[{j}];
                 """)
-        return code 
+        return code
 
-    def clear_mask_if_not_pred_template(self, code: pccm.FunctionCode, pred: str, idxes: Tuple[Optional[int], ...]):
+    def clear_mask_if_not_pred_template(self, code: pccm.FunctionCode,
+                                        pred: str, idxes: Tuple[Optional[int],
+                                                                ...]):
         # TODO use asm may faster?
         clear_masks = self.get_masks(*idxes)
         for j in range(len(clear_masks)):
@@ -168,7 +179,7 @@ class Mask(pccm.ParameterizedClass):
                 code.raw(f"""
                 mask_.mask_[{j}] = {pred}u ? mask_.mask_[{j}]: 0;
                 """)
-        return code 
+        return code
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def clear_all_mask_if_not_pred(self):

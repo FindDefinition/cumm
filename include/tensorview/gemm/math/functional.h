@@ -33,8 +33,8 @@
 
 #pragma once
 #include <tensorview/core/all.h>
-#include <tensorview/math/all.h>
 #include <tensorview/gemm/dtypes/all.h>
+#include <tensorview/math/all.h>
 
 namespace tv {
 namespace math {
@@ -111,7 +111,6 @@ template <typename T, size_t N> struct multiplies<array<T, N>> {
     return result;
   }
 };
-
 
 /// Squares with optional conversion
 template <typename T, typename Output = T> struct square {
@@ -463,7 +462,8 @@ template <typename T, size_t N> struct minimum<array<T, N>> {
   }
 
   TV_HOST_DEVICE_INLINE
-  constexpr array<T, N> operator()(array<T, N> const &lhs, array<T, N> const &rhs) const {
+  constexpr array<T, N> operator()(array<T, N> const &lhs,
+                                   array<T, N> const &rhs) const {
 
     array<T, N> result;
     minimum<T> scalar_op;
@@ -477,7 +477,8 @@ template <typename T, size_t N> struct minimum<array<T, N>> {
   }
 
   TV_HOST_DEVICE_INLINE
-  constexpr array<T, N> operator()(array<T, N> const &lhs, T const &scalar) const {
+  constexpr array<T, N> operator()(array<T, N> const &lhs,
+                                   T const &scalar) const {
 
     array<T, N> result;
     minimum<T> scalar_op;
@@ -491,7 +492,8 @@ template <typename T, size_t N> struct minimum<array<T, N>> {
   }
 
   TV_HOST_DEVICE_INLINE
-  constexpr array<T, N> operator()(T const &scalar, array<T, N> const &rhs) const {
+  constexpr array<T, N> operator()(T const &scalar,
+                                   array<T, N> const &rhs) const {
 
     array<T, N> result;
     minimum<T> scalar_op;
@@ -1572,7 +1574,7 @@ TV_HOST_DEVICE_INLINE array<T, N> fma(array<T, N> const &a,
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-}
+} // namespace math
 
 } // namespace tv
 

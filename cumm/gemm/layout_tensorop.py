@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,14 +27,16 @@ from cumm.gemm.core import MetaArray, metaseq, seq
 def to_stride(shape: np.ndarray):
     return np.cumprod(shape[::-1])[::-1]
 
+
 def to_stride_list(shape: MetaArray[int]):
     shape = shape[::-1]
     res = MetaArray(*shape)
     m = 1
     for i, s in enumerate(shape):
-        res[i] = m 
+        res[i] = m
         m *= s
     return res[::-1]
+
 
 def rowmajor_inverse(index: int, shape: np.ndarray) -> np.ndarray:
     res = np.zeros_like(shape)
@@ -46,6 +48,7 @@ def rowmajor_inverse(index: int, shape: np.ndarray) -> np.ndarray:
             index /= shape[i]
     return res
 
+
 def rowmajor_inverse_list(index: int, shape: MetaArray[int]) -> MetaArray[int]:
     res = shape.copy()
     ndim = len(shape)
@@ -55,6 +58,7 @@ def rowmajor_inverse_list(index: int, shape: MetaArray[int]) -> MetaArray[int]:
             index -= res[i]
             index //= shape[i]
     return res
+
 
 class VoltaTensorOpCrosswise(pccm.ParameterizedClass):
     def __init__(self, element_size: int, kblock: int = 32):
@@ -78,7 +82,7 @@ class VoltaTensorOpCrosswise(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -183,7 +187,7 @@ class VoltaTensorOpCongruous(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -412,7 +416,7 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -444,7 +448,7 @@ class TensorOpMultiplicand(pccm.ParameterizedClass):
                                constexpr=True,
                                const=True)
     def call_operator(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.spec_32:
             code.raw(f"""
             int tc = y / 32;
@@ -633,7 +637,7 @@ class TensorOpMultiplicandColumnMajorInterleaved(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -698,7 +702,7 @@ class TensorOpMultiplicandRowMajorInterleaved(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code

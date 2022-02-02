@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -17,6 +17,7 @@ from typing import (Any, Callable, Dict, Generator, Generic, Hashable,
                     Iterable, List, Tuple, TypeVar, Union)
 
 import pccm
+
 from cumm import dtypes
 
 _T = TypeVar("_T")
@@ -63,6 +64,7 @@ class Condition:
         else:
             return false_cond
 
+
 def dispatch_ints(code: pccm.FunctionCode, ints: List[int], var: str):
     """equivalent to tv::dispatch_int, exists because some compiler
     don't support nested dispatch_int.
@@ -70,14 +72,15 @@ def dispatch_ints(code: pccm.FunctionCode, ints: List[int], var: str):
     for i, val in enumerate(ints):
         if i == 0:
             with code.if_(f"{var} == {val}"):
-                yield val 
+                yield val
         else:
             with code.else_if_(f"{var} == {val}"):
-                yield val 
+                yield val
     with code.else_():
         code.raw(f"""
         TV_THROW_RT_ERR("unknown val {var}, available: {ints}")
         """)
+
 
 def dispatch(code: pccm.FunctionCode, dts: List[dtypes.DType], var: str):
     """equivalent to tv::dispatch, exists because some compiler
@@ -86,10 +89,10 @@ def dispatch(code: pccm.FunctionCode, dts: List[dtypes.DType], var: str):
     for i, dtype in enumerate(dts):
         if i == 0:
             with code.if_(f"{var} == tv::DType({dtype.tv_dtype})"):
-                yield dtype 
+                yield dtype
         else:
             with code.else_if_(f"{var} == tv::DType({dtype.tv_dtype})"):
-                yield dtype 
+                yield dtype
     with code.else_():
         code.raw(f"""
         TV_THROW_RT_ERR("unknown dtype {var}, available: {dts}")

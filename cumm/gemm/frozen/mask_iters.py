@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,6 +26,7 @@ from cumm.gemm import bases, codeops, constants, layout, thread_map
 from cumm.gemm.arch import memory
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.mask_iters import MaskTileIteratorParams, div_up
+
 
 class MaskTileIteratorGather(bases.GemmInputIterator):
     """
@@ -100,8 +101,9 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
             assert have_output_ptr
             assert not self.read_only
         self.is_scatter = is_scatter
-        self.add_member("pointer_", self.const_byte_pointer
-                        if read_only else self.byte_pointer)
+        self.add_member(
+            "pointer_",
+            self.const_byte_pointer if read_only else self.byte_pointer)
         if have_output_ptr:
             if self.is_scatter:
                 self.add_member("out_pointer_", self.const_byte_pointer)
@@ -144,7 +146,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     def ctor(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         int residue_size = (extent[{self.advance_axis}] - threadblock_offset[{self.advance_axis}]) %
                         {self.tile_shape[self.advance_axis]};
@@ -234,7 +236,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
         code.arg("params", f"Params const &")
         code.arg("ptr",
                  f"{self.const_pointer if self.read_only else self.pointer}")
-        output_const  = "const " if self.is_scatter else ""
+        output_const = "const " if self.is_scatter else ""
         if self.have_output_ptr:
             code.arg("output_ptr", f"{output_const} {self.pointer}")
 
@@ -268,11 +270,11 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
                     thread_id: int,
                     tb_offset: MetaArray[int],
                     is_left: bool = True) -> "MaskTileIteratorGather":
-        new_obj = MaskTileIteratorGather(self.dtype, self.tile_shape,
-                                   self.sub_tile_shape, self.tmap, params,
-                                   self.advance_axis, self.num_sub_access,
-                                   self.transpose_load, self.last_residual,
-                                   self.shuffle_in_stride, self.read_only)
+        new_obj = MaskTileIteratorGather(
+            self.dtype, self.tile_shape, self.sub_tile_shape, self.tmap,
+            params, self.advance_axis, self.num_sub_access,
+            self.transpose_load, self.last_residual, self.shuffle_in_stride,
+            self.read_only)
         new_obj.params_ = params
         new_obj.pointer_ = ptr.change_access_byte_size(1)
         new_obj.extent_ = extent
@@ -327,7 +329,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def update_indices(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if not self.shuffle_in_stride:
             return code
         code.raw(f"""
@@ -352,7 +354,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     def update_indices_identity(self):
         """if indice ptr is nullptr, use this function to get identity offset.
         """
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if not self.shuffle_in_stride:
             return code
         code.raw(f"""
@@ -372,7 +374,6 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
         """)
         return code
 
-
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_pointer_offset(self):
         code = pccm.FunctionCode(f"""
@@ -382,20 +383,19 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_output_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.have_output_ptr:
             code.raw(f"""
             out_pointer_ += sizeof({self.dtype}) * offset;
             """)
         return code.arg("offset", str(self.long_index_t))
 
-
     def add_pointer_offset_python(self, offset: int):
         self.pointer_ += self.dtype.itemsize() * offset
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def tile_increment(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         with code.if_("is_residue_tile_"):
             if self.last_residual:
                 if self.advance_axis == 1:
@@ -415,7 +415,6 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
                         code.raw(f"""
                         out_pointer_ += sizeof({self.dtype}) * params_.stride_ * residue_offset_;
                         """)
-
 
             else:
                 if self.advance_axis == 1:
@@ -525,7 +524,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     def get(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode()
+        code = pccm.code()
         const = "const" if self.read_only else ""
         if self.sub_tile_shape[strided] == 1:
             indice_s = "indices_[s] + " if self.shuffle_in_stride else ""
@@ -564,8 +563,8 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     def get_output(self):
         contig = 1
         strided = 0
-        output_const  = "const" if self.is_scatter else ""
-        code = pccm.FunctionCode()
+        output_const = "const" if self.is_scatter else ""
+        code = pccm.code()
         const = "const" if self.read_only else ""
         if not self.have_output_ptr:
             code.raw(f"return nullptr;")
@@ -579,7 +578,6 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
             v;
         """).arg("s,c,v", "int")
         return code.ret(f"{output_const} {self.access_t} *")
-
 
     def get_python(self, c: int, ss: int, v: int) -> ArrayPtr:
         contig = 1
@@ -623,7 +621,6 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
                 pointer_ -= params_.inc_advance_;
                 """)
 
-
     def end_iter_python(self):
         self.pointer_ += self.params_.inc_next_
         self.pointer_ -= self.params_.inc_advance_
@@ -632,7 +629,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     def valid(self):
         contig = 1
         strided = 0
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.sub_tile_shape[0] == 1:
             code.raw(f"""
             int scalar_index =
@@ -710,7 +707,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store_with_pointer_offset(self):
         if self.read_only:
-            return pccm.FunctionCode()
+            return pccm.code()
         code = pccm.FunctionCode(f"""
         store_with_byte_offset(frag, pointer_offset * sizeof({self.dtype}));
         """)
@@ -724,7 +721,9 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
         self.load_with_byte_offset_python(
             frag, pointer_offset * self.dtype.itemsize())
 
-    def loadstore_with_byte_offset_template(self, store: bool, out_load: bool = False):
+    def loadstore_with_byte_offset_template(self,
+                                            store: bool,
+                                            out_load: bool = False):
         contig = 1
         strided = 0
         code = pccm.cuda.PTXCode("")
@@ -783,7 +782,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
                             //    frag_ptr[idx], access_ptr, valid(s, c, v));
                             """)
                 # for gather/scatter iters, we enable increment only if:
-                # store output ptr or 
+                # store output ptr or
                 # is_scatter and load output
                 if not self.shuffle_in_stride or is_scatter_load or is_gather_store:
                     code.raw(f"""
@@ -858,7 +857,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store_with_byte_offset(self):
         if self.read_only and not self.have_output_ptr:
-            return pccm.FunctionCode()
+            return pccm.code()
         return self.loadstore_with_byte_offset_template(True)
 
     def load_with_byte_offset_python(self, frag: ArrayPtr, byte_offset: int):
@@ -914,7 +913,7 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store(self):
         if self.read_only and not self.have_output_ptr:
-            return pccm.FunctionCode()
+            return pccm.code()
         code = pccm.FunctionCode(f"""
         store_with_byte_offset(frag, 0);
         """)
@@ -1052,4 +1051,3 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
                         bit_idx = residual % self.mask_tensor_shape[2]
                         self.predicates_[word_idx] |= (
                             int(valid) << (byte_idx * 8 + bit_idx))
-

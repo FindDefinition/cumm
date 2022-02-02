@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -13,10 +13,10 @@
 // limitations under the License.
 
 #pragma once
-#include <tensorview/core/common.h>
-#include <tensorview/core/defs.h>
 #include <array>
 #include <memory>
+#include <tensorview/core/common.h>
+#include <tensorview/core/defs.h>
 #include <tensorview/cuda/driverops.h>
 #include <unordered_map>
 #ifdef TV_CUDA
@@ -37,7 +37,7 @@ struct ContextValue {
 struct ContextManager {
   // windows nvcc have bug when use std::function
   std::uintptr_t (*creater)();
-  void(*deleter)(std::uintptr_t);
+  void (*deleter)(std::uintptr_t);
   // std::function<void(std::uintptr_t)> deleter;
 };
 

@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -151,11 +151,17 @@ public:
     return const_reverse_iterator(begin());
   }
 #endif
-  TV_HOST_DEVICE_INLINE constexpr reference front() noexcept { return *begin(); }
+  TV_HOST_DEVICE_INLINE constexpr reference front() noexcept {
+    return *begin();
+  }
 
-  TV_HOST_DEVICE_INLINE constexpr const_reference front() const noexcept { return array_[0]; }
+  TV_HOST_DEVICE_INLINE constexpr const_reference front() const noexcept {
+    return array_[0];
+  }
 
-  TV_HOST_DEVICE_INLINE constexpr reference back() noexcept { return N ? *(end() - 1) : *end(); }
+  TV_HOST_DEVICE_INLINE constexpr reference back() noexcept {
+    return N ? *(end() - 1) : *end();
+  }
 
   TV_HOST_DEVICE_INLINE constexpr const_reference back() const noexcept {
     return N ? array_[N - 1] : array_[0];
@@ -215,7 +221,8 @@ public:
 };
 
 template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr bool operator==(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
+TV_HOST_DEVICE_INLINE constexpr bool operator==(const array<T, N, Align> &lfs,
+                                                const array<T, N, Align> &rfs) {
 
   for (size_t i = 0; i < N; ++i) {
     if (lfs[i] != rfs[i])
@@ -225,19 +232,18 @@ TV_HOST_DEVICE_INLINE constexpr bool operator==(const array<T, N, Align> &lfs, c
 }
 
 template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr bool operator!=(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
+TV_HOST_DEVICE_INLINE constexpr bool operator!=(const array<T, N, Align> &lfs,
+                                                const array<T, N, Align> &rfs) {
 
   return !(lfs == rfs);
 }
 
-
 // TODO sub-byte type
-template <typename T, size_t N, size_t Align = sizeof_v<T> * N>
+template <typename T, size_t N, size_t Align = sizeof_v<T> *N>
 struct alignas(Align) alignedarray : public array<T, N> {};
 
 // template <typename T, size_t N, size_t Align = sizeof_v<T> * N>
 // using alignedarray = array<T, N, Align>;
-
 
 namespace detail {
 // mp_list_c to array
@@ -252,16 +258,18 @@ template <int I, int... Is> struct gen_seq : gen_seq<I - 1, I - 1, Is...> {};
 template <int... Is> struct gen_seq<0, Is...> : seq<Is...> {};
 
 template <class F, class... Args>
-TV_HOST_DEVICE_INLINE constexpr auto index_invoke(F f, int i, Args &&...args)
-    -> decltype(f(args[i]...)) {
-  return f(args[i]...);
+TV_HOST_DEVICE_INLINE constexpr auto index_invoke(F &&f, int i, Args &&...args)
+    -> decltype(std::forward<F>(f)(std::forward<Args>(args)[i]...)) {
+  return std::forward<F>(f)(std::forward<Args>(args)[i]...);
 }
 
 template <class F, int... Is, class... Args>
-TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(F f, seq<Is...>,
+TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(F &&f, seq<Is...>,
                                                           Args &&...args)
-    -> array<decltype(f(args[0]...)), sizeof...(Is)> {
-  return {{index_invoke(f, Is, std::forward<Args>(args)...)...}};
+    -> array<decltype(std::forward<F>(f)(std::forward<Args>(args)[0]...)),
+             sizeof...(Is)> {
+  return {
+      {index_invoke(std::forward<F>(f), Is, std::forward<Args>(args)...)...}};
 }
 
 // we can't use std::extent here because the default value of extent is ZERO...
@@ -274,7 +282,8 @@ template <typename T, size_t N> struct get_array_extent<std::array<T, N>> {
 };
 #endif
 
-template <typename T, size_t N, size_t Align> struct get_array_extent<array<T, N, Align>> {
+template <typename T, size_t N, size_t Align>
+struct get_array_extent<array<T, N, Align>> {
   static constexpr int value = N;
 };
 
@@ -283,11 +292,13 @@ struct get_extent_helper
     : std::integral_constant<int, get_array_extent<std::decay_t<T>>::value> {};
 
 template <class F, class... Args>
-TV_HOST_DEVICE_INLINE constexpr auto index_transform(F f, Args &&...args)
-    -> decltype(index_transform_impl(f, gen_seq<get_extent_helper<Args...>{}>{},
+TV_HOST_DEVICE_INLINE constexpr auto index_transform(F &&f, Args &&...args)
+    -> decltype(index_transform_impl(std::forward<F>(f),
+                                     gen_seq<get_extent_helper<Args...>{}>{},
                                      std::forward<Args>(args)...)) {
   using N = get_extent_helper<Args...>;
-  return index_transform_impl(f, gen_seq<N{}>{}, std::forward<Args>(args)...);
+  return index_transform_impl(std::forward<F>(f), gen_seq<N{}>{},
+                              std::forward<Args>(args)...);
 }
 
 template <typename T> TV_HOST_DEVICE_INLINE constexpr T array_sum(T l, T r) {
@@ -315,26 +326,26 @@ template <int... Is>
 constexpr auto mp_array_int_v = tv::mp_list_c_to_array<tv::mp_list_int<Is...>>;
 
 template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> operator+(const array<T, N, Align> &lfs,
-                                                      const array<T, N, Align> &rfs) {
+TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
+operator+(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
   return detail::index_transform(detail::array_sum<T>, lfs, rfs);
 }
 
 template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> operator-(const array<T, N, Align> &lfs,
-                                                      const array<T, N, Align> &rfs) {
+TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
+operator-(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
   return detail::index_transform(detail::array_sub<T>, lfs, rfs);
 }
 
 template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> operator*(const array<T, N, Align> &lfs,
-                                                      const array<T, N, Align> &rfs) {
+TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
+operator*(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
   return detail::index_transform(detail::array_mul<T>, lfs, rfs);
 }
 
 template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> operator/(const array<T, N, Align> &lfs,
-                                                      const array<T, N, Align> &rfs) {
+TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
+operator/(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
   return detail::index_transform(detail::array_div<T>, lfs, rfs);
 }
 
@@ -354,11 +365,9 @@ reverse_impl(const array<T, N> &a, mp_list_int<Inds...>) noexcept {
 }
 
 template <typename T, size_t N, int... Inds>
-TV_HOST_DEVICE_INLINE constexpr tv::array<
-    T, sizeof...(Inds)>
+TV_HOST_DEVICE_INLINE constexpr tv::array<T, sizeof...(Inds)>
 slice_impl(const tv::array<T, N> &arr, mp_list_int<Inds...>) noexcept {
-  return array<T, sizeof...(Inds)>{
-      arr[Inds]...};
+  return array<T, sizeof...(Inds)>{arr[Inds]...};
 }
 
 } // namespace detail
@@ -423,9 +432,8 @@ using _RequireInputIter = typename std::enable_if<std::is_convertible<
     typename std::iterator_traits<_InIter>::iterator_category,
     std::input_iterator_tag>::value>::type;
 #endif
-}
-template <typename T, size_t N>
-struct vecarray : public array<T, N> {
+} // namespace detail
+template <typename T, size_t N> struct vecarray : public array<T, N> {
   typedef T value_type;
   typedef value_type *pointer;
   typedef const value_type *const_pointer;
@@ -567,11 +575,17 @@ public:
   }
 
 #endif
-  TV_HOST_DEVICE_INLINE constexpr reference front() noexcept { return *begin(); }
+  TV_HOST_DEVICE_INLINE constexpr reference front() noexcept {
+    return *begin();
+  }
 
-  TV_HOST_DEVICE_INLINE constexpr const_reference front() const noexcept { return array_[0]; }
+  TV_HOST_DEVICE_INLINE constexpr const_reference front() const noexcept {
+    return array_[0];
+  }
 
-  TV_HOST_DEVICE_INLINE reference back() noexcept { return size_ ? *(end() - 1) : *end(); }
+  TV_HOST_DEVICE_INLINE reference back() noexcept {
+    return size_ ? *(end() - 1) : *end();
+  }
 
   TV_HOST_DEVICE_INLINE const_reference back() const noexcept {
     return size_ ? array_[size_ - 1] : array_[0];
@@ -583,7 +597,8 @@ protected:
 };
 
 template <typename T, size_t N>
-TV_HOST_DEVICE_INLINE bool operator==(const vecarray<T, N> &lfs, const vecarray<T, N> &rfs) {
+TV_HOST_DEVICE_INLINE bool operator==(const vecarray<T, N> &lfs,
+                                      const vecarray<T, N> &rfs) {
   if (lfs.size() != rfs.size())
     return false;
   for (size_t i = 0; i < lfs.size(); ++i) {
@@ -594,7 +609,8 @@ TV_HOST_DEVICE_INLINE bool operator==(const vecarray<T, N> &lfs, const vecarray<
 }
 
 template <typename T, size_t N>
-TV_HOST_DEVICE_INLINE bool operator!=(const vecarray<T, N> &lfs, const vecarray<T, N> &rfs) {
+TV_HOST_DEVICE_INLINE bool operator!=(const vecarray<T, N> &lfs,
+                                      const vecarray<T, N> &rfs) {
 
   return !(lfs == rfs);
 }

@@ -1,5 +1,3 @@
-
-import pccm 
 import contextlib
 from typing import List, Optional, Union
 
@@ -13,8 +11,10 @@ from cumm.common import GemmBasic, GemmBasicKernel, TensorView, TensorViewMath
 from cumm.conv import bases, params
 from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
 from cumm.gemm import codeops, constants, layout, thread_map
-from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.arch.memory import GlobalLoad
+from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+
+
 class WeightIterator(bases.ConvInputIterator):
     """
     fwd: NHWC -> NPQRSC @ KRSC, k = RSC
@@ -57,7 +57,8 @@ class WeightIterator(bases.ConvInputIterator):
             self.params = AnalyticParams(problem_size, input_layout)
         else:
             self.params = WeightOptParams(dtype, tile_shape_mnk, problem_size,
-                                          input_layout, tmap, increment_k_first)
+                                          input_layout, tmap,
+                                          increment_k_first)
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -97,7 +98,7 @@ class WeightIterator(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(host=True, device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params const&")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -286,7 +287,7 @@ class WeightIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -322,7 +323,7 @@ class WeightIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def load_invalid(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if not self.optimized:
             return code
         with self.tmap.tmap_loop(code, "s"):
@@ -343,6 +344,5 @@ class WeightIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(host=True, device=True, forceinline=True)
     def clear_mask(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         return code
-

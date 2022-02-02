@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,7 +31,8 @@ class WarpMmaSimt(bases.WarpMma):
                  trans_b: bool, trans_c: bool):
         # TODO merge mma sync
         super().__init__()
-        self.add_dependency(TensorViewNVRTC, layout.RowMajor, layout.ColumnMajor)
+        self.add_dependency(TensorViewNVRTC, layout.RowMajor,
+                            layout.ColumnMajor)
         self.thread_mma_shape = (thread_mma_shape[0], thread_mma_shape[1],
                                  thread_mma_shape[2])
         self.dtype_a = dtype_a
@@ -84,7 +85,7 @@ class WarpMmaSimt(bases.WarpMma):
         lc = "ColumnMajor" if self.trans_c else "RowMajor"
         mma_iters = np.array(self.thread_mma_shape) // np.array(self.mma.shape)
 
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("D", f"{self.fragment_c_t}&")
         code.arg("A", f"{self.fragment_a_t} const &")
         code.arg("B", f"{self.fragment_b_t} const &")

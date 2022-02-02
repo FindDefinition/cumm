@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -197,7 +197,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         return code
 
     def python_ctor(self, stride):
@@ -231,7 +231,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                                constexpr=True,
                                const=True)
     def call_operator(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         shape_before_interleave = self.sw_shape[1] // self.interleave
         assert self.subsw_count[0] == 1 or self.subsw_count[0] == 2
         code.raw(f"""
@@ -554,7 +554,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                                forceinline=True,
                                constexpr=True)
     def get_ldm_initial_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("lane_idx,permute_m_pointer_idx", self.index_t)
         code.arg("transpose", "bool")
         # is hard to get ldm count here even if it's a static constexpr variable,
@@ -633,7 +633,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                                forceinline=True,
                                constexpr=True)
     def get_ldm_initial_offset_ref_cpp(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("lane_idx,permute_m_pointer_idx", self.index_t)
         code.arg("transpose", "bool")
         # is hard to get ldm count here even if it's a static constexpr variable,
@@ -761,7 +761,7 @@ class SmemTileIterator(bases.GemmSmemIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         # TODO remove this argument
         code.arg("stride", "int")
         code.arg("ptr", self.pointer)
@@ -1059,7 +1059,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("ptr", self.pointer)
         code.arg("warp_idx_k, warp_idx_mn, lane_idx", "int")
         code.ctor_init("pointer_",
@@ -1148,7 +1148,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
                                forceinline=True)
     def operator_pp(self):
         num_k_inc = (self.k_groups_per_tile // self.partk)
-        code = pccm.FunctionCode()
+        code = pccm.code()
 
         if num_k_inc > 1:
             assert count_set_bits(
@@ -1369,7 +1369,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("ptr", self.pointer)
         code.arg("warp_idx_k, warp_idx_mn, lane_idx", "int")
         code.ctor_init("wmma_k_index_", "0")
@@ -1444,7 +1444,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_tile_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.is_spec_32:
             code.raw(f"""
             constexpr int kContigEqual = {self.layout.tile_shape[1]} * {self.layout.element_per_acc} / 2;
@@ -1692,7 +1692,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def set_kgroup_index(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("wmma_k", "int")
         return code
 

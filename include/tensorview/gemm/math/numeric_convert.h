@@ -1,58 +1,57 @@
 /***************************************************************************************************
  * Copyright (c) 2017-2020, NVIDIA CORPORATION.  All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without modification, are permitted
- * provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright notice, this list of
- *       conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright notice, this list of
- *       conditions and the following disclaimer in the documentation and/or other materials
- *       provided with the distribution.
- *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
- *       to endorse or promote products derived from this software without specific prior written
- *       permission.
+ * Redistribution and use in source and binary forms, with or without
+ *modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright notice,
+ *this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *notice, this list of conditions and the following disclaimer in the
+ *documentation and/or other materials provided with the distribution.
+ *     * Neither the name of the NVIDIA CORPORATION nor the names of its
+ *contributors may be used to endorse or promote products derived from this
+ *software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ *AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ *IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ *DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY DIRECT,
+ *INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ *OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TOR (INCLUDING
+ *NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ *EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************************************/
 
-
-#pragma once 
+#pragma once
 
 #include <tensorview/core/all.h>
 #include <tensorview/gemm/dtypes/all.h>
 namespace tv {
 namespace gemm {
 
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// Floating-point rounding style similare to Standard Library's formats but supporting
-/// additional rounding options.
+/// Floating-point rounding style similare to Standard Library's formats but
+/// supporting additional rounding options.
 enum class FloatRoundStyle {
-  round_indeterminate,          ///< rounding mode unknown
-  round_toward_zero,            ///< round toward zero
-  round_to_nearest,             ///< round to nearest even
-  round_toward_infinity,        ///< round toward infinity
-  round_toward_neg_infinity,    ///< round toward negative infinity
-  round_half_ulp_truncate,      ///< add 0.5ulp to integer representation then round toward zero
-  round_half_ulp_trunc_dntz     ///< like round_half_ulp_truncate, except denorms are rounded *toward* zero
+  round_indeterminate,       ///< rounding mode unknown
+  round_toward_zero,         ///< round toward zero
+  round_to_nearest,          ///< round to nearest even
+  round_toward_infinity,     ///< round toward infinity
+  round_toward_neg_infinity, ///< round toward negative infinity
+  round_half_ulp_truncate,  ///< add 0.5ulp to integer representation then round
+                            ///< toward zero
+  round_half_ulp_trunc_dntz ///< like round_half_ulp_truncate, except denorms
+                            ///< are rounded *toward* zero
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <
-  typename T,
-  typename S,
-  FloatRoundStyle Round = FloatRoundStyle::round_to_nearest
->
+template <typename T, typename S,
+          FloatRoundStyle Round = FloatRoundStyle::round_to_nearest>
 struct NumericConverter {
 
   using result_type = T;
@@ -60,15 +59,13 @@ struct NumericConverter {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-    static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     return static_cast<result_type>(s);
   }
 
   TV_HOST_DEVICE_INLINE
-    result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -76,15 +73,14 @@ struct NumericConverter {
 // Partial specializations for float => int8_t
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////
-template <FloatRoundStyle Round>
-struct NumericConverter<int8_t, float, Round> {
+template <FloatRoundStyle Round> struct NumericConverter<int8_t, float, Round> {
 
   using result_type = int8_t;
   using source_type = float;
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     result_type result = static_cast<int8_t>(s);
 
@@ -92,9 +88,7 @@ struct NumericConverter<int8_t, float, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -108,15 +102,10 @@ struct NumericConverter<T, T, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
-
-    return s;
-  }
+  static result_type convert(source_type const &s) { return s; }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -126,15 +115,14 @@ struct NumericConverter<T, T, Round> {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Partial specialization for float <= half_t
-template <FloatRoundStyle Round>
-struct NumericConverter<float, half_t, Round> {
+template <FloatRoundStyle Round> struct NumericConverter<float, half_t, Round> {
 
   using result_type = float;
   using source_type = half_t;
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     result_type result = static_cast<float>(s);
 
@@ -142,9 +130,7 @@ struct NumericConverter<float, half_t, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Specialization for round-to-nearest
@@ -156,7 +142,7 @@ struct NumericConverter<half_t, float, FloatRoundStyle::round_to_nearest> {
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     result_type result = static_cast<half_t>(s);
 
@@ -164,9 +150,7 @@ struct NumericConverter<half_t, float, FloatRoundStyle::round_to_nearest> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Specialization for round-toward-zero
@@ -179,13 +163,13 @@ struct NumericConverter<half_t, float, FloatRoundStyle::round_toward_zero> {
 
   /// Round toward zero
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & flt) {
+  static result_type convert(source_type const &flt) {
 
-  #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
     return half_t(__float2half_rz(flt));
-  #else
+#else
     // software implementation rounds toward nearest even
-    unsigned const& s = reinterpret_cast<unsigned const &>(flt);
+    unsigned const &s = reinterpret_cast<unsigned const &>(flt);
     uint16_t sign = uint16_t((s >> 16) & 0x8000);
     int16_t exp = uint16_t(((s >> 23) & 0xff) - 127);
     int mantissa = s & 0x7fffff;
@@ -229,13 +213,11 @@ struct NumericConverter<half_t, float, FloatRoundStyle::round_toward_zero> {
 
     return half_t::bitcast(u);
 
-  #endif // defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+#endif // defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -253,15 +235,13 @@ struct NumericConverter<float, bfloat16_t, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     return static_cast<float>(s);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 template <>
@@ -271,44 +251,42 @@ struct NumericConverter<bfloat16_t, float, FloatRoundStyle::round_to_nearest> {
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
     return static_cast<bfloat16_t>(s);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 template <>
-struct NumericConverter<bfloat16_t, float, FloatRoundStyle::round_half_ulp_truncate> {
+struct NumericConverter<bfloat16_t, float,
+                        FloatRoundStyle::round_half_ulp_truncate> {
   using result_type = bfloat16_t;
   using source_type = float;
-  static FloatRoundStyle const round_style = FloatRoundStyle::round_half_ulp_truncate;
+  static FloatRoundStyle const round_style =
+      FloatRoundStyle::round_half_ulp_truncate;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
     uint32_t x32 = reinterpret_cast<uint32_t const &>(s);
 
-    #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
     if (::isfinite(s)) {
       x32 += 0x8000;
     }
-    #else
+#else
     if (std::isfinite(s)) {
       x32 += 0x8000;
     }
-    #endif
+#endif
 
     uint16_t x16 = uint16_t((x32 >> 16) & 0xffff);
     return bfloat16_t::bitcast(x16);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 template <>
@@ -318,7 +296,7 @@ struct NumericConverter<bfloat16_t, float, FloatRoundStyle::round_toward_zero> {
   static FloatRoundStyle const round_style = FloatRoundStyle::round_toward_zero;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     uint32_t x32 = reinterpret_cast<uint32_t const &>(s);
     uint16_t x16 = uint16_t(x32 >> 16);
@@ -327,9 +305,7 @@ struct NumericConverter<bfloat16_t, float, FloatRoundStyle::round_toward_zero> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -347,15 +323,13 @@ struct NumericConverter<float, tfloat32_t, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     return static_cast<float>(s);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 template <>
@@ -365,7 +339,7 @@ struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_to_nearest> {
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     unsigned storage = reinterpret_cast<unsigned const &>(s);
 
@@ -381,7 +355,7 @@ struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_to_nearest> {
 
       // Note, the following is intentionally commented out. TF32
       // does not define the low order bits, so they may be left in
-      // an undefined state. 
+      // an undefined state.
       //
       // By not truncating these bit explicitly, we avoid an extra logical
       // operation.
@@ -390,8 +364,7 @@ struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_to_nearest> {
       // operation as needed.
       //
       // storage = (storage & ~0x1fff);
-    }
-    else if (storage & ~0xff800000) {
+    } else if (storage & ~0xff800000) {
       storage = 0x7fffffff;
     }
 
@@ -399,38 +372,39 @@ struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_to_nearest> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 template <>
-struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_half_ulp_truncate> {
+struct NumericConverter<tfloat32_t, float,
+                        FloatRoundStyle::round_half_ulp_truncate> {
   using result_type = tfloat32_t;
   using source_type = float;
-  static FloatRoundStyle const round_style = FloatRoundStyle::round_half_ulp_truncate;
+  static FloatRoundStyle const round_style =
+      FloatRoundStyle::round_half_ulp_truncate;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
     return tfloat32_t::round_half_ulp_truncate(s);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
-/// This rounding operation is similar to half_ulp_truncate except it rounds denorms toward zero.
-/// It avoids predicated code, though it requires a temporary register.
+/// This rounding operation is similar to half_ulp_truncate except it rounds
+/// denorms toward zero. It avoids predicated code, though it requires a
+/// temporary register.
 template <>
-struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_half_ulp_trunc_dntz> {
+struct NumericConverter<tfloat32_t, float,
+                        FloatRoundStyle::round_half_ulp_trunc_dntz> {
   using result_type = tfloat32_t;
   using source_type = float;
-  static FloatRoundStyle const round_style = FloatRoundStyle::round_half_ulp_trunc_dntz;
+  static FloatRoundStyle const round_style =
+      FloatRoundStyle::round_half_ulp_trunc_dntz;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     unsigned y = reinterpret_cast<unsigned const &>(s);
     y = y & 0xff800000;
@@ -441,9 +415,7 @@ struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_half_ulp_trunc
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 template <>
@@ -453,15 +425,13 @@ struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_toward_zero> {
   static FloatRoundStyle const round_style = FloatRoundStyle::round_toward_zero;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
     uint32_t x = reinterpret_cast<uint32_t const &>(s);
     return tfloat32_t::bitcast(x & 0xffffe000);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -470,11 +440,7 @@ struct NumericConverter<tfloat32_t, float, FloatRoundStyle::round_toward_zero> {
 //
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <
-  typename T,
-  typename S
->
-struct NumericConverterClamp {
+template <typename T, typename S> struct NumericConverterClamp {
 
   using result_type = T;
   using source_type = S;
@@ -485,7 +451,7 @@ struct NumericConverterClamp {
                 "Clamp is only needed for integer types");
 
   TV_HOST_DEVICE_INLINE
-    static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
     NumericConverter<result_type, source_type> convert_op;
     result_type const kClamp_max =
         (0x1U << (sizeof_bits<result_type>::value - 1)) - 1;
@@ -496,16 +462,11 @@ struct NumericConverterClamp {
   }
 
   TV_HOST_DEVICE_INLINE
-    result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for clamping from a single-precision float.
-template <
-  typename T
->
-struct NumericConverterClamp<T, float> {
+template <typename T> struct NumericConverterClamp<T, float> {
 
   using result_type = T;
   using source_type = float;
@@ -520,15 +481,15 @@ struct NumericConverterClamp<T, float> {
                 "Clamp is only needed for integer types");
 
   TV_HOST_DEVICE_INLINE
-    static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     NumericConverter<result_type, double> convert_op;
     double kClamp_max, kClamp_min;
 
     if (std::is_same<result_type, int32_t>::value ||
-                 std::is_same<result_type, int16_t>::value ||
-                 std::is_same<result_type, int8_t>::value ||
-                 std::is_same<result_type, int4b_t>::value) {
+        std::is_same<result_type, int16_t>::value ||
+        std::is_same<result_type, int8_t>::value ||
+        std::is_same<result_type, int4b_t>::value) {
       kClamp_max = double((1LLU << (sizeof_bits<result_type>::value - 1)) - 1);
       kClamp_min = -kClamp_max - 1;
     } else {
@@ -545,9 +506,7 @@ struct NumericConverterClamp<T, float> {
   }
 
   TV_HOST_DEVICE_INLINE
-    result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -557,12 +516,8 @@ struct NumericConverterClamp<T, float> {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Conversion operator for tv::array
-template <
-  typename T,
-  typename S,
-  int N,
-  FloatRoundStyle Round = FloatRoundStyle::round_to_nearest
->
+template <typename T, typename S, int N,
+          FloatRoundStyle Round = FloatRoundStyle::round_to_nearest>
 struct NumericArrayConverter {
 
   using result_type = tv::array<T, N>;
@@ -570,7 +525,7 @@ struct NumericArrayConverter {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & s) {
+  static result_type convert(source_type const &s) {
 
     result_type result;
     NumericConverter<T, S, Round> convert_;
@@ -584,16 +539,10 @@ struct NumericArrayConverter {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
-template <
-  typename T,
-  int N,
-  FloatRoundStyle Round
->
+template <typename T, int N, FloatRoundStyle Round>
 struct NumericArrayConverter<T, T, N, Round> {
 
   using result_type = tv::array<T, N>;
@@ -601,45 +550,44 @@ struct NumericArrayConverter<T, T, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return s;
-  }
+  result_type operator()(source_type const &s) { return s; }
 };
-
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// Partial specialization for tv::array<half, 2> <= tv::array<float, 2>, round to nearest
+/// Partial specialization for tv::array<half, 2> <= tv::array<float, 2>, round
+/// to nearest
 template <>
-struct NumericArrayConverter<half_t, float, 2, FloatRoundStyle::round_to_nearest> {
+struct NumericArrayConverter<half_t, float, 2,
+                             FloatRoundStyle::round_to_nearest> {
 
   using result_type = tv::array<half_t, 2>;
   using source_type = tv::array<float, 2>;
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     tv::array<half_t, 2> result;
 
-    #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
-      reinterpret_cast<__half2 &>(result) = __float22half2_rn(reinterpret_cast<float2 const &>(source));
-    #else
-      NumericConverter<half_t, float, round_style> convert_;
-      result[0] = convert_(source[0]);
-      result[1] = convert_(source[1]);
-    #endif
-    
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+    reinterpret_cast<__half2 &>(result) =
+        __float22half2_rn(reinterpret_cast<float2 const &>(source));
+#else
+    NumericConverter<half_t, float, round_style> convert_;
+    result[0] = convert_(source[0]);
+    result[1] = convert_(source[1]);
+#endif
+
     return result;
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
-/// Partial specialization for tv::array<float, 2> <= tv::array<half_t, 2>, round to nearest
+/// Partial specialization for tv::array<float, 2> <= tv::array<half_t, 2>,
+/// round to nearest
 template <FloatRoundStyle Round>
 struct NumericArrayConverter<float, half_t, 2, Round> {
 
@@ -648,34 +596,30 @@ struct NumericArrayConverter<float, half_t, 2, Round> {
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     tv::array<float, 2> result;
 
-    #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
-      reinterpret_cast<float2 &>(result) = __half22float2(reinterpret_cast<__half2 const &>(source));
-    #else
-      NumericConverter<float, half_t, round_style> convert_;
-      result[0] = convert_(source[0]);
-      result[1] = convert_(source[1]);
-    #endif
-    
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+    reinterpret_cast<float2 &>(result) =
+        __half22float2(reinterpret_cast<__half2 const &>(source));
+#else
+    NumericConverter<float, half_t, round_style> convert_;
+    result[0] = convert_(source[0]);
+    result[1] = convert_(source[1]);
+#endif
+
     return result;
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Partial specialization for tv::array<half> <= tv::array<float>
-template <
-  int N,
-  FloatRoundStyle Round
->
+template <int N, FloatRoundStyle Round>
 struct NumericArrayConverter<half_t, float, N, Round> {
 
   using result_type = tv::array<half_t, N>;
@@ -683,15 +627,17 @@ struct NumericArrayConverter<half_t, float, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     NumericArrayConverter<half_t, float, 2, Round> convert_vector_;
     NumericConverter<half_t, float, Round> convert_element_;
 
     result_type result;
 
-    tv::array<half_t, 2> *result_ptr = reinterpret_cast<tv::array<half_t, 2> *>(&result);
-    tv::array<float, 2> const *source_ptr = reinterpret_cast<tv::array<float, 2> const *>(&source);
+    tv::array<half_t, 2> *result_ptr =
+        reinterpret_cast<tv::array<half_t, 2> *>(&result);
+    tv::array<float, 2> const *source_ptr =
+        reinterpret_cast<tv::array<float, 2> const *>(&source);
 
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N / 2; ++i) {
@@ -706,17 +652,11 @@ struct NumericArrayConverter<half_t, float, N, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
-
 /// Partial specialization for tv::array<half> <= tv::array<float>
-template <
-  int N,
-  FloatRoundStyle Round
->
+template <int N, FloatRoundStyle Round>
 struct NumericArrayConverter<float, half_t, N, Round> {
 
   using result_type = tv::array<float, N>;
@@ -724,15 +664,17 @@ struct NumericArrayConverter<float, half_t, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     NumericArrayConverter<float, half_t, 2, Round> convert_vector_;
     NumericConverter<float, half_t, Round> convert_element_;
 
     result_type result;
 
-    tv::array<float, 2> *result_ptr = reinterpret_cast<tv::array<float, 2> *>(&result);
-    tv::array<half_t, 2> const *source_ptr = reinterpret_cast<tv::array<half_t, 2> const *>(&source);
+    tv::array<float, 2> *result_ptr =
+        reinterpret_cast<tv::array<float, 2> *>(&result);
+    tv::array<half_t, 2> const *source_ptr =
+        reinterpret_cast<tv::array<half_t, 2> const *>(&source);
 
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N / 2; ++i) {
@@ -747,48 +689,44 @@ struct NumericArrayConverter<float, half_t, N, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
-
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// Partial specialization for tv::array<bfloat16_t, 2> <= tv::array<float, 2>, round to nearest
+/// Partial specialization for tv::array<bfloat16_t, 2> <= tv::array<float, 2>,
+/// round to nearest
 template <>
-struct NumericArrayConverter<bfloat16_t, float, 2, FloatRoundStyle::round_to_nearest> {
+struct NumericArrayConverter<bfloat16_t, float, 2,
+                             FloatRoundStyle::round_to_nearest> {
 
   using result_type = tv::array<bfloat16_t, 2>;
   using source_type = tv::array<float, 2>;
   static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     unsigned d;
 
-    asm("cvt.rn.bf16x2.f32 %0, %1, %2;\n" : "=r"(d) : "f"(source[1]), "f"(source[0]) );
+    asm("cvt.rn.bf16x2.f32 %0, %1, %2;\n"
+        : "=r"(d)
+        : "f"(source[1]), "f"(source[0]));
 
     return reinterpret_cast<result_type const &>(d);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Partial specialization for tv::array<half> <= tv::array<float>
-template <
-  int N,
-  FloatRoundStyle Round
->
+template <int N, FloatRoundStyle Round>
 struct NumericArrayConverter<bfloat16_t, float, N, Round> {
 
   using result_type = tv::array<bfloat16_t, N>;
@@ -796,15 +734,17 @@ struct NumericArrayConverter<bfloat16_t, float, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     NumericArrayConverter<bfloat16_t, float, 2, Round> convert_vector_;
     NumericConverter<bfloat16_t, float, Round> convert_element_;
 
     result_type result;
 
-    tv::array<bfloat16_t, 2> *result_ptr = reinterpret_cast<tv::array<bfloat16_t, 2> *>(&result);
-    tv::array<float, 2> const *source_ptr = reinterpret_cast<tv::array<float, 2> const *>(&source);
+    tv::array<bfloat16_t, 2> *result_ptr =
+        reinterpret_cast<tv::array<bfloat16_t, 2> *>(&result);
+    tv::array<float, 2> const *source_ptr =
+        reinterpret_cast<tv::array<float, 2> const *>(&source);
 
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N / 2; ++i) {
@@ -819,24 +759,20 @@ struct NumericArrayConverter<bfloat16_t, float, N, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 #endif // if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-// Conditional guards to enable partial specialization for packed integers 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 720) && \
-    ((__CUDACC_VER_MAJOR__ > 10) ||                     \
+// Conditional guards to enable partial specialization for packed integers
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 720) &&                        \
+    ((__CUDACC_VER_MAJOR__ > 10) ||                                            \
      ((__CUDACC_VER_MAJOR__ >= 10) && (__CUDACC_VER_MINOR__ >= 2)))
 
 /// Partial specialization for tv::array<int8_t, 1> <= tv::array<int, 1>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<int8_t, int, 1, Round> {
 
   using result_type = tv::array<int8_t, 1>;
@@ -844,26 +780,22 @@ struct NumericArrayConverter<int8_t, int, 1, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
     NumericConverter<int8_t, int, Round> convert_element_;
 
     result_type result;
 
     result[0] = convert_element_(source[0]);
-   
+
     return result;
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<int8_t, 2> <= tv::array<int, 2>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<int8_t, int, 2, Round> {
 
   using result_type = tv::array<int8_t, 2>;
@@ -871,28 +803,24 @@ struct NumericArrayConverter<int8_t, int, 2, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     uint32_t tmp;
 
-    asm volatile(
-      "cvt.pack.sat.s8.s32.b32   %0, %2, %1, 0;\n"
-      : "=r"(tmp) : "r"(source[0]), "r"(source[1]));
+    asm volatile("cvt.pack.sat.s8.s32.b32   %0, %2, %1, 0;\n"
+                 : "=r"(tmp)
+                 : "r"(source[0]), "r"(source[1]));
 
     uint16_t out = (tmp & 0xffff);
     return reinterpret_cast<result_type const &>(out);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<int8_t, 4> <= tv::array<int, 4>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<int8_t, int, 4, Round> {
 
   using result_type = tv::array<int8_t, 4>;
@@ -900,31 +828,27 @@ struct NumericArrayConverter<int8_t, int, 4, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     unsigned out;
 
-    asm volatile(
-      "{ .reg .u32 r4;"
-      "cvt.pack.sat.s8.s32.b32   r4, %4, %3, 0;"
-      "cvt.pack.sat.s8.s32.b32   %0, %2, %1, r4;"
-      "}"
-      : "=r"(out) : "r"(source[0]), "r"(source[1]), "r"(source[2]), "r"(source[3]));
+    asm volatile("{ .reg .u32 r4;"
+                 "cvt.pack.sat.s8.s32.b32   r4, %4, %3, 0;"
+                 "cvt.pack.sat.s8.s32.b32   %0, %2, %1, r4;"
+                 "}"
+                 : "=r"(out)
+                 : "r"(source[0]), "r"(source[1]), "r"(source[2]),
+                   "r"(source[3]));
 
     return reinterpret_cast<result_type const &>(out);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<int8_t> <= tv::array<int>
-template <
-  int N,
-  FloatRoundStyle Round
->
+template <int N, FloatRoundStyle Round>
 struct NumericArrayConverter<int8_t, int, N, Round> {
   static_assert(!(N % 4), "N must be multiple of 4.");
 
@@ -933,14 +857,16 @@ struct NumericArrayConverter<int8_t, int, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     NumericArrayConverter<int8_t, int, 4, Round> convert_vector_;
 
     result_type result;
 
-    tv::array<int8_t, 4> *result_ptr = reinterpret_cast<tv::array<int8_t, 4> *>(&result);
-    tv::array<int, 4> const *source_ptr = reinterpret_cast<tv::array<int, 4> const *>(&source);
+    tv::array<int8_t, 4> *result_ptr =
+        reinterpret_cast<tv::array<int8_t, 4> *>(&result);
+    tv::array<int, 4> const *source_ptr =
+        reinterpret_cast<tv::array<int, 4> const *>(&source);
 
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N / 4; ++i) {
@@ -951,15 +877,11 @@ struct NumericArrayConverter<int8_t, int, N, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<uint8_t, 1> <= tv::array<int, 1>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<uint8_t, int, 1, Round> {
 
   using result_type = tv::array<uint8_t, 1>;
@@ -967,26 +889,22 @@ struct NumericArrayConverter<uint8_t, int, 1, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
     NumericConverter<uint8_t, int, Round> convert_element_;
 
     result_type result;
 
     result[0] = convert_element_(source[0]);
-   
+
     return result;
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<uint8_t, 2> <= tv::array<int, 2>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<uint8_t, int, 2, Round> {
 
   using result_type = tv::array<uint8_t, 2>;
@@ -994,28 +912,24 @@ struct NumericArrayConverter<uint8_t, int, 2, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     uint32_t tmp;
 
-    asm volatile(
-      "cvt.pack.sat.u8.s32.b32   %0, %2, %1, 0;\n"
-      : "=r"(tmp) : "r"(source[0]), "r"(source[1]));
+    asm volatile("cvt.pack.sat.u8.s32.b32   %0, %2, %1, 0;\n"
+                 : "=r"(tmp)
+                 : "r"(source[0]), "r"(source[1]));
 
     uint16_t out = (tmp & 0xffff);
     return reinterpret_cast<result_type const &>(out);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<uint8_t, 4> <= tv::array<int, 4>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<uint8_t, int, 4, Round> {
 
   using result_type = tv::array<uint8_t, 4>;
@@ -1023,31 +937,27 @@ struct NumericArrayConverter<uint8_t, int, 4, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     unsigned out;
 
-    asm volatile(
-      "{ .reg .u32 r4;"
-      "cvt.pack.sat.u8.s32.b32   r4, %4, %3, 0;"
-      "cvt.pack.sat.u8.s32.b32   %0, %2, %1, r4;"
-      "}"
-      : "=r"(out) : "r"(source[0]), "r"(source[1]), "r"(source[2]), "r"(source[3]));
+    asm volatile("{ .reg .u32 r4;"
+                 "cvt.pack.sat.u8.s32.b32   r4, %4, %3, 0;"
+                 "cvt.pack.sat.u8.s32.b32   %0, %2, %1, r4;"
+                 "}"
+                 : "=r"(out)
+                 : "r"(source[0]), "r"(source[1]), "r"(source[2]),
+                   "r"(source[3]));
 
     return reinterpret_cast<result_type const &>(out);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<int8_t> <= tv::array<int>
-template <
-  int N,
-  FloatRoundStyle Round
->
+template <int N, FloatRoundStyle Round>
 struct NumericArrayConverter<uint8_t, int, N, Round> {
   static_assert(!(N % 4), "N must be multiple of 4.");
 
@@ -1056,14 +966,16 @@ struct NumericArrayConverter<uint8_t, int, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     NumericArrayConverter<uint8_t, int, 4, Round> convert_vector_;
 
     result_type result;
 
-    tv::array<uint8_t, 4> *result_ptr = reinterpret_cast<tv::array<uint8_t, 4> *>(&result);
-    tv::array<int, 4> const *source_ptr = reinterpret_cast<tv::array<int, 4> const *>(&source);
+    tv::array<uint8_t, 4> *result_ptr =
+        reinterpret_cast<tv::array<uint8_t, 4> *>(&result);
+    tv::array<int, 4> const *source_ptr =
+        reinterpret_cast<tv::array<int, 4> const *>(&source);
 
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N / 4; ++i) {
@@ -1074,23 +986,19 @@ struct NumericArrayConverter<uint8_t, int, N, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 #endif
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750) && \
-    ((__CUDACC_VER_MAJOR__ > 10) ||                     \
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750) &&                        \
+    ((__CUDACC_VER_MAJOR__ > 10) ||                                            \
      ((__CUDACC_VER_MAJOR__ >= 10) && (__CUDACC_VER_MINOR__ >= 2)))
 
 /// Partial specialization for tv::array<int4b_t, 8> <= tv::array<int, 8>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<int4b_t, int, 8, Round> {
 
   using result_type = tv::array<int4b_t, 8>;
@@ -1098,35 +1006,30 @@ struct NumericArrayConverter<int4b_t, int, 8, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     unsigned out;
 
-    asm volatile(
-        "{ .reg .u32 r4;"
-        "cvt.pack.sat.s4.s32.b32   r4, %8, %7, 0;"
-        "cvt.pack.sat.s4.s32.b32   r4, %6, %5, r4;"
-        "cvt.pack.sat.s4.s32.b32   r4, %4, %3, r4;"
-        "cvt.pack.sat.s4.s32.b32   %0, %2, %1, r4;"
-        "}"
-        : "=r"(out)
-        : "r"(source[0]), "r"(source[1]), "r"(source[2]), "r"(source[3]),
-          "r"(source[4]), "r"(source[5]), "r"(source[6]), "r"(source[7]));
+    asm volatile("{ .reg .u32 r4;"
+                 "cvt.pack.sat.s4.s32.b32   r4, %8, %7, 0;"
+                 "cvt.pack.sat.s4.s32.b32   r4, %6, %5, r4;"
+                 "cvt.pack.sat.s4.s32.b32   r4, %4, %3, r4;"
+                 "cvt.pack.sat.s4.s32.b32   %0, %2, %1, r4;"
+                 "}"
+                 : "=r"(out)
+                 : "r"(source[0]), "r"(source[1]), "r"(source[2]),
+                   "r"(source[3]), "r"(source[4]), "r"(source[5]),
+                   "r"(source[6]), "r"(source[7]));
 
     return reinterpret_cast<result_type const &>(out);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<int4b_t> <= tv::array<int>
-template <
-  int N,
-  FloatRoundStyle Round
->
+template <int N, FloatRoundStyle Round>
 struct NumericArrayConverter<int4b_t, int, N, Round> {
   static_assert(!(N % 8), "N must be multiple of 8.");
 
@@ -1135,14 +1038,16 @@ struct NumericArrayConverter<int4b_t, int, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     NumericArrayConverter<int4b_t, int, 8, Round> convert_vector_;
 
     result_type result;
 
-    tv::array<int4b_t, 8> *result_ptr = reinterpret_cast<tv::array<int4b_t, 8> *>(&result);
-    tv::array<int, 8> const *source_ptr = reinterpret_cast<tv::array<int, 8> const *>(&source);
+    tv::array<int4b_t, 8> *result_ptr =
+        reinterpret_cast<tv::array<int4b_t, 8> *>(&result);
+    tv::array<int, 8> const *source_ptr =
+        reinterpret_cast<tv::array<int, 8> const *>(&source);
 
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N / 8; ++i) {
@@ -1153,15 +1058,11 @@ struct NumericArrayConverter<int4b_t, int, N, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<uint4b_t, 8> <= tv::array<int, 8>
-template <
-  FloatRoundStyle Round
->
+template <FloatRoundStyle Round>
 struct NumericArrayConverter<uint4b_t, int, 8, Round> {
 
   using result_type = tv::array<uint4b_t, 8>;
@@ -1169,35 +1070,30 @@ struct NumericArrayConverter<uint4b_t, int, 8, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     unsigned out;
 
-    asm volatile(
-        "{ .reg .u32 r4;"
-        "cvt.pack.sat.u4.s32.b32   r4, %8, %7, 0;"
-        "cvt.pack.sat.u4.s32.b32   r4, %6, %5, r4;"
-        "cvt.pack.sat.u4.s32.b32   r4, %4, %3, r4;"
-        "cvt.pack.sat.u4.s32.b32   %0, %2, %1, r4;"
-        "}"
-        : "=r"(out)
-        : "r"(source[0]), "r"(source[1]), "r"(source[2]), "r"(source[3]),
-          "r"(source[4]), "r"(source[5]), "r"(source[6]), "r"(source[7]));
+    asm volatile("{ .reg .u32 r4;"
+                 "cvt.pack.sat.u4.s32.b32   r4, %8, %7, 0;"
+                 "cvt.pack.sat.u4.s32.b32   r4, %6, %5, r4;"
+                 "cvt.pack.sat.u4.s32.b32   r4, %4, %3, r4;"
+                 "cvt.pack.sat.u4.s32.b32   %0, %2, %1, r4;"
+                 "}"
+                 : "=r"(out)
+                 : "r"(source[0]), "r"(source[1]), "r"(source[2]),
+                   "r"(source[3]), "r"(source[4]), "r"(source[5]),
+                   "r"(source[6]), "r"(source[7]));
 
     return reinterpret_cast<result_type const &>(out);
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
 /// Partial specialization for tv::array<int4b_t> <= tv::array<int>
-template <
-  int N,
-  FloatRoundStyle Round
->
+template <int N, FloatRoundStyle Round>
 struct NumericArrayConverter<uint4b_t, int, N, Round> {
   static_assert(!(N % 8), "N must be multiple of 8.");
 
@@ -1206,14 +1102,16 @@ struct NumericArrayConverter<uint4b_t, int, N, Round> {
   static FloatRoundStyle const round_style = Round;
 
   TV_HOST_DEVICE_INLINE
-  static result_type convert(source_type const & source) {
+  static result_type convert(source_type const &source) {
 
     NumericArrayConverter<uint4b_t, int, 8, Round> convert_vector_;
 
     result_type result;
 
-    tv::array<uint4b_t, 8> *result_ptr = reinterpret_cast<tv::array<uint4b_t, 8> *>(&result);
-    tv::array<int, 8> const *source_ptr = reinterpret_cast<tv::array<int, 8> const *>(&source);
+    tv::array<uint4b_t, 8> *result_ptr =
+        reinterpret_cast<tv::array<uint4b_t, 8> *>(&result);
+    tv::array<int, 8> const *source_ptr =
+        reinterpret_cast<tv::array<int, 8> const *>(&source);
 
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N / 8; ++i) {
@@ -1224,12 +1122,11 @@ struct NumericArrayConverter<uint4b_t, int, N, Round> {
   }
 
   TV_HOST_DEVICE_INLINE
-  result_type operator()(source_type const &s) {
-    return convert(s);
-  }
+  result_type operator()(source_type const &s) { return convert(s); }
 };
 
-#endif  // Conditional guards to enable partial specialization for packed integers
+#endif // Conditional guards to enable partial specialization for packed
+       // integers
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1342,19 +1239,17 @@ struct FastNumericArrayConverter<int8_t, float, N, Round> {
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
 /// Defines preferred rounding mode for a pair of types
-template <typename T, typename S>
-struct PreferredRoundingMode {
+template <typename T, typename S> struct PreferredRoundingMode {
   static FloatRoundStyle const kRound = FloatRoundStyle::round_to_nearest;
 };
 
 /// Defines preferred rounding mode for a pair of types
-template <>
-struct PreferredRoundingMode<tfloat32_t, float> {
-  static FloatRoundStyle const kRound = FloatRoundStyle::round_half_ulp_truncate;
+template <> struct PreferredRoundingMode<tfloat32_t, float> {
+  static FloatRoundStyle const kRound =
+      FloatRoundStyle::round_half_ulp_truncate;
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-
-}
-}
+} // namespace gemm
+} // namespace tv

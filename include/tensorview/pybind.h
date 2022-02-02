@@ -131,7 +131,9 @@ template <typename T, typename Tarr> TensorView<T> array2tview(Tarr &arr) {
   }
   auto type = type_v<T>;
   auto np_type = get_array_tv_dtype(arr);
-  TV_ASSERT_INVALID_ARG(np_type == type, "array type mismatch, expected:", dtype_str(type), "get:", dtype_str(np_type));
+  TV_ASSERT_INVALID_ARG(np_type == type,
+                        "array type mismatch, expected:", dtype_str(type),
+                        "get:", dtype_str(np_type));
   return TensorView<T>(reinterpret_cast<T *>(arr.mutable_data()), shape);
 }
 
@@ -176,7 +178,7 @@ template <typename Ttensor> py::array tensor2array(const Ttensor &tensor) {
   std::vector<int> stride_vec(stride.begin(), stride.end());
   int itemsize = tensor.itemsize();
   // py::array stride is BYTES!!!
-  for (auto& s : stride_vec){
+  for (auto &s : stride_vec) {
     s *= itemsize;
   }
   auto dtype = tv_dtype_to_py(tensor.dtype());
@@ -192,7 +194,8 @@ template <typename T> py::array tview2array(TensorView<T> tview) {
   auto shape_vec = std::vector<int64_t>(shape.begin(), shape.end());
   auto stride = tview.stride();
   auto stride_vec = std::vector<int64_t>(stride.begin(), stride.end());
-  auto tensor = Tensor(tview.data(), TensorShape(shape_vec), TensorShape(stride_vec), tv::type_v<T>, -1);
+  auto tensor = Tensor(tview.data(), TensorShape(shape_vec),
+                       TensorShape(stride_vec), tv::type_v<T>, -1);
   return tensor2array(tensor);
 }
 
@@ -211,8 +214,9 @@ constexpr decltype(auto) pyarray_invoke(F &&f, Args &&...args) {
 namespace pybind11 {
 namespace detail {
 
-template <typename Type, size_t Size> struct type_caster<tv::array<Type, Size>>
- : array_caster<tv::array<Type, Size>, Type, false, Size> { };
+template <typename Type, size_t Size>
+struct type_caster<tv::array<Type, Size>>
+    : array_caster<tv::array<Type, Size>, Type, false, Size> {};
 
 /*
 template <> struct type_caster<tv::Tensor> {
@@ -237,7 +241,8 @@ public:
 
   static handle cast(tv::Tensor src, return_value_policy,
                      handle h ) {
-    // https://stackoverflow.com/questions/42645228/cast-numpy-array-to-from-custom-c-matrix-class-using-pybind11
+    //
+https://stackoverflow.com/questions/42645228/cast-numpy-array-to-from-custom-c-matrix-class-using-pybind11
     return tv::tensor2array(src).release();
   }
 };

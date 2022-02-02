@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,8 +14,8 @@
 
 #pragma once
 #include <exception>
-#include <tensorview/core/all.h>
 #include <tensorview/context.h>
+#include <tensorview/core/all.h>
 #if defined(TV_CUDA_CC)
 #include <tensorview/cuda/launch.h>
 #include <tensorview/kernel_utils.h>
@@ -50,10 +50,12 @@ template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
           bool MapMode = false, typename F, class... Args>
 void kernel_1d_impl(Context ctx, int device, size_t size, F &&f,
                     Args &&...args) {
-  // if extend-lambda isn't added, TV_IS_EXTEND_LAMBDA always return false and cause compile
-  // problem even if we don't use this function, so we delay evaulation of this constexpr by a simple template.
+  // if extend-lambda isn't added, TV_IS_EXTEND_LAMBDA always return false and
+  // cause compile problem even if we don't use this function, so we delay
+  // evaulation of this constexpr by a simple template.
 #if defined(TV_CUDA_CC)
-  static constexpr bool is_nv_host_device_func = delay_bool_eval_v<TV_IS_EXTEND_LAMBDA(F)>;
+  static constexpr bool is_nv_host_device_func =
+      delay_bool_eval_v<TV_IS_EXTEND_LAMBDA(F)>;
   static_assert(is_nv_host_device_func,
                 "only support extend lambda with __host__ __device__");
 #endif
@@ -67,7 +69,7 @@ void kernel_1d_impl(Context ctx, int device, size_t size, F &&f,
     // from pytorch/aten/src/ATen/ParallelOpenMP.h
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
-#pragma omp parallel if (MaxNumThreads > 1 && omp_get_max_threads() > 1 && \
+#pragma omp parallel if (MaxNumThreads > 1 && omp_get_max_threads() > 1 &&     \
                          !omp_in_parallel() && ((end - begin) > GrainSize))
     {
       int64_t num_threads = omp_get_num_threads();
@@ -124,15 +126,17 @@ void kernel_1d_impl(Context ctx, int device, size_t size, F &&f,
         size, reinterpret_cast<cudaStream_t>(ctx.cuda_stream()));
     if_constexpr<MapMode>(
         [&](auto _) {
-          launcher(simple_kernel_1d<F, Args...>, std::forward<Args>(args)..., size, _(f));
+          launcher(simple_kernel_1d<F, Args...>, std::forward<Args>(args)...,
+                   size, _(f));
         },
         [&](auto _) {
-          launcher(simple_kernel_1d_beginendstep<F, Args...>, std::forward<Args>(args)..., size,
-                  _(f));
+          launcher(simple_kernel_1d_beginendstep<F, Args...>,
+                   std::forward<Args>(args)..., size, _(f));
         });
     TV_CHECK_CUDA_ERR_V2("launch failed.");
 #else
-    TV_THROW_INVALID_ARG("your code doesn't compile with TV_CUDA, or your code isn't compiled by nvcc.")
+    TV_THROW_INVALID_ARG("your code doesn't compile with TV_CUDA, or your code "
+                         "isn't compiled by nvcc.")
 #endif
   }
 }
@@ -140,11 +144,13 @@ void kernel_1d_impl(Context ctx, int device, size_t size, F &&f,
 template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
           bool MapMode = false, typename F, class... Args>
 void kernel_1d_impl_cuda(Context ctx, int device, size_t size, F &&f,
-                    Args &&...args) {
-  // if extend-lambda isn't added, TV_IS_EXTEND_DEVICE_LAMBDA always return false and cause compile
-  // problem even if we don't use this function, so we delay evaulation of this constexpr by a simple template.
+                         Args &&...args) {
+  // if extend-lambda isn't added, TV_IS_EXTEND_DEVICE_LAMBDA always return
+  // false and cause compile problem even if we don't use this function, so we
+  // delay evaulation of this constexpr by a simple template.
 #if defined(TV_CUDA_CC)
-  static constexpr bool is_nv_host_device_func = delay_bool_eval_v<TV_IS_EXTEND_DEVICE_LAMBDA(F)>;
+  static constexpr bool is_nv_host_device_func =
+      delay_bool_eval_v<TV_IS_EXTEND_DEVICE_LAMBDA(F)>;
   static_assert(is_nv_host_device_func,
                 "only support extend lambda with __host__ __device__");
 #endif
@@ -159,23 +165,24 @@ void kernel_1d_impl_cuda(Context ctx, int device, size_t size, F &&f,
         size, reinterpret_cast<cudaStream_t>(ctx.cuda_stream()));
     if_constexpr<MapMode>(
         [&](auto _) {
-          launcher(simple_kernel_1d<F, Args...>, std::forward<Args>(args)..., size, _(f));
+          launcher(simple_kernel_1d<F, Args...>, std::forward<Args>(args)...,
+                   size, _(f));
         },
         [&](auto _) {
-          launcher(simple_kernel_1d_beginendstep<F, Args...>, std::forward<Args>(args)..., size,
-                  _(f));
+          launcher(simple_kernel_1d_beginendstep<F, Args...>,
+                   std::forward<Args>(args)..., size, _(f));
         });
     TV_CHECK_CUDA_ERR_V2("launch failed.");
 #else
-    TV_THROW_INVALID_ARG("your code doesn't compile with TV_CUDA, or your code isn't compiled by nvcc.")
+    TV_THROW_INVALID_ARG("your code doesn't compile with TV_CUDA, or your code "
+                         "isn't compiled by nvcc.")
 #endif
   }
 }
 
 template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
           bool MapMode = false, typename F, class... Args>
-void kernel_1d_impl_cpu(int device, size_t size, F &&f,
-                    Args &&...args) {
+void kernel_1d_impl_cpu(int device, size_t size, F &&f, Args &&...args) {
   static_assert(argument_size_v<F> == sizeof...(args) + (MapMode ? 1 : 3),
                 "your lambda must have N + 1(3 if not MapMode) argg (begin, "
                 "[end, step])");
@@ -186,7 +193,7 @@ void kernel_1d_impl_cpu(int device, size_t size, F &&f,
     // from pytorch/aten/src/ATen/ParallelOpenMP.h
     std::atomic_flag err_flag = ATOMIC_FLAG_INIT;
     std::exception_ptr eptr;
-#pragma omp parallel if (MaxNumThreads > 1 && omp_get_max_threads() > 1 && \
+#pragma omp parallel if (MaxNumThreads > 1 && omp_get_max_threads() > 1 &&     \
                          !omp_in_parallel() && ((end - begin) > GrainSize))
     {
       int64_t num_threads = omp_get_num_threads();
@@ -242,7 +249,6 @@ void kernel_1d_impl_cpu(int device, size_t size, F &&f,
   }
 }
 
-
 } // namespace detail
 
 template <size_t MaxNumThreads = 512, size_t GrainSize = 0, typename F,
@@ -260,16 +266,15 @@ inline void kernel_1d_map(Context ctx, int device, size_t size, F &&f,
       ctx, device, size, std::forward<F>(f), std::forward<Args>(args)...);
 }
 
-
-template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
-          typename F, class... Args>
+template <size_t MaxNumThreads = 512, size_t GrainSize = 0, typename F,
+          class... Args>
 inline void kernel_1d(int device, size_t size, F &&f, Args &&...args) {
   return detail::kernel_1d_impl<MaxNumThreads, GrainSize, false>(
       Context(), device, size, std::forward<F>(f), std::forward<Args>(args)...);
 }
 
-template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
-          typename F, class... Args>
+template <size_t MaxNumThreads = 512, size_t GrainSize = 0, typename F,
+          class... Args>
 inline void kernel_1d(Context ctx, int device, size_t size, F &&f,
                       Args &&...args) {
   return detail::kernel_1d_impl<MaxNumThreads, GrainSize, false>(
@@ -286,23 +291,22 @@ inline void kernel_1d_map_cuda(int device, size_t size, F &&f, Args &&...args) {
 template <size_t MaxNumThreads = 512, size_t GrainSize = 0, typename F,
           class... Args>
 inline void kernel_1d_map_cuda(Context ctx, int device, size_t size, F &&f,
-                          Args &&...args) {
+                               Args &&...args) {
   return detail::kernel_1d_impl_cuda<MaxNumThreads, GrainSize, true>(
       ctx, device, size, std::forward<F>(f), std::forward<Args>(args)...);
 }
 
-
-template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
-          typename F, class... Args>
+template <size_t MaxNumThreads = 512, size_t GrainSize = 0, typename F,
+          class... Args>
 inline void kernel_1d_cuda(int device, size_t size, F &&f, Args &&...args) {
   return detail::kernel_1d_impl_cuda<MaxNumThreads, GrainSize, false>(
       Context(), device, size, std::forward<F>(f), std::forward<Args>(args)...);
 }
 
-template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
-          typename F, class... Args>
+template <size_t MaxNumThreads = 512, size_t GrainSize = 0, typename F,
+          class... Args>
 inline void kernel_1d_cuda(Context ctx, int device, size_t size, F &&f,
-                      Args &&...args) {
+                           Args &&...args) {
   return detail::kernel_1d_impl_cuda<MaxNumThreads, GrainSize, false>(
       ctx, device, size, std::forward<F>(f), std::forward<Args>(args)...);
 }
@@ -314,13 +318,11 @@ inline void kernel_1d_map_cpu(int device, size_t size, F &&f, Args &&...args) {
       device, size, std::forward<F>(f), std::forward<Args>(args)...);
 }
 
-
-template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
-          typename F, class... Args>
+template <size_t MaxNumThreads = 512, size_t GrainSize = 0, typename F,
+          class... Args>
 inline void kernel_1d_cpu(int device, size_t size, F &&f, Args &&...args) {
   return detail::kernel_1d_impl_cpu<MaxNumThreads, GrainSize, false>(
       device, size, std::forward<F>(f), std::forward<Args>(args)...);
 }
-
 
 } // namespace tv

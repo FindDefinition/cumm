@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -27,8 +27,7 @@ class GlobalLoad(pccm.ParameterizedClass):
                  cache_op: Optional[pccm.cuda.CacheOpLd] = None,
                  prefetch: bool = False,
                  level: str = "",
-                 prefetch_size: int = -1
-                 ):
+                 prefetch_size: int = -1):
         super().__init__()
         self.load_bytes = load_bytes
         self.cache_op = cache_op
@@ -53,7 +52,10 @@ class GlobalLoad(pccm.ParameterizedClass):
                 self.load_dtype = dtypes.uint8
             self.fragment_t = core.array_type(str(self.load_dtype), 1)
 
-    def _run(self, code: pccm.cuda.PTXCode, level: str = "", prefetch_size: int = -1):
+    def _run(self,
+             code: pccm.cuda.PTXCode,
+             level: str = "",
+             prefetch_size: int = -1):
         with code.asm_block() as asm:
             ptr_addr = asm.global_ptr("ptr")
             frag_reg_type = pccm.cuda.RegDType.B32
@@ -73,12 +75,12 @@ class GlobalLoad(pccm.ParameterizedClass):
                             asm.generic("prefetch.global.L2",
                                         [ptr_addr + i * 16])
                         asm.ld(ptr_addr + i * 16,
-                            frag_unpack[i * 4:(i + 1) * 4], self.cache_op)
+                               frag_unpack[i * 4:(i + 1) * 4], self.cache_op)
                 else:
                     if self.prefetch:
                         asm.generic("prefetch.global.L2", [ptr_addr])
-                    asm.ld(ptr_addr, frag_unpack, self.cache_op, level, prefetch_size)
-
+                    asm.ld(ptr_addr, frag_unpack, self.cache_op, level,
+                           prefetch_size)
 
     @pccm.cuda.static_function(device=True, forceinline=True)
     def run(self):

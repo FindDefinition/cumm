@@ -186,7 +186,7 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
     }                                                                          \
   } while (0)
 
-#define TV_CUDADRV_RESULT_CHECK(EXPR)                                      \
+#define TV_CUDADRV_RESULT_CHECK(EXPR)                                          \
   do {                                                                         \
     CUresult __macro_err = EXPR;                                               \
     if (__macro_err != CUresult::CUDA_SUCCESS) {                               \

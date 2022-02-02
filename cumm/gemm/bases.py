@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -124,7 +124,8 @@ class GemmInputIterator(GemmIterator):
                  element_per_acc: int,
                  alignment: int = 0,
                  access_per_vector: int = 1):
-        super().__init__(dtype, fragment_length, element_per_acc, alignment, access_per_vector)
+        super().__init__(dtype, fragment_length, element_per_acc, alignment,
+                         access_per_vector)
         self.tmap = tmap
         self.sub_tile_shape = sub_tile_shape
 

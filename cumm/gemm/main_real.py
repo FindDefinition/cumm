@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -66,6 +66,7 @@ def build_gemm_lib(cus: List[pccm.Class]):
 
     return lib
 
+
 def build_gather_lib(cus: List[pccm.Class]):
     lib = pccm.builder.build_pybind(cus,
                                     Path(__file__).parent / "gather_test",
@@ -77,6 +78,7 @@ def build_gather_lib(cus: List[pccm.Class]):
 
     return lib
 
+
 def build_scatter_lib(cus: List[pccm.Class]):
     lib = pccm.builder.build_pybind(cus,
                                     Path(__file__).parent / "scatter_test",
@@ -87,6 +89,7 @@ def build_scatter_lib(cus: List[pccm.Class]):
                                     disable_anno=True)
 
     return lib
+
 
 def _asdv_test_simt():
     # /usr/local/cuda/bin/nvprof -o out_lidardet.nvvp --profile-from-start off --analysis-metrics -f --csv python /home/yy/OneDrive/dev/spconv/spconv/gemm/main_real.py
@@ -245,8 +248,10 @@ def _asdv_test_simt_shuffle():
             algo.trans_a = params.trans_a
             algo.trans_b = params.trans_b
             algo.trans_c = params.trans_c
-            algo.element_per_access_a = ker.input_spec.input_sub_tile_shape_a[1]
-            algo.element_per_access_b = ker.input_spec.input_sub_tile_shape_b[1]
+            algo.element_per_access_a = ker.input_spec.input_sub_tile_shape_a[
+                1]
+            algo.element_per_access_b = ker.input_spec.input_sub_tile_shape_b[
+                1]
             algo.element_per_access_c = ker.output_spec.out_iter.element_per_acc
             algo.split_k_serial = params.splitk_serial
 
@@ -283,7 +288,8 @@ def _asdv_test_simt_shuffle():
                 c_cpu = c_tv.cpu().numpy()
                 # cu_prof_stop()
                 print(ksplit, params.dtype_c, params.get_algo_name(), duration,
-                    np.linalg.norm(c_cpu - c))
+                      np.linalg.norm(c_cpu - c))
+
 
 def _asdv_test_simt_shuffle_debug():
     np.random.seed(12315)
@@ -295,7 +301,7 @@ def _asdv_test_simt_shuffle_debug():
     algo_cls = lib.cumm.gemm.main.GemmAlgoDesp
     # gather_lib = lib_object.rtx.GatherKernel()
     with open("/home/yy/test_debug.pkl", "rb") as f:
-        import pickle 
+        import pickle
         a, b, c, a_inds, b_inds = pickle.load(f)
         a_inds = np.arange(a_inds.shape[0]).astype(np.int32)
         b_inds = np.arange(b_inds.shape[0]).astype(np.int32)
@@ -307,13 +313,12 @@ def _asdv_test_simt_shuffle_debug():
         b_inds_tv = tv.from_numpy(b_inds).cuda()
         print(a_inds, b_inds)
 
-
     for params, ker in zip(main_cu.all_params, main_cu.all_kernels):
         if params.shuffle_stride == ShuffleStrideType.NoShuffle:
             continue
         print("RTX", params.shuffle_stride, params.trans_a, params.trans_b,
               params.trans_c)
-        
+
         for kk in range(100):
             if params.splitk_serial:
                 ksplit = 32
@@ -352,7 +357,8 @@ def _asdv_test_simt_shuffle_debug():
             # cu_prof_stop()
 
             print(ksplit, params.dtype_c, params.get_algo_name(),
-                np.linalg.norm(c_cpu - c))
+                  np.linalg.norm(c_cpu - c))
+
 
 def _asdv_test_simt_debug():
     np.random.seed(12315)
@@ -364,9 +370,9 @@ def _asdv_test_simt_debug():
     algo_cls = lib.cumm.gemm.main.GemmAlgoDesp
     # gather_lib = lib_object.rtx.GatherKernel()
     with open("/home/yy/test_debug.pkl", "rb") as f:
-        import pickle 
+        import pickle
         a, b, c, a_inds, b_inds = pickle.load(f)
-        nhot  = len(a_inds)
+        nhot = len(a_inds)
         a_inds = np.arange(a_inds.shape[0]).astype(np.int32)
         b_inds = np.arange(b_inds.shape[0]).astype(np.int32)
         a = a[:nhot]
@@ -383,13 +389,12 @@ def _asdv_test_simt_debug():
 
         print(a_inds, b_inds)
 
-
     for params, ker in zip(main_cu.all_params, main_cu.all_kernels):
         if params.shuffle_stride != ShuffleStrideType.NoShuffle:
             continue
         print("RTX", params.shuffle_stride, params.trans_a, params.trans_b,
               params.trans_c)
-        
+
         for kk in range(100):
             if params.splitk_serial:
                 ksplit = 32
@@ -428,7 +433,8 @@ def _asdv_test_simt_debug():
             # cu_prof_stop()
 
             print(ksplit, params.dtype_c, params.get_algo_name(),
-                np.linalg.norm(c_cpu - c))
+                  np.linalg.norm(c_cpu - c))
+
 
 COUNTBIT_LOOKUP_TABLE = np.array([bin(i).count('1')
                                   for i in range(256)]).astype(np.int32)
@@ -442,6 +448,9 @@ def count_set_bits(v):
                                             v.shape + (-1, ))].sum(axis=-1)
 
 
+from cumm.nvrtc import CummNVRTCModule
+
+
 def _asdv_test_regular_gemm():
     np.random.seed(12315)
     with cudasim.enter_debug_context(True, 3):
@@ -451,11 +460,24 @@ def _asdv_test_regular_gemm():
     lib_object = lib.cumm.gemm.main.GemmMainUnitTest()
     params_cls = lib.cumm.gemm.main.GemmParams
     algo_cls = lib.cumm.gemm.main.GemmAlgoDesp
-
+    a = tv.zeros([3], tv.int32, 0)
     for params in main_cu.all_params:
         if params.shuffle_stride != ShuffleStrideType.NoShuffle:
             continue
+        ker = gen_gemm_kernels(params, is_nvrtc=True)
+        ker.namespace = "wtf"
+        t = time.time()
+        mod = CummNVRTCModule(
+            [ker],
+            cudadevrt_path="/usr/local/cuda-11.4/lib64/libcudadevrt.a",
+            verbose=False)
+        # print(mod.get_ptx())
 
+        mod.load()
+        print(mod.kernels)
+        print("RTC COMPILE TIME", time.time() - t)
+        # print(mod.kernels)
+        # breakpoint()
         m = 256 + 32
         n = 256 + 40
         k = 136
@@ -528,6 +550,27 @@ def _asdv_test_regular_gemm():
         print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
               np.linalg.norm(c_cpu - c))
 
+        params_cpp = params_cls()
+        params_cpp.algo_desp = algo
+        params_cpp.split_k_slices = ksplit
+        a_tv = tv.from_numpy(a).cuda()
+        b_tv = tv.from_numpy(b).cuda()
+
+        c_tv = tv.zeros(c.shape, params.dtype_c.tv_dtype, 0)
+
+        params_cpp.a = a_tv
+        params_cpp.b = b_tv
+        params_cpp.c = c_tv
+        params_cpp.nvrtc_kernel = mod.get_cpp_object()
+        params_cpp.nvrtc_kernel_name = mod.get_lowered_name(
+            "wtf::nvrtc_kernel")
+        lib_object.matmul2(params_cpp)
+        c_cpu = c_tv.cpu().numpy()
+        print(c_cpu.reshape(-1)[-16:])
+        print(c.reshape(-1)[-16:])
+        print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
+              np.linalg.norm(c_cpu - c))
+
 
 def _asdv_test_turing():
     np.random.seed(12315)
@@ -590,8 +633,9 @@ def _asdv_test_turing():
         c_cpu = c_tv.cpu().numpy()
         print(params.get_algo_name(), np.linalg.norm(c_cpu - c))
 
+
 def _test_gather1():
-    import torch 
+    import torch
 
     np.random.seed(12315)
     main_cu = Gather(seq(4, 128 * 4), 8, 256)
@@ -619,7 +663,7 @@ def _test_gather1():
 
 
 def _test_gather():
-    from cumm.gemm.gather import GatherKernel, Gather, GatherAll, ScatterAll
+    from cumm.gemm.gather import Gather, GatherAll, GatherKernel, ScatterAll
 
     np.random.seed(12315)
     main_cu = GatherAll()
@@ -666,8 +710,9 @@ def _test_gather():
     c_cpu = c_tv.cpu().numpy()
     print(np.linalg.norm(c_ref - c_cpu))
 
+
 def _test_gather_pth():
-    import torch 
+    import torch
     np.random.seed(12315)
     m = 64000
     k = 128
@@ -684,6 +729,7 @@ def _test_gather_pth():
         torch.cuda.synchronize()
 
         print(time.time() - t)
+
 
 def _test_scatter():
     np.random.seed(12315)

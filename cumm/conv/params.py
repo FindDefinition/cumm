@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -57,6 +57,7 @@ def gemm_abc_012_to_iwo(op_type: bases.ConvOpType):
     else:
         raise NotImplementedError
 
+
 def get_gemm_trans_abc(op_type: bases.ConvOpType):
     if op_type == bases.ConvOpType.kForward:
         return (False, True, False)
@@ -67,15 +68,15 @@ def get_gemm_trans_abc(op_type: bases.ConvOpType):
     else:
         raise NotImplementedError
 
+
 class ConvProblemCommon(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_dependency(bases.ConvEnum, TensorViewNVRTC)
-    
 
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def implicit_gemm_mnk(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("op_type", "ConvEnum::OpType")
         code.arg("N, C, K", "int")
         code.arg("kernel_volume, in_prod, out_prod", "int")
@@ -106,6 +107,46 @@ class ConvProblemCommon(pccm.Class):
             }}
             return {{}};
         }}
+        """)
+        code.ret(f"tv::array<int, 3>")
+        return code
+
+    @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
+    def conv_iwo_012_to_abc(self):
+        code = pccm.code()
+        code.arg("op_type", "ConvEnum::OpType")
+        code.raw(f"""
+        switch (op_type) {{
+            case ConvEnum::OpType::kForward:
+                return {{0, 1, 2}};
+            case ConvEnum::OpType::kBackwardInput:
+                return {{2, 1, 0}};
+            case ConvEnum::OpType::kBackwardWeight:
+                return {{1, 2, 0}};
+            default:
+                return {{}};
+        }}
+        return {{}};
+        """)
+        code.ret(f"tv::array<int, 3>")
+        return code
+
+    @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
+    def gemm_abc_012_to_iwo(self):
+        code = pccm.code()
+        code.arg("op_type", "ConvEnum::OpType")
+        code.raw(f"""
+        switch (op_type) {{
+            case ConvEnum::OpType::kForward:
+                return {{0, 1, 2}};
+            case ConvEnum::OpType::kBackwardInput:
+                return {{2, 1, 0}};
+            case ConvEnum::OpType::kBackwardWeight:
+                return {{2, 0, 1}};
+            default:
+                return {{}};
+        }}
+        return {{}};
         """)
         code.ret(f"tv::array<int, 3>")
         return code
@@ -154,9 +195,13 @@ class ConvProblem(pccm.ParameterizedClass):
         self.split_k_slices_ = -1
         self.groups_ = -1
 
+    @pccm.cuda.constructor(device=True, host=True, forceinline=True)
+    def defctor(self):
+        return pccm.code()
+
     @pccm.constructor(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def ctor_without_out_calc(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("N, C, K", "int")
         if self.mask_sparse:
             code.arg("kernel_volume", f"int")
@@ -195,7 +240,7 @@ class ConvProblem(pccm.ParameterizedClass):
 
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def calc_output_dims(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("input_dims, ksize, padding, stride, dilation",
                  f"tv::array<int, {self.ndim}>")
         code.raw(f"""
@@ -220,10 +265,9 @@ class ConvProblem(pccm.ParameterizedClass):
                 stride[i]) + 1
         return out
 
-
     @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def implicit_gemm_mnk(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("op_type", "ConvEnum::OpType")
         if self.mask_sparse:
             code.raw(f"""
@@ -239,7 +283,6 @@ class ConvProblem(pccm.ParameterizedClass):
 
         code.ret(f"tv::array<int, 3>")
         return code
-
 
     def implicit_gemm_mnk_python(self, conv_op_type: bases.ConvOpType):
         ksize_prod = int(np.prod(self.ksize_))
@@ -257,7 +300,7 @@ class ConvProblem(pccm.ParameterizedClass):
 
     @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def implicit_gemm_k_iterations(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("op_type", "ConvEnum::OpType")
         code.arg("tile_shape_k", "int")
         if self.mask_sparse:
@@ -334,7 +377,7 @@ class ConvProblem(pccm.ParameterizedClass):
 
     @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def get_input_shape(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         msg = ", ".join(f"input_dims[{i}]" for i in range(self.ndim))
         if self.mask_sparse:
             code.raw(f"return {{N, C}};")
@@ -349,7 +392,7 @@ class ConvProblem(pccm.ParameterizedClass):
 
     @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def get_weight_shape(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.mask_sparse:
             msg = "kernel_volume"
         else:
@@ -366,7 +409,7 @@ class ConvProblem(pccm.ParameterizedClass):
 
     @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def get_output_shape(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         msg = ", ".join(f"output_dims[{i}]" for i in range(self.ndim))
         if self.mask_sparse:
             code.raw(f"return {{N, K}};")

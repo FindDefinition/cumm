@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,9 +35,7 @@ template <typename K> struct Murmur3Hash {
 template <typename K> struct IdentityHash {
   using key_type = tv::hash::to_unsigned_t<K>;
 
-  key_type TV_HOST_DEVICE_INLINE operator()(key_type k) const {
-    return k;
-  }
+  key_type TV_HOST_DEVICE_INLINE operator()(key_type k) const { return k; }
 };
 
 namespace detail {
@@ -53,16 +51,20 @@ template <> struct FNVInternal<uint64_t> {
   constexpr static uint64_t prime = 0x100000001b3;
 };
 
-static constexpr bool kIsUint64SameAsULL = std::is_same<uint64_t, unsigned long long>::value;
+static constexpr bool kIsUint64SameAsULL =
+    std::is_same<uint64_t, unsigned long long>::value;
 
-template <> struct FNVInternal<std::conditional<kIsUint64SameAsULL, int64_t, unsigned long long>::type> {
+template <>
+struct FNVInternal<
+    std::conditional<kIsUint64SameAsULL, int64_t, unsigned long long>::type> {
   constexpr static unsigned long long defaultOffsetBasis = 0xcbf29ce484222325;
   constexpr static unsigned long long prime = 0x100000001b3;
 };
 
 } // namespace detail
 
-template <typename K> struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
+template <typename K>
+struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
   using key_type = tv::hash::to_unsigned_t<K>;
   key_type TV_HOST_DEVICE_INLINE operator()(key_type key) const {
     key_type ret = detail::FNVInternal<key_type>::defaultOffsetBasis;

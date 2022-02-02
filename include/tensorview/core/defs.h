@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,8 +24,10 @@
 #define TV_GPU_LAMBDA __device__ __host__
 #define TV_GPU_LAMBDA_DEVICE __device__
 #define TV_ASSERT(expr) assert(expr)
-#define TV_IS_EXTEND_LAMBDA(x) __nv_is_extended_host_device_lambda_closure_type(x)
-#define TV_IS_EXTEND_DEVICE_LAMBDA(x) __nv_is_extended_device_lambda_closure_type(x)
+#define TV_IS_EXTEND_LAMBDA(x)                                                 \
+  __nv_is_extended_host_device_lambda_closure_type(x)
+#define TV_IS_EXTEND_DEVICE_LAMBDA(x)                                          \
+  __nv_is_extended_device_lambda_closure_type(x)
 
 #elif defined(__CUDACC_RTC__)
 #define TV_CUDA_CC
@@ -36,8 +38,10 @@
 #define TV_DEVICE __device__
 #define TV_GPU_LAMBDA __device__ __host__
 #define TV_GPU_LAMBDA_DEVICE __device__
-#define TV_IS_EXTEND_LAMBDA(x) __nv_is_extended_host_device_lambda_closure_type(x)
-#define TV_IS_EXTEND_DEVICE_LAMBDA(x) __nv_is_extended_device_lambda_closure_type(x)
+#define TV_IS_EXTEND_LAMBDA(x)                                                 \
+  __nv_is_extended_host_device_lambda_closure_type(x)
+#define TV_IS_EXTEND_DEVICE_LAMBDA(x)                                          \
+  __nv_is_extended_device_lambda_closure_type(x)
 #else
 
 #define TV_ASSERT(x) assert(x)
@@ -72,7 +76,7 @@
 #endif
 
 #if __cplusplus >= 201703L
-#define TV_IF_CONSTEXPR constexpr 
-#else 
-#define TV_IF_CONSTEXPR 
+#define TV_IF_CONSTEXPR constexpr
+#else
+#define TV_IF_CONSTEXPR
 #endif

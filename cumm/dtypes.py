@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -74,7 +74,7 @@ class DType(object):
     def npdtype(self):
         return get_npdtype(self)
 
-    def nbytes_str(self, num = -1):
+    def nbytes_str(self, num=-1):
         bsize = self.bitsize()
         if num > 0:
             bsize = num
@@ -84,7 +84,6 @@ class DType(object):
         else:
             return f"{bsize} / 8"
 
-            
 
 float16 = DType("tv::half_t", 2 * 8, "f16", 1, RegDType.F16, "cutlass::half_t")
 float32 = DType("float", 4 * 8, "f32", 2, RegDType.F32)
@@ -137,7 +136,6 @@ TVDTYPE_TO_NPDTYPE = {
     tf32.tv_dtype: np.dtype(np.float32),
 }  # type: Dict[int, np.dtype]
 
-
 NPDTYPE_TO_DTYPE = {v: k
                     for k, v in DTYPE_TO_NPDTYPE.items()
                     }  # type: Dict[np.dtype, DType]
@@ -149,6 +147,7 @@ def get_dtype_by_shortcut(shortcut: str):
 
 def get_npdtype(dtype: DType):
     return DTYPE_TO_NPDTYPE[dtype]
+
 
 def get_npdtype_from_tvdtype(tv_dtype: int):
     return TVDTYPE_TO_NPDTYPE[tv_dtype]

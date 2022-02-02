@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -20,18 +20,18 @@ import pccm
 
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
-                         TensorViewKernel)
+from cumm.common import GemmBasic, GemmBasicKernel, TensorViewKernel
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import (constants, layout, mask_iters, out_iters, thread_map,
                        volta_iters, volta_out_iters)
 from cumm.gemm.algospec import bases
+from cumm.gemm.arch.memory import GlobalLoad
 from cumm.gemm.bases import (GemmInputIterator, GemmOutputIterator,
                              GemmOutputOp, GemmOutSmemLoader,
                              GemmOutWarpIterator, GemmSmemIterator,
                              GemmWarpIterator)
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
-from cumm.gemm.arch.memory import GlobalLoad
+
 
 def div_up(a, b):
     return (a + b - 1) // b
@@ -91,7 +91,7 @@ class MaskIGemmIterator(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("gemm_k_iterations, RS", "const int&")
         code.arg("mask", "const uint32_t&")
         if not self.increment_k_first:
@@ -110,7 +110,7 @@ class MaskIGemmIterator(pccm.ParameterizedClass):
                                forceinline=True,
                                name="operator++")
     def increment(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.increment_k_first:
             code.raw(f"""
             if (++filter_idx < RS){{
@@ -133,7 +133,7 @@ class MaskIGemmIterator(pccm.ParameterizedClass):
 
     @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def valid(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return mask & (1u << filter_idx);
         """)
@@ -202,7 +202,7 @@ class Mma(pccm.ParameterizedClass):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("smem_storage", "GemmStorage*")
         code.arg("thread_idx,warp_idx_k,warp_m,warp_n,lane_idx", "int")
         code.ctor_init(
@@ -242,7 +242,7 @@ class Mma(pccm.ParameterizedClass):
         return new_obj
 
     def call_mask_sparse_k_first(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("gemm_k_iterations", f"int")
         code.arg("accumulators", f"{self.accumulator_fragment}&")
         code.arg("input_iter_A", f"InputIteratorA &")
@@ -368,7 +368,7 @@ class Mma(pccm.ParameterizedClass):
         return code
 
     def call_mask_sparse_wgrad(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("gemm_k_iterations", f"int")
         code.arg("accumulators", f"{self.accumulator_fragment}&")
         code.arg("input_iter_A", f"InputIteratorA &")
@@ -542,7 +542,7 @@ class Mma(pccm.ParameterizedClass):
 
     def call_mask_sparse_k_first_ffs(self):
         # slower than while loop. may due to slow ffs/mul.
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("gemm_k_iterations", f"int")
         code.arg("accumulators", f"{self.accumulator_fragment}&")
         code.arg("input_iter_A", f"InputIteratorA &")
@@ -660,7 +660,7 @@ class Mma(pccm.ParameterizedClass):
         return code
 
     def call_mask_sparse_filter_first(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("gemm_k_iterations", f"int")
         code.arg("accumulators", f"{self.accumulator_fragment}&")
         code.arg("input_iter_A", f"InputIteratorA &")
@@ -795,7 +795,7 @@ class Mma(pccm.ParameterizedClass):
                 return self.call_mask_sparse_k_first()
             else:
                 return self.call_mask_sparse_filter_first()
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("gemm_k_iterations", f"int")
         code.arg("accumulators", f"{self.accumulator_fragment}&")
         code.arg("input_iter_A", f"InputIteratorA &")

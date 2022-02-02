@@ -20,8 +20,7 @@
 // see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
 // <http://www.gnu.org/licenses/>.
 
-
-#pragma once 
+#pragma once
 
 #include <tensorview/core/defs.h>
 #ifdef __CUDACC_RTC__
@@ -40,7 +39,6 @@ typedef unsigned long long uint64_t;
 namespace std {
 typedef unsigned long size_t;
 typedef long ptrdiff_t;
-
 
 template <typename _Tp, _Tp __v> struct integral_constant {
   static constexpr _Tp value = __v;
@@ -277,110 +275,94 @@ public:
 
 template <typename _Tp> using decay_t = typename decay<_Tp>::type;
 
-template <typename _Tp>
-constexpr _Tp &&
-forward(typename std::remove_reference<_Tp>::type &__t) noexcept {
-  return static_cast<_Tp &&>(__t);
-}
+// nvrtc seems contain a built-in std::forward...
+// template <typename _Tp>
+// constexpr _Tp &&
+// forward(typename std::remove_reference<_Tp>::type &__t) noexcept {
+//   return static_cast<_Tp &&>(__t);
+// }
 
-/**
- *  @brief  Forward an rvalue.
- *  @return The parameter cast to the specified type.
- *
- *  This function is used to implement "perfect forwarding".
- */
-template <typename _Tp>
-constexpr _Tp &&
-forward(typename std::remove_reference<_Tp>::type &&__t) noexcept {
-  static_assert(!std::is_lvalue_reference<_Tp>::value,
-                "template argument"
-                " substituting _Tp is an lvalue reference type");
-  return static_cast<_Tp &&>(__t);
-}
+// /**
+//  *  @brief  Forward an rvalue.
+//  *  @return The parameter cast to the specified type.
+//  *
+//  *  This function is used to implement "perfect forwarding".
+//  */
+// template <typename _Tp>
+// constexpr _Tp &&
+// forward(typename std::remove_reference<_Tp>::type &&__t) noexcept {
+//   static_assert(!std::is_lvalue_reference<_Tp>::value,
+//                 "template argument"
+//                 " substituting _Tp is an lvalue reference type");
+//   return static_cast<_Tp &&>(__t);
+// }
 
-  template<typename, typename>
-    struct is_same
-    : public false_type { };
+template <typename, typename> struct is_same : public false_type {};
 
-  template<typename _Tp>
-    struct is_same<_Tp, _Tp>
-    : public true_type { };
+template <typename _Tp> struct is_same<_Tp, _Tp> : public true_type {};
 
-  // Primary template.
-  /// Define a member typedef @c type only if a boolean constant is true.
-  template<bool, typename _Tp = void>
-    struct enable_if
-    { };
+// Primary template.
+/// Define a member typedef @c type only if a boolean constant is true.
+template <bool, typename _Tp = void> struct enable_if {};
 
-  // Partial specialization for true.
-  template<typename _Tp>
-    struct enable_if<true, _Tp>
-    { typedef _Tp type; };
+// Partial specialization for true.
+template <typename _Tp> struct enable_if<true, _Tp> { typedef _Tp type; };
 
-  template<typename... _Cond>
-    using _Require = typename enable_if<__and_<_Cond...>::value>::type;
+template <typename... _Cond>
+using _Require = typename enable_if<__and_<_Cond...>::value>::type;
 
-  template<bool _Cond, typename _Iftrue, typename _Iffalse>
-    using conditional_t = typename conditional<_Cond, _Iftrue, _Iffalse>::type;
+template <bool _Cond, typename _Iftrue, typename _Iffalse>
+using conditional_t = typename conditional<_Cond, _Iftrue, _Iffalse>::type;
 
-template <class T>
-struct numeric_limits;
+template <class T> struct numeric_limits;
 
-template <>
-struct numeric_limits<int32_t> {
+template <> struct numeric_limits<int32_t> {
   TV_HOST_DEVICE_INLINE
-  static constexpr int32_t lowest() noexcept { return -2147483647 - 1;}
+  static constexpr int32_t lowest() noexcept { return -2147483647 - 1; }
   TV_HOST_DEVICE_INLINE
-  static constexpr int32_t max() noexcept { return 2147483647;}
+  static constexpr int32_t max() noexcept { return 2147483647; }
   static constexpr bool is_integer = true;
 };
 
-template <>
-struct numeric_limits<int16_t> {
+template <> struct numeric_limits<int16_t> {
   TV_HOST_DEVICE_INLINE
-  static constexpr int16_t lowest() noexcept { return -32768;}
+  static constexpr int16_t lowest() noexcept { return -32768; }
   TV_HOST_DEVICE_INLINE
-  static constexpr int16_t max() noexcept { return 32767;}
+  static constexpr int16_t max() noexcept { return 32767; }
   static constexpr bool is_integer = true;
 };
 
-template <>
-struct numeric_limits<int8_t> {
+template <> struct numeric_limits<int8_t> {
   TV_HOST_DEVICE_INLINE
-  static constexpr int8_t lowest() noexcept { return -128;}
+  static constexpr int8_t lowest() noexcept { return -128; }
   TV_HOST_DEVICE_INLINE
-  static constexpr int8_t max() noexcept { return 127;}
+  static constexpr int8_t max() noexcept { return 127; }
   static constexpr bool is_integer = true;
 };
 
-
-template <>
-struct numeric_limits<uint32_t> {
+template <> struct numeric_limits<uint32_t> {
   TV_HOST_DEVICE_INLINE
-  static constexpr uint32_t lowest() noexcept { return 0;}
+  static constexpr uint32_t lowest() noexcept { return 0; }
   TV_HOST_DEVICE_INLINE
-  static constexpr uint32_t max() noexcept { return 4294967295;}
+  static constexpr uint32_t max() noexcept { return 4294967295; }
   static constexpr bool is_integer = true;
 };
 
-template <>
-struct numeric_limits<uint16_t> {
+template <> struct numeric_limits<uint16_t> {
   TV_HOST_DEVICE_INLINE
-  static constexpr uint16_t lowest() noexcept { return 0;}
+  static constexpr uint16_t lowest() noexcept { return 0; }
   TV_HOST_DEVICE_INLINE
-  static constexpr uint16_t max() noexcept { return 65535;}
+  static constexpr uint16_t max() noexcept { return 65535; }
   static constexpr bool is_integer = true;
 };
 
-template <>
-struct numeric_limits<uint8_t> {
+template <> struct numeric_limits<uint8_t> {
   TV_HOST_DEVICE_INLINE
-  static constexpr uint8_t lowest() noexcept { return 0;}
+  static constexpr uint8_t lowest() noexcept { return 0; }
   TV_HOST_DEVICE_INLINE
-  static constexpr uint8_t max() noexcept { return 255;}
+  static constexpr uint8_t max() noexcept { return 255; }
   static constexpr bool is_integer = true;
 };
-
 
 template <typename T>
 TV_HOST_DEVICE_INLINE constexpr const T &min(const T &a, const T &b) {

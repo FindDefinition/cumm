@@ -1,8 +1,9 @@
-import pccm 
+import pccm
 
-from cumm.nvrtc import CummNVRTCModule
+from cumm import tensorview as tv
 from cumm.common import TensorViewNVRTCKernel
-from cumm import tensorview as tv 
+from cumm.nvrtc import CummNVRTCModule
+
 
 class SimpleKernel(pccm.Class):
     def __init__(self):
@@ -17,16 +18,20 @@ class SimpleKernel(pccm.Class):
         code.arg("arr", "tv::array<tv::array<float, 3>, 4>")
 
         code.raw(f"""
+        tv::array<float, 3> a, b;
+        tv::array<float, 2> c;
+        b = b + a;
+        c = tv::arrayops::slice<0, 2>(a);
         size_t tid = blockIdx.x * blockDim.x + threadIdx.x;  
         if (tid < n) {{
             x[tid] += 1;
         }}
         """)
-        return code 
+        return code
 
 
 if __name__ == "__main__":
-    import numpy as np 
+    import numpy as np
     m = CummNVRTCModule([SimpleKernel()])
     # print(m.program.ptx())
     print(m.name_to_meta)
@@ -35,4 +40,3 @@ if __name__ == "__main__":
     m.prepare_launch([1, 1, 1], [128, 1, 1])
     m.run_kernel("cumm::nvrtc::dev::add", a, 2, arr)
     print(a.cpu().numpy())
-

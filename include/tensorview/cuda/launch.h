@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -73,14 +73,14 @@ template <size_t NumThreads = 1024> struct LaunchEx {
         std::forward<Args>(args)...);
   }
 
-  template <class... Args> void run_launch_api(CUfunction kernel, Args &&...args) {
-    void *args_vec[] = { &args... };
+  template <class... Args>
+  void run_launch_api(CUfunction kernel, Args &&...args) {
+    void *args_vec[] = {&args...};
     TV_CUDART_RESULT_CHECK(
-      cudaLaunchKernel(kernel,
-                    blocks.x, blocks.y, blocks.z,    // grid dim
-                    threads.x, threads.y, threads.z,   // block dim
-                    smem_size, stream,             // shared mem and stream
-                    args_vec, 0));           // arguments
+        cudaLaunchKernel(kernel, blocks.x, blocks.y, blocks.z, // grid dim
+                         threads.x, threads.y, threads.z,      // block dim
+                         smem_size, stream, // shared mem and stream
+                         args_vec, 0));     // arguments
   }
 
   dim3 blocks;

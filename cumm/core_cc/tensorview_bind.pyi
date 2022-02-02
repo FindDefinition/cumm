@@ -1,5 +1,8 @@
-from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
-from pccm.stubs import EnumValue, EnumClassValue
+from typing import (Any, Callable, Dict, List, Optional, Set, Tuple, Type,
+                    Union, overload)
+
+from pccm.stubs import EnumClassValue, EnumValue
+
 class TensorViewBind:
     @staticmethod
     def hello() -> None: ...
@@ -17,12 +20,10 @@ class TensorViewBind:
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Type
-from typing import Dict, List, Optional, Tuple, Union, overload
 import builtins
+from typing import Dict, List, Optional, Tuple, Type, Union, overload
 
 import numpy as np
-
 
 class CUDAKernelTimer:
     def __init__(self, enable: bool) -> None:
@@ -59,10 +60,13 @@ class NVRTCProgram:
                  code: str,
                  headers: Dict[str, str] = {},
                  opts: List[str] = [],
-                 program_name: str = "kernel.cu") -> None:
+                 program_name: str = "kernel") -> None:
         ...
 
     def ptx(self) -> str:
+        ...
+
+    def compile_log(self) -> str:
         ...
 
     def get_lowered_name(self, name: str) -> str:
@@ -79,7 +83,8 @@ class NVRTCModule:
                  code: str,
                  headers: Dict[str, str] = {},
                  opts: List[str] = [],
-                 program_name: str = "kernel.cu") -> None:
+                 program_name: str = "kernel",
+                 cudadevrt_path: str = "") -> None:
         ...
 
     @overload
@@ -340,4 +345,10 @@ def zeros_managed(shape: List[int],
 
 
 def from_numpy(arr: np.ndarray) -> Tensor:
+    ...
+
+def get_compute_capability(index: int) -> Tuple[int, int]:
+    ...
+    
+def is_cpu_only() -> bool:
     ...

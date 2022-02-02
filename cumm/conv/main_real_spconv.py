@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -13,31 +13,31 @@
 # limitations under the License.
 
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import sys
-from pathlib import Path
-from typing import Dict, List, Tuple
+import os
 import pickle
 import sys
 import time
 from pathlib import Path
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pccm
 import torch
 import torch.nn.functional as F
+from spconv.core_cc.csrc.sparse.all import SpconvOps
 
 from cumm import dtypes
 from cumm import tensorview as tv
@@ -46,8 +46,6 @@ from cumm.conv.bases import NCHW, NHWC, ConvIterAlgo, ConvOpType
 from cumm.conv.main import ConvMainUnitTest, gen_gemm_kernels
 from cumm.conv.params import ConvProblem
 from cumm.gemm import kernel
-import os 
-from spconv.core_cc.csrc.sparse.all import SpconvOps
 from cumm.gemm.codeops import div_up
 
 os.environ["CUMM_DEBUG"] = "1"
@@ -56,9 +54,11 @@ os.environ["CUMM_DEBUG"] = "1"
 def _asdv_test_spconv():
     limit_input_n = 16384
     limit_input_n = None
-    with (Path.home() / Path("Projects/spconv-release/spconv/test/data/test_spconv.pkl")).open("rb") as f:
+    with (Path.home() /
+          Path("Projects/spconv-release/spconv/test/data/test_spconv.pkl")
+          ).open("rb") as f:
 
-    # with (Path.home() / Path("OneDrive/dev/spconv-release/spconv/test/data/test_spconv.pkl")).open("rb") as f:
+        # with (Path.home() / Path("OneDrive/dev/spconv-release/spconv/test/data/test_spconv.pkl")).open("rb") as f:
         voxels_np, indices_np, spatial_shape = pickle.load(f)
         voxels_np = voxels_np[:limit_input_n]
         indices_np = indices_np[:limit_input_n]
@@ -80,24 +80,29 @@ def _asdv_test_spconv():
     hashdata_subm = tv.zeros([points.dim(0) * 2], tv.custom64, 0)
     indice_pairs_np = np.full([2, kv, indices.dim(0)], -1, np.int32)
     indice_pairs = tv.from_numpy(indice_pairs_np).cuda()
-    indice_pairs_mask_np = np.full([2, indices.dim(0)], (1 << (kv // 2)), np.uint32)
+    indice_pairs_mask_np = np.full([2, indices.dim(0)], (1 << (kv // 2)),
+                                   np.uint32)
 
     indice_pairs_mask = tv.from_numpy(indice_pairs_mask_np).cuda()
 
     indice_pairs_mask2 = tv.empty([1, indices.dim(0)], tv.uint32, 0)
 
     indice_pairs_igemm = indice_pairs.clone()
-    out_act = SpconvOps.generate_subm_conv_inds(indices, hashdata_subm, indice_pairs,
-        out_indices, indice_num_per_loc, 
-        1, spatial_shape, ksize, [1, 1, 1])
+    out_act = SpconvOps.generate_subm_conv_inds(indices, hashdata_subm,
+                                                indice_pairs, out_indices,
+                                                indice_num_per_loc, 1,
+                                                spatial_shape, ksize,
+                                                [1, 1, 1])
     indice_pairs_np = indice_pairs.cpu().numpy()
     indice_num_per_loc_np = indice_num_per_loc.cpu().numpy()
-    out_act = SpconvOps.generate_subm_conv_inds(indices, hashdata_subm, indice_pairs_igemm,
-        out_indices, indice_num_per_loc, 
-        1, spatial_shape, ksize, [1, 1, 1], indice_pairs_mask, False)
-    out_act = SpconvOps.generate_subm_conv_inds(indices, hashdata_subm, indice_pairs_igemm,
-        out_indices, indice_num_per_loc, 
-        1, spatial_shape, ksize, [1, 1, 1], indice_pairs_mask2, False)
+    out_act = SpconvOps.generate_subm_conv_inds(
+        indices, hashdata_subm, indice_pairs_igemm, out_indices,
+        indice_num_per_loc, 1, spatial_shape, ksize, [1, 1, 1],
+        indice_pairs_mask, False)
+    out_act = SpconvOps.generate_subm_conv_inds(
+        indices, hashdata_subm, indice_pairs_igemm, out_indices,
+        indice_num_per_loc, 1, spatial_shape, ksize, [1, 1, 1],
+        indice_pairs_mask2, False)
 
     indice_pairs_mask_np = indice_pairs_mask.cpu().numpy()
     indice_pairs_igemm_np = indice_pairs_igemm.cpu().numpy()
@@ -119,7 +124,8 @@ def _asdv_test_spconv():
     indice_pairs_mask_cpu = indice_pairs_mask.cpu().numpy()
     # indice_pairs_mask.fill_int_((1 << 27) - 1)
     indice_pairs_mask2_2 = indice_pairs_mask2.clone()
-    masks_np = np.array([0b11111111111111, (0b1111111111111) << 14], dtype=np.uint32)
+    masks_np = np.array([0b11111111111111, (0b1111111111111) << 14],
+                        dtype=np.uint32)
     masks_tv = tv.from_numpy(masks_np)
     # for x in range(10):
     #     print("-----------")
@@ -133,7 +139,8 @@ def _asdv_test_spconv():
         print("-----------")
         for j in range(2):
             mask_split = indice_pairs_mask2s[j].clone()
-            mask_split_inds = SpconvOps.sort_1d_by_key_split(mask_split, masks_tv.slice_first_axis(j, j + 1))
+            mask_split_inds = SpconvOps.sort_1d_by_key_split(
+                mask_split, masks_tv.slice_first_axis(j, j + 1))
             mask_splits.append(mask_split)
             mask_split_indss.append(mask_split_inds)
 
@@ -172,17 +179,21 @@ def _asdv_test_spconv():
         C = 128
         K = 128
         if params.dtype_a == dtypes.int8:
-            inp = np.random.randint(-1, 1, size=[points.shape[0], C]).astype(np.int8)
-            weight = np.random.randint(-1, 1, size=[K, *ksize, C]).astype(np.int8)
-            output = np.random.randint(-1, 1, size=[points.shape[0], K]).astype(
-                dtypes.get_npdtype(params.dtype_output))
+            inp = np.random.randint(-1, 1, size=[points.shape[0],
+                                                 C]).astype(np.int8)
+            weight = np.random.randint(-1, 1, size=[K, *ksize,
+                                                    C]).astype(np.int8)
+            output = np.random.randint(-1, 1, size=[
+                points.shape[0], K
+            ]).astype(dtypes.get_npdtype(params.dtype_output))
         else:
             inp = np.random.uniform(-1, 1, size=[points.shape[0], C]).astype(
                 dtypes.get_npdtype(params.dtype_input))
             weight = np.random.uniform(-1, 1, size=[K, *ksize, C]).astype(
                 dtypes.get_npdtype(params.dtype_weight))
-            output = np.random.uniform(-1, 1, size=[points.shape[0], K]).astype(
-                dtypes.get_npdtype(params.dtype_output))
+            output = np.random.uniform(-1, 1, size=[
+                points.shape[0], K
+            ]).astype(dtypes.get_npdtype(params.dtype_output))
         weight_ref = weight.transpose(1, 2, 3, 0, 4)
         weight_ref = np.ascontiguousarray(weight_ref).reshape(-1, K, C)
 
@@ -235,7 +246,6 @@ def _asdv_test_spconv():
         algo.increment_k_first = params.increment_k_first
         algo.access_per_vector = params.access_per_vector
 
-
         if params.tensorop is not None:
             algo.tensorop = params.tensorop.shape
         params_cpp = params_cls(ker.problem.ndim, ker.problem.op_type.value)
@@ -268,7 +278,7 @@ def _asdv_test_spconv():
                         params_cpp.mask_filter = (0b11111111111111)
                     else:
                         params_cpp.mask_filter = ((0b1111111111111) << 14)
-                    
+
                     mask_op = mask_output[j]
                 else:
                     params_cpp.mask_filter = 0xffffffff
@@ -283,7 +293,6 @@ def _asdv_test_spconv():
                 params_cpp.beta = beta
                 lib_object.implicit_gemm2(params_cpp)
 
-
                 # lib_object.implicit_gemm(inp_tv, weight_tv, output_tv, padding, stride, dilation,
                 #     ndim=ndim, iter_algo_=params.iter_algo.value, op_type_=params.op_type.value,
                 #     i_ltype_=params.layout_desp_input.layout_type.value,
@@ -292,11 +301,11 @@ def _asdv_test_spconv():
                 #     ts=params.ts, wts=params.wts, num_stage=params.num_stage, dacc=params.dtype_acc.tv_dtype,
                 #     dcomp=params.dtype_comp.tv_dtype, algo=params.algo.value, tensorop=[0, 0, 0], split_k_slices=spk,
                 #     mask_sparse=True, increment_k_first=params.increment_k_first,
-                #     mask=mask_op, mask_argsort=mask_split_indss[j], indices=indice_pairs, 
+                #     mask=mask_op, mask_argsort=mask_split_indss[j], indices=indice_pairs,
                 #     beta=beta, mask_output=mask_output[j])  # type: tv.Tensor
             torch.cuda.synchronize()
             # print(time.time() - t, params.op_type)
-        op_duration=  0
+        op_duration = 0
         if params.op_type == ConvOpType.kForward:
             output_ref = np.zeros_like(output, dtype=np.float32)
             # ref algorithm
@@ -311,7 +320,8 @@ def _asdv_test_spconv():
                 c_inds = indice_pairs_np[1][filter_offset][:nhot]
                 # print(a_inds_cpu[:10])
                 a = inp[a_inds]
-                cc = a.astype(np.float32) @ weight_ref[filter_offset].T.astype(np.float32)
+                cc = a.astype(np.float32) @ weight_ref[filter_offset].T.astype(
+                    np.float32)
                 output_ref[c_inds] += cc
 
             output_cpu = output_tv.cpu().numpy()
@@ -350,18 +360,20 @@ def _asdv_test_spconv():
                 # print(a_inds_cpu[:10])
                 a = output[a_inds]
                 # NK @ KC
-                cc = a.astype(np.float32) @ weight_ref[filter_offset].astype(np.float32)
+                cc = a.astype(np.float32) @ weight_ref[filter_offset].astype(
+                    np.float32)
                 dinput_ref[c_inds] += cc
 
             din_cpu = inp_tv.cpu().numpy()
-            print("ERROR", np.linalg.norm(din_cpu.reshape(-1) - dinput_ref.reshape(-1)))
+            print("ERROR",
+                  np.linalg.norm(din_cpu.reshape(-1) - dinput_ref.reshape(-1)))
             # print(din_cpu.reshape(-1))
             # print(dinput_ref.reshape(-1))
             duration = time.time() - t
             # print(params.get_algo_name(), din_cpu.mean(), din_cpu.max(), din_cpu.min(),
             #     "Time=", op_duration)
         else:
-            dw_ref = np.zeros_like(weight_ref, dtype=np.float32) # KV, K, C
+            dw_ref = np.zeros_like(weight_ref, dtype=np.float32)  # KV, K, C
             for filter_offset in range(kv):
                 if filter_offset > kv // 2:
                     nhot = indice_num_per_loc_np[kv - 1 - filter_offset]
@@ -372,10 +384,11 @@ def _asdv_test_spconv():
                 o_inds = indice_pairs_np[1][filter_offset][:nhot]
                 i_inds = indice_pairs_np[0][filter_offset][:nhot]
                 # print(a_inds_cpu[:10])
-                out_gather = output[o_inds] # [N, K]
-                inp_gather = inp[i_inds] # [N, C]
+                out_gather = output[o_inds]  # [N, K]
+                inp_gather = inp[i_inds]  # [N, C]
                 # KN @ NC
-                dw_res = out_gather.astype(np.float32).T @ inp_gather.astype(np.float32)
+                dw_res = out_gather.astype(np.float32).T @ inp_gather.astype(
+                    np.float32)
                 # if filter_offset == 13:
                 #     print(dw_res.mean(), dw_res.min(), dw_res.max())
                 #     ref_res = output.T @ inp
@@ -386,7 +399,8 @@ def _asdv_test_spconv():
             # print(indice_pairs_np_test[0])
             dw_ref_kcrs = dw_ref.transpose(1, 0, 2)
             dw_cpu = weight_tv.cpu().numpy().reshape(K, np.prod(ksize), C)
-            print("ERROR", np.linalg.norm(dw_cpu.reshape(-1) - dw_ref_kcrs.reshape(-1)))
+            print("ERROR",
+                  np.linalg.norm(dw_cpu.reshape(-1) - dw_ref_kcrs.reshape(-1)))
             # print("ERROR2", np.linalg.norm(dw_cpu.reshape(-1)[:448] - dw_ref_kcrs.reshape(-1)[:448]))
             # print("RTX", indices_np.shape)
             # print(dw_cpu[:, 13].reshape(-1)[:50] - dw_ref_kcrs[:, 13].reshape(-1)[:50])

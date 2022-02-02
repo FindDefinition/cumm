@@ -18,7 +18,7 @@ import numpy as np
 import pccm
 
 from cumm import dtypes
-from cumm.common import GemmBasic, TensorView, TensorViewNVRTC
+from cumm.common import GemmBasic, TensorViewNVRTC
 from cumm.gemm import constants
 
 
@@ -48,7 +48,7 @@ class RowMajorInterleaved(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -165,7 +165,7 @@ class ColumnMajorInterleaved(pccm.ParameterizedClass):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -267,7 +267,7 @@ class RowMajor(pccm.Class):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -360,7 +360,7 @@ class ColumnMajor(pccm.Class):
                            forceinline=True,
                            constexpr=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stride_", self.index_t)
         code.ctor_init("stride", "stride_")
         return code
@@ -483,7 +483,7 @@ class TensorGeneric(pccm.ParameterizedClass):
 
     @pccm.constructor(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         if self.ndim > 1:
             code.arg("strides", f"tv::array<int, {self.ndim - 1}> const&")
             code.ctor_init("strides", "strides")
@@ -496,7 +496,7 @@ class TensorGeneric(pccm.ParameterizedClass):
 
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def from_shape(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("shape", f"const tv::array<int, {self.ndim}> &")
         if self.ndim == 1:
             code.raw(f"""
@@ -520,7 +520,7 @@ class TensorGeneric(pccm.ParameterizedClass):
                           attrs=["TV_HOST_DEVICE_INLINE"],
                           const=True)
     def call_operator(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("indexes", f"const tv::array<int, {self.ndim}> &")
         stmts = [f"indexes[{self.ndim - 1}]"]
         for i in range(self.ndim - 1):
@@ -533,7 +533,7 @@ class TensorGeneric(pccm.ParameterizedClass):
                           attrs=["TV_HOST_DEVICE_INLINE"],
                           const=True)
     def call_operator2(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("indexes", f"const int*")
         stmts = [f"indexes[{self.ndim - 1}]"]
         for i in range(self.ndim - 1):
@@ -557,7 +557,7 @@ class TensorGeneric(pccm.ParameterizedClass):
             assert external_out is True, "packed must be external out"
         if ptr_out:
             assert not unpack and external_out
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("index", str(self.long_index_t))
         if unpack:
             for i in range(self.ndim):

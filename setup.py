@@ -13,6 +13,7 @@ from shutil import rmtree
 from typing import List
 
 import pccm
+from ccimport import compat
 from pccm.extension import ExtCallback, PCCMBuild, PCCMExtension
 from setuptools import Command, find_packages, setup
 from setuptools.extension import Extension
@@ -35,8 +36,12 @@ VERSION = None
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    "pccm>=0.2.21", "pybind11>=2.6.0", "fire", "numpy", 
+    "pccm>=0.2.21",
+    "pybind11>=2.6.0",
+    "fire",
+    "numpy",
     "contextvars; python_version == \"3.6\"",
+    "cxxfilt",
 ]
 
 # What packages are optional?
@@ -136,6 +141,14 @@ class CopyHeaderCallback(ExtCallback):
             shutil.rmtree(include_path)
         code_path = Path(__file__).parent / "include"
         shutil.copytree(code_path, include_path)
+        lib_path = Path(__file__).parent / "lib"
+
+        if compat.InLinux:
+            # copy /usr/local/cuda/lib64/libcudadevrt.a
+            cudadevrt = Path("/usr/local/cuda/lib64/libcudadevrt.a")
+            if cudadevrt.exists():
+                lib_path.mkdir(0o755)
+                shutil.copy(str(cudadevrt), str(lib_path / "libcudadevrt.a"))
 
 
 disable_jit = os.getenv("CUMM_DISABLE_JIT", None)

@@ -12,18 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
+from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Tuple, Union, Optional
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from pccm import Argument
+from pccm.middlewares.pybind import (TemplateTypeStmt,
+                                     _simple_template_type_parser)
+from torch import tensor
 
 from cumm.core_cc import tensorview_bind
-from cumm.core_cc.tensorview_bind import Tensor
-from pccm.middlewares.pybind import _simple_template_type_parser, TemplateTypeStmt
-from dataclasses import dataclass
-from cumm.core_cc.tensorview_bind import CUDAKernelTimer, NVRTCModule as _NVRTCModule, NVRTCProgram
+from cumm.core_cc.tensorview_bind import CUDAKernelTimer
+from cumm.core_cc.tensorview_bind import NVRTCModule as _NVRTCModule
+from cumm.core_cc.tensorview_bind import NVRTCProgram, Tensor
 from cumm.dtypes import get_npdtype_from_tvdtype
+
 bool_ = 0
 float16 = 1
 float32 = 2
@@ -74,9 +79,10 @@ _SIMPLE_TYPES_TO_TV_DTYPE = {
 
 _VALID_CONTAINER_TYPES = {"tv::array", "std::array"}
 
+
 @dataclass
 class NVRTCArgMeta:
-    valid: bool 
+    valid: bool
     simple_type: int
     shape: List[int]
 
@@ -85,10 +91,12 @@ class NVRTCArgMeta:
 
 class NVRTCKernelMeta:
     def __init__(self, name: str, ns: str, args: List[Argument]):
-        self.name = name 
-        self.ns = ns 
+        self.name = name
+        self.ns = ns
         self.args = args
-        self.arg_types = [_simple_template_type_parser(a.type_str, {}) for a in args]
+        self.arg_types = [
+            _simple_template_type_parser(a.type_str, {}) for a in args
+        ]
         self.simple_types: List[Optional[int]] = []
         self.arg_metas: List[NVRTCArgMeta] = []
         for meta in self.arg_types:
@@ -102,7 +110,8 @@ class NVRTCKernelMeta:
                 while True:
                     if len(cur_meta.args) == 0:
                         if cur_meta.name in _SIMPLE_TYPES_TO_TV_DTYPE:
-                            simple_tv_type = _SIMPLE_TYPES_TO_TV_DTYPE[cur_meta.name]
+                            simple_tv_type = _SIMPLE_TYPES_TO_TV_DTYPE[
+                                cur_meta.name]
                         break
                     is_valid_container = cur_meta.name in _VALID_CONTAINER_TYPES
                     if not is_valid_container and len(cur_meta.args) > 0:
@@ -118,18 +127,22 @@ class NVRTCKernelMeta:
             if len(shape) == 0:
                 shape = [1]
             # shape = shape[::-1]
-            self.arg_metas.append(NVRTCArgMeta(valid, simple_tv_type, shape, is_simple_ptr))
+            self.arg_metas.append(
+                NVRTCArgMeta(valid, simple_tv_type, shape, is_simple_ptr))
 
     def __repr__(self) -> str:
         return f"NVRTCKernelMeta[name={self.name},ns={self.ns},args={self.arg_metas}]"
 
+
 class NVRTCModule:
-    def __init__(self, code: Union[str, NVRTCProgram],
+    def __init__(self,
+                 code: Union[str, NVRTCProgram],
                  headers: Optional[Dict[str, str]] = None,
                  opts: Optional[List[str]] = None,
                  program_name: str = "kernel.cu",
                  name_exprs: Optional[List[str]] = None,
-                 name_to_meta: Optional[Dict[str, NVRTCKernelMeta]] = None) -> None:
+                 name_to_meta: Optional[Dict[str, NVRTCKernelMeta]] = None,
+                 cudadevrt_path: str = "") -> None:
         if headers is None:
             headers = {}
         if opts is None:
@@ -137,9 +150,10 @@ class NVRTCModule:
         if name_exprs is None:
             name_exprs = []
         if isinstance(code, str):
-            self._mod = _NVRTCModule(code, headers, opts, program_name, name_exprs)
+            self._mod = _NVRTCModule(code, headers, opts, program_name,
+                                     name_exprs, cudadevrt_path)
         else:
-            self._mod = _NVRTCModule(code)
+            self._mod = _NVRTCModule(code, cudadevrt_path)
         self.blocks = [0, 0, 0]
         self.threads = [0, 0, 0]
         self.smem_size = 0
@@ -150,15 +164,26 @@ class NVRTCModule:
     def load(self):
         return self._mod.load()
 
-    def prepare_launch( self, blocks: List[int], threads: List[int],
-                   smem_size: int = 0, stream: int = 0):
+    def get_cpp_object(self):
+        return self._mod
+
+    def get_ptx(self):
+        return self._mod.program.ptx()
+
+    def prepare_launch(self,
+                       blocks: List[int],
+                       threads: List[int],
+                       smem_size: int = 0,
+                       stream: int = 0):
         self.blocks = blocks
         self.threads = threads
         self.smem_size = smem_size
         self.stream = stream
-        return self 
+        return self
 
-    def run_kernel(self, name: str, *args: Union[Tensor, int, float, List[int], List[float], Tuple[float, ...], Tuple[int, ...]]):
+    def run_kernel(self, name: str,
+                   *args: Union[Tensor, int, float, List[int], List[float],
+                                Tuple[float, ...], Tuple[int, ...]]):
         assert np.prod(self.blocks) > 0
         assert np.prod(self.threads) > 0
         metas: List[NVRTCArgMeta] = [NVRTCArgMeta(False, -1, [])] * len(args)
@@ -178,9 +203,11 @@ class NVRTCModule:
                         raise ValueError("your arg must be tensor")
                     if not arg.dtype == meta.simple_type:
                         cur_dtype = get_npdtype_from_tvdtype(arg.dtype)
-                        expected_dtype = get_npdtype_from_tvdtype(meta.simple_type)
-                        raise ValueError(f"your tensor {arg.shape}|{cur_dtype}"
-                                        f" dtype not equal to {expected_dtype}")
+                        expected_dtype = get_npdtype_from_tvdtype(
+                            meta.simple_type)
+                        raise ValueError(
+                            f"your tensor {arg.shape}|{cur_dtype}"
+                            f" dtype not equal to {expected_dtype}")
                     kernel_args.append((arg, _NVRTCModule.kTensor))
                     continue
                 else:
@@ -197,33 +224,112 @@ class NVRTCModule:
                         ten.numpy_view()[:] = arg_array
                         kernel_args.append((ten, _NVRTCModule.kScalar))
                         continue
-            # meta isn't valid, use regular dtypes. 
+            # meta isn't valid, use regular dtypes.
             if isinstance(arg, (int, float)):
-                dtype = float32 
+                dtype = float32
                 if isinstance(arg, int):
-                    dtype = int64 
+                    dtype = int64
                 ten = empty([1], dtype, -1)
                 ten.numpy_view()[0] = arg
                 kernel_args.append((ten, _NVRTCModule.kScalar))
             elif isinstance(arg, (list, tuple)):
-                dtype = np.float32 
+                dtype = np.float32
                 if isinstance(arg[0], int):
-                    dtype = np.int64 
+                    dtype = np.int64
                 arg_np = np.array(arg, dtype=dtype)
                 ten = from_numpy(arg_np).clone()
                 kernel_args.append((ten, _NVRTCModule.kArray))
             else:
                 assert isinstance(arg, Tensor)
                 kernel_args.append((arg, _NVRTCModule.kTensor))
-        
-        return self._mod.run_kernel(name, self.blocks, self.threads, self.smem_size, self.stream, kernel_args)
 
-    @property 
+        return self._mod.run_kernel(name, self.blocks, self.threads,
+                                    self.smem_size, self.stream, kernel_args)
+
+    @property
     def program(self):
         return self._mod.program
 
     def get_lowered_name(self, name: str) -> str:
         return self._mod.get_lowered_name(name)
+
+
+class nullcontext(contextlib.AbstractContextManager):
+    """Context manager that does no additional processing.
+
+    Used as a stand-in for a normal context manager, when a particular
+    block of code is only sometimes used with a normal context manager:
+
+    cm = optional_cm if condition else nullcontext()
+    with cm:
+        # Perform operation, using optional_cm if condition is True
+    """
+    def __init__(self, enter_result=None):
+        self.enter_result = enter_result
+
+    def __enter__(self):
+        return self.enter_result
+
+    def __exit__(self, *excinfo):
+        pass
+
+
+class KernelTimer:
+    def __init__(self, enable: bool = True) -> None:
+        self.enable = enable and not tensorview_bind.is_cpu_only()
+        if self.enable:
+            self._timer = CUDAKernelTimer(enable)
+        else:
+            self._timer = None
+
+    @contextlib.contextmanager
+    def _namespace(self, name: str):
+        assert self._timer is not None
+        self._timer.push(name)
+        try:
+            yield
+        finally:
+            self._timer.pop()
+
+    @contextlib.contextmanager
+    def _record(self, name: str, stream: int = 0):
+        assert self._timer is not None
+        self._timer.push(name)
+        try:
+            self._timer.insert_pair("", "start", "stop")
+            self._timer.record("start", stream)
+            yield
+            self._timer.record("stop", stream)
+        finally:
+            self._timer.pop()
+
+    def namespace(self, name: str):
+        if self.enable:
+            return self._namespace(name)
+        else:
+            return nullcontext()
+
+    def record(self, name: str, stream: int = 0):
+        if self.enable:
+            return self._record(name, stream)
+        else:
+            return nullcontext()
+
+    def get_all_pair_time(self) -> Dict[str, float]:
+        if self.enable:
+            assert self._timer is not None
+            return self._timer.get_all_pair_duration()
+        else:
+            return {}
+
+    @staticmethod
+    def collect_by_name(name: str, res: Dict[str, float]):
+        filtered_res: Dict[str, float] = {}
+        for k, v in res.items():
+            k_split = k.split(".")
+            if name in k_split:
+                filtered_res[k] = v
+        return filtered_res
 
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:
@@ -288,8 +394,7 @@ def from_blob_strided(ptr: int, shape: List[int], stride: List[int],
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
-    return tensorview_bind.from_blob(ptr, shape, stride, tv_dtype,
-                                             device)
+    return tensorview_bind.from_blob(ptr, shape, stride, tv_dtype, device)
 
 
 def from_const_blob_strided(ptr: int, shape: List[int], stride: List[int],
@@ -300,8 +405,8 @@ def from_const_blob_strided(ptr: int, shape: List[int], stride: List[int],
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
-    return tensorview_bind.from_const_blob(ptr, shape, stride,
-                                                   tv_dtype, device)
+    return tensorview_bind.from_const_blob(ptr, shape, stride, tv_dtype,
+                                           device)
 
 
 def from_blob(ptr: int, shape: List[int], dtype: Union[np.dtype, int],
@@ -370,3 +475,11 @@ def zeros_managed(shape: List[int],
 
 def from_numpy(arr: np.ndarray) -> Tensor:
     return tensorview_bind.from_numpy(arr)
+
+
+def get_compute_capability(index: int):
+    return tensorview_bind.get_compute_capability(index)
+
+
+def is_cpu_only():
+    return tensorview_bind.is_cpu_only()

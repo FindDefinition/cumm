@@ -142,7 +142,6 @@ struct function_takes_identity_argument_cuda<
     : std::true_type {};
 #endif
 
-
 template <bool Condition> struct _if_constexpr;
 template <bool Condition> struct _if_constexpr_cuda;
 
@@ -193,10 +192,10 @@ template <> struct _if_constexpr<false> final {
 };
 
 template <> struct _if_constexpr_cuda<true> final {
-  template <
-      class ThenCallback, class ElseCallback,
-      std::enable_if_t<function_takes_identity_argument_cuda<ThenCallback>::value,
-                       void *> = nullptr>
+  template <class ThenCallback, class ElseCallback,
+            std::enable_if_t<
+                function_takes_identity_argument_cuda<ThenCallback>::value,
+                void *> = nullptr>
   TV_HOST_DEVICE_INLINE static decltype(auto)
   call(ThenCallback &&thenCallback, ElseCallback && /* elseCallback */) {
     // The _identity instance passed in can be used to delay evaluation of an
@@ -205,10 +204,10 @@ template <> struct _if_constexpr_cuda<true> final {
     return thenCallback(_identity_cuda());
   }
 
-  template <
-      class ThenCallback, class ElseCallback,
-      std::enable_if_t<!function_takes_identity_argument_cuda<ThenCallback>::value,
-                       void *> = nullptr>
+  template <class ThenCallback, class ElseCallback,
+            std::enable_if_t<
+                !function_takes_identity_argument_cuda<ThenCallback>::value,
+                void *> = nullptr>
   TV_HOST_DEVICE_INLINE static decltype(auto)
   call(ThenCallback &&thenCallback, ElseCallback && /* elseCallback */) {
     return thenCallback();
@@ -216,10 +215,10 @@ template <> struct _if_constexpr_cuda<true> final {
 };
 
 template <> struct _if_constexpr_cuda<false> final {
-  template <
-      class ThenCallback, class ElseCallback,
-      std::enable_if_t<function_takes_identity_argument_cuda<ElseCallback>::value,
-                       void *> = nullptr>
+  template <class ThenCallback, class ElseCallback,
+            std::enable_if_t<
+                function_takes_identity_argument_cuda<ElseCallback>::value,
+                void *> = nullptr>
   TV_HOST_DEVICE_INLINE static decltype(auto)
   call(ThenCallback && /* thenCallback */, ElseCallback &&elseCallback) {
     // The _identity instance passed in can be used to delay evaluation of an
@@ -228,10 +227,10 @@ template <> struct _if_constexpr_cuda<false> final {
     return elseCallback(_identity_cuda());
   }
 
-  template <
-      class ThenCallback, class ElseCallback,
-      std::enable_if_t<!function_takes_identity_argument_cuda<ElseCallback>::value,
-                       void *> = nullptr>
+  template <class ThenCallback, class ElseCallback,
+            std::enable_if_t<
+                !function_takes_identity_argument_cuda<ElseCallback>::value,
+                void *> = nullptr>
   TV_HOST_DEVICE_INLINE static decltype(auto)
   call(ThenCallback && /* thenCallback */, ElseCallback &&elseCallback) {
     return elseCallback();

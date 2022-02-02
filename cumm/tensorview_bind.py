@@ -1,29 +1,33 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from typing import List, Optional
-import os 
+
 import pccm
+from ccimport import compat
 from pccm.utils import project_is_editable, project_is_installed
 
-from .constants import PACKAGE_NAME
 from cumm.common import PyBind11, TensorView, TensorViewCPU
-from cumm.constants import PACKAGE_ROOT, CUMM_CPU_ONLY_BUILD
-from ccimport import compat 
+from cumm.constants import CUMM_CPU_ONLY_BUILD, PACKAGE_ROOT
+
+from .constants import PACKAGE_NAME
+
 _TENSORVIEW_BIND_CODE_ANNO_PATH = PACKAGE_ROOT / "tensorview_bind_anno.pyi"
 with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
     _TENSORVIEW_BIND_CODE_ANNO = f.read()
+
 
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
@@ -31,21 +35,22 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_dependency(TensorView, PyBind11)
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
-        self.add_include("tensorview/nvrtcutils.h")
-        self.build_meta.add_libraries("nvrtc")
-        if not compat.InWindows:
-            self.build_meta.add_libraries("dl")
+        if not CUMM_CPU_ONLY_BUILD:
+            self.add_include("tensorview/cuda/nvrtc.h")
+            self.build_meta.add_libraries("nvrtc")
+            if not compat.InWindows:
+                self.build_meta.add_libraries("dl")
 
     @pccm.pybind.mark
     @pccm.static_function
     def hello(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         return code
 
     @pccm.pybind.mark_bind_raw(raw_bind_anno=_TENSORVIEW_BIND_CODE_ANNO)
     @pccm.static_function
     def bind_tensorview(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("m", "pybind11::module_")
         # we remove fill in below code because it depends on libcuda.so.
         code.raw("""
@@ -72,15 +77,17 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
          py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
          py::arg("name_exprs") = std::vector<std::string>{})
     .def("ptx", &tv::NVRTCProgram::ptx)
+    .def("compile_log", &tv::NVRTCProgram::compile_log)
     .def("get_lowered_name", &tv::NVRTCProgram::get_lowered_name);
   
   py::class_<tv::NVRTCModule, std::shared_ptr<tv::NVRTCModule>> nvrtc_m(m, "NVRTCModule");
   nvrtc_m.def(py::init(&tv::NVRTCModule::create), py::arg("code"), py::arg("headers") = std::unordered_map<std::string, std::string>{}, 
          py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
-         py::arg("name_exprs") = std::vector<std::string>{})
-    .def(py::init([](std::shared_ptr<tv::NVRTCProgram> p) {
-        return std::make_shared<tv::NVRTCModule>(p);
-    }), py::arg("prog"))
+         py::arg("name_exprs") = std::vector<std::string>{},
+         py::arg("cudadevrt_path") = std::string(""))
+    .def(py::init([](std::shared_ptr<tv::NVRTCProgram> p, std::string path) {
+        return std::make_shared<tv::NVRTCModule>(p, path);
+    }), py::arg("prog"), py::arg("cudadevrt_path") = std::string())
     .def("load", &tv::NVRTCModule::load)
     .def_property_readonly("program", &tv::NVRTCModule::get_program)
     .def("get_lowered_name", &tv::NVRTCModule::get_lowered_name)
@@ -270,10 +277,23 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   // m.def("full_float_managed", [](std::vector<int64_t> shape, float val, int dtype){
   //   return tv::full(shape, val, tv::DType(dtype), 0, false, true);
   // }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0); 
+  m.def("get_compute_capability", [](int index){
+    cudaDeviceProp prop;
+    checkCudaErrors(cudaGetDeviceProperties(&prop, index));
+    return std::make_tuple(prop.major, prop.minor);
+  }, py::arg("index")); 
 #endif
   m.def("from_numpy", [](py::array arr){
     return tv::array2tensor(arr);
   }); 
   m.def("cat_first_axis", &tv::cat_first_axis);
+  m.def("is_cpu_only", [](){
+#ifdef TV_CUDA
+    return false;
+#else
+    return true;
+#endif
+  }); 
+
         """)
         return code

@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -320,7 +320,6 @@ public:
     launcher(clear_set2<LinearHashSet>, *this);
   }
 
-
   tv::Tensor keys(tv::Tensor out = tv::Tensor(),
                   cudaStream_t stream = nullptr) const {
     auto count = tv::zeros({1}, tv::int32, 0);
@@ -351,7 +350,6 @@ public:
     auto count_val = count_cpu.item<int32_t>();
     return out.slice_first_axis(0, count_val);
   }
-
 };
 
 template <typename K, typename V, typename Hash, K EmptyKey = empty_key_v<K>,
@@ -376,9 +374,10 @@ private:
   Hash hash_ftor_ = Hash();
 
 public:
-  TV_HOST_DEVICE explicit LinearHashTableSplit(key_type *key, mapped_type *value,
-                                          size_type hash_size)
-      : key_ptr_(key),  value_ptr_(value), hash_size_(hash_size) {
+  TV_HOST_DEVICE explicit LinearHashTableSplit(key_type *key,
+                                               mapped_type *value,
+                                               size_type hash_size)
+      : key_ptr_(key), value_ptr_(value), hash_size_(hash_size) {
     auto eky = empty_key;
     empty_key_uint = *(reinterpret_cast<const key_type_uint *>(&eky));
   }
@@ -393,7 +392,9 @@ public:
   TV_HOST_DEVICE_INLINE key_type *key_ptr() { return key_ptr_; }
   TV_HOST_DEVICE_INLINE const key_type *key_ptr() const { return key_ptr_; }
   TV_HOST_DEVICE_INLINE mapped_type *value_ptr() { return value_ptr_; }
-  TV_HOST_DEVICE_INLINE const mapped_type *value_ptr() const { return value_ptr_; }
+  TV_HOST_DEVICE_INLINE const mapped_type *value_ptr() const {
+    return value_ptr_;
+  }
 
   TV_DEVICE_INLINE void insert(const K &key, const V &value) {
     key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
@@ -497,11 +498,10 @@ public:
     launcher(clear_table<LinearHashTable>, *this);
   }
 
-  std::tuple<tv::Tensor, tv::Tensor> items(tv::Tensor out_k = tv::Tensor(), 
-                  tv::Tensor out_v = tv::Tensor(),
-                  tv::Tensor count = tv::Tensor(),
-                   cudaStream_t stream = nullptr) const {
-    if (count.empty()){
+  std::tuple<tv::Tensor, tv::Tensor>
+  items(tv::Tensor out_k = tv::Tensor(), tv::Tensor out_v = tv::Tensor(),
+        tv::Tensor count = tv::Tensor(), cudaStream_t stream = nullptr) const {
+    if (count.empty()) {
       count = tv::empty({1}, tv::type_v<size_type>, 0);
     }
     auto ctx = tv::Context();
@@ -511,31 +511,31 @@ public:
       out_k = tv::Tensor({hash_size_}, tv::type_v<key_type>, 0);
     } else {
       TV_ASSERT_INVALID_ARG(out_k.device() == 0 && out_k.ndim() == 1 &&
-                            out_k.itemsize() == sizeof(tv::type_v<key_type>),
+                                out_k.itemsize() ==
+                                    sizeof(tv::type_v<key_type>),
                             "error");
     }
     if (out_v.empty()) {
       out_v = tv::Tensor({hash_size_}, tv::type_v<mapped_type>, 0);
     } else {
       TV_ASSERT_INVALID_ARG(out_v.device() == 0 && out_v.ndim() == 1 &&
-                            out_v.itemsize() == sizeof(tv::type_v<mapped_type>),
+                                out_v.itemsize() ==
+                                    sizeof(tv::type_v<mapped_type>),
                             "error");
     }
     TV_ASSERT_INVALID_ARG(out_k.dim(0) == out_v.dim(0), "error");
 
     auto launcher = tv::cuda::Launch(hash_size_, stream);
-    launcher(iterate_table_split<LinearHashTableSplit, size_type>, *this, 
-            reinterpret_cast<key_type*>(out_k.raw_data()),
-            reinterpret_cast<mapped_type*>(out_v.raw_data()),
-            out_k.dim(0),
-            count.data_ptr<size_type>());
+    launcher(iterate_table_split<LinearHashTableSplit, size_type>, *this,
+             reinterpret_cast<key_type *>(out_k.raw_data()),
+             reinterpret_cast<mapped_type *>(out_v.raw_data()), out_k.dim(0),
+             count.data_ptr<size_type>());
     auto count_cpu = count.cpu(ctx);
     auto count_val = count_cpu.item<size_type>();
-    return std::make_tuple(out_k.slice_first_axis(0, count_val), out_v.slice_first_axis(0, count_val));
+    return std::make_tuple(out_k.slice_first_axis(0, count_val),
+                           out_v.slice_first_axis(0, count_val));
   }
-
 };
-
 
 } // namespace hash
 } // namespace tv

@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,6 +15,8 @@
 import os
 from pathlib import Path
 from typing import List
+
+from ccimport import compat
 
 PACKAGE_NAME = "cumm"
 PACKAGE_ROOT = Path(__file__).parent.resolve()
@@ -44,3 +46,5 @@ if CUMM_CUDA_VERSION is not None:
     CUMM_CPU_ONLY_BUILD = CUMM_CUDA_VERSION.strip() == ""
 
 CUMM_DISABLE_JIT = os.getenv("CUMM_DISABLE_JIT", "0") == "1"
+
+CUMM_MAXIMUM_NVRTC_CONV_NDIM = 3

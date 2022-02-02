@@ -1,11 +1,11 @@
 // Copyright 2021 Yan Yan
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -34,9 +34,9 @@ we can access single tensor without read all data of a json array.
 #include <tuple>
 #include <vector>
 
-#include <tensorview/thirdparty/nlohmann/json.hpp>
 #include <string>
 #include <tensorview/tensor.h>
+#include <tensorview/thirdparty/nlohmann/json.hpp>
 #include <unordered_map>
 
 namespace tv {
@@ -68,7 +68,6 @@ int64_t align_offset(int64_t offset, int64_t n) {
 }
 
 } // namespace detail
-
 
 template <typename Tbuffer> JsonArray decode(const Tbuffer &buffer) {
   JsonArray res;
@@ -108,7 +107,8 @@ template <typename Tbuffer> JsonArray decode(const Tbuffer &buffer) {
   return {data_skeleton, res_tensors};
 }
 
-inline std::string encode(const std::vector<tv::Tensor> tensors, json &data_json) {
+inline std::string encode(const std::vector<tv::Tensor> tensors,
+                          json &data_json) {
   json res_json;
   int64_t start = 16;
   constexpr int64_t align_size = 128;
@@ -118,7 +118,7 @@ inline std::string encode(const std::vector<tv::Tensor> tensors, json &data_json
     json array_meta;
     auto &tensor = tensors[i];
     auto &shape = tensor.shape();
-  
+
     int64_t start_aligned = detail::align_offset(start, align_size);
     array_meta["shape"] = std::vector<int64_t>(shape.begin(), shape.end());
     array_meta["dtype"] = int(tensor.dtype());
@@ -160,6 +160,5 @@ inline json access_idx(json j) {
   return j[kJsonArrayKey].template get<int64_t>();
 }
 
-
-} // namespace codeai
-} // namespace codeai
+} // namespace io
+} // namespace tv

@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -37,7 +37,7 @@ class ApplyOutputOp(bases.GemmApply):
 
     @pccm.cuda.static_function(device=True, forceinline=True)
     def apply_output_operator(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("output_fragment", f"{self.out_frag_t} &")
         code.arg("output_op", f"OutputOp const &")
         code.arg("aligned_accum_fragment", f"{self.inp_frag_t} const &")
@@ -85,7 +85,7 @@ class ApplyOutputOp(bases.GemmApply):
 
     @pccm.cuda.static_function(device=True, forceinline=True)
     def apply_output_operator_no_source(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("output_fragment", f"{self.out_frag_t} &")
         code.arg("output_op", f"OutputOp const &")
         code.arg("aligned_accum_fragment", f"{self.inp_frag_t} const &")

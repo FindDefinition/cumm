@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import enum
 import os
 import sys
 from functools import partial
@@ -27,14 +28,15 @@ from pccm.core import CodeFormatter, FunctionCode
 # from myclang import clangformat
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import GemmBasic, PyBind11, TensorView, TensorViewKernel
-from cumm.gemm.utils import GemmUtilsCPU
+from cumm.common import (CummNVRTCLib, GemmBasic, PyBind11, TensorView,
+                         TensorViewKernel)
 from cumm.constants import CUTLASS_MODE
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import codeops, kernel
 from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.core.metaarray import MetaArray
+from cumm.gemm.utils import GemmUtilsCPU
 
 
 class GemmAlgoParams(object):
@@ -161,9 +163,10 @@ def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
             res.append(p)
     return res
 
+
 def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: str, stage: int,
-                       algo: kernel.GemmAlgo,
-                       tensorop: Optional[kernel.TensorOpParams]):
+                          algo: kernel.GemmAlgo,
+                          tensorop: Optional[kernel.TensorOpParams]):
     res = []
     for ds in dss:
         for tb in [False, True]:
@@ -173,11 +176,13 @@ def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: str, stage: int,
             if not p.skipped():
                 res.append(p)
     if ds_for_sab:
-        p = GemmAlgoParams(ts, wts, stage, ds_for_sab, True, False, False, algo,
-                            tensorop, True, False, ShuffleStrideType.ShuffleAB)
+        p = GemmAlgoParams(ts, wts, stage, ds_for_sab, True, False, False,
+                           algo, tensorop, True, False,
+                           ShuffleStrideType.ShuffleAB)
         if not p.skipped():
             res.append(p)
     return res
+
 
 def gen_gemm_params_rowmajor_c(ts,
                                wts,
@@ -199,7 +204,7 @@ def gen_gemm_params_rowmajor_c(ts,
     return res
 
 
-def gen_gemm_kernels(params: GemmAlgoParams):
+def gen_gemm_kernels(params: GemmAlgoParams, is_nvrtc: bool = False):
     return kernel.GemmKernel(params.ts,
                              params.wts,
                              params.num_stage,
@@ -216,7 +221,8 @@ def gen_gemm_kernels(params: GemmAlgoParams):
                              splitk_serial=params.splitk_serial,
                              splitk_parallel=params.splitk_parallel,
                              shuffle_stride=params.shuffle_stride,
-                             access_per_vector=params.access_per_vector)
+                             access_per_vector=params.access_per_vector,
+                             is_nvrtc=is_nvrtc)
 
 
 class SpconvKernel(pccm.Class):
@@ -225,15 +231,48 @@ class SpconvKernel(pccm.Class):
         self.add_include("spconv/minkowski.cu.h")
 
 
-class IGemmMaskIterator(pccm.Class):
+class NVRTCMode(enum.Enum):
+    Disabled = 0
+    # calc params directly in kernel. VERY SLOW.
+    Direct = 1
+    # launch a kernel, calculate params, then launch gemm kernel
+    # in that kernel.
+    # greatly slower than KernelAndCPU/ConstantMemory, I don't know why.
+    DynamicParallism = 2
+    # run init kernel first to generate params, copy params to cpu, then use
+    # that oarans to launch kernel.
+    KernelAndCPU = 3
+    # similar to KernelAndCPU, don't need dev to cpu copy.
+    # fastest way, but DON'T SUPPORT MULTIPLE STREAM. (we need to
+    # create nvrtc module for every stream)
+    ConstantMemory = 4
+
+
+class NVRTCParams(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_member("k_idx, filter_idx", "int")
-        self.add_member("mask", "const int&")
+        self.add_dependency(CummNVRTCLib, TensorView)
+        self.add_pybind_member("module",
+                               "std::shared_ptr<tv::NVRTCModule>",
+                               "std::shared_ptr<tv::NVRTCModule>{}",
+                               pyanno="cumm.tensorview.NVRTCModule")
+        self.add_pybind_member("kernel_name", "std::string")
+        self.add_pybind_member("init_kernel_name", "std::string", "\"\"")
+        self.add_pybind_member("param_size", "int", "-1")
+        self.add_pybind_member("param_storage", "tv::Tensor", "tv::Tensor()")
+        self.add_pybind_member("param_storage_cpu", "tv::Tensor",
+                               "tv::Tensor()")
 
-    @pccm.cuda.member_function(device=True, forceinline=True)
-    def increment(self):
-        pass
+        self.add_pybind_member("num_threads", "int", "-1")
+        self.add_pybind_member("smem_size", "int", "-1")
+        self.add_pybind_member("mode", "int", f"{NVRTCMode.Disabled.value}")
+        self.add_pybind_member("constant_name", "std::string", "\"\"")
+
+    @pccm.pybind.mark
+    @pccm.constructor
+    def dtor(self):
+        return pccm.code()
+
 
 @pccm.pybind.bind_class_module_local
 class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
@@ -242,7 +281,8 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_dependency(TensorView, GemmUtilsCPU)
         # why not std::optional?
         # c++17 requires cuda11. to support cuda 10.2, we can't use c++17 for now.
-        self.add_pybind_member("dtype_a,dtype_b,dtype_c", "int")  # -1 means unset
+        self.add_pybind_member("dtype_a,dtype_b,dtype_c",
+                               "int")  # -1 means unset
         self.add_member("trans_a_,trans_b_,trans_c_", "int")  # -1 means unset
         self.add_pybind_member("tile_shape,warp_tile_shape",
                                "std::array<int, 3>",
@@ -265,7 +305,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.ctor_init("dtype_a", "int(tv::unknown)")
         code.ctor_init("dtype_b", "int(tv::unknown)")
         code.ctor_init("dtype_c", "int(tv::unknown)")
@@ -294,7 +334,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark
     @pccm.member_function(name="__repr__")
     def repr(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         check_valid();
         std::stringstream ss;
@@ -318,7 +358,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="split_k_serial")
     @pccm.member_function
     def split_k_serial(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return split_k_serial_ == 1;
         """)
@@ -327,7 +367,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="split_k_serial")
     @pccm.member_function
     def split_k_serial_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "bool")
         code.raw(f"""
         split_k_serial_ = val ? 1 : 0;
@@ -337,7 +377,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="split_k_parallel")
     @pccm.member_function
     def split_k_parallel(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return split_k_parallel_ == 1;
         """)
@@ -346,7 +386,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="split_k_parallel")
     @pccm.member_function
     def split_k_parallel_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "bool")
         code.raw(f"""
         split_k_parallel_ = val ? 1 : 0;
@@ -356,7 +396,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark
     @pccm.member_function
     def check_valid(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         TV_ASSERT_RT_ERR(trans_a_ != -1 && !trans_b_ != -1 && trans_c_ != -1 && !algo.empty(), 
             "trans_a, trans_b, trans_c and algo must be set");
@@ -382,7 +422,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="trans_a")
     @pccm.member_function
     def trans_a(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return trans_a_ == 1;
         """)
@@ -391,7 +431,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="trans_a")
     @pccm.member_function
     def trans_a_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "bool")
         code.raw(f"""
         trans_a_ = val ? 1 : 0;
@@ -401,7 +441,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="trans_b")
     @pccm.member_function
     def trans_b(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return trans_b_ == 1;
         """)
@@ -410,7 +450,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="trans_b")
     @pccm.member_function
     def trans_b_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "bool")
         code.raw(f"""
         trans_b_ = val ? 1 : 0;
@@ -420,7 +460,7 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="trans_c")
     @pccm.member_function
     def trans_c(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return trans_c_ == 1;
         """)
@@ -429,17 +469,17 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="trans_c")
     @pccm.member_function
     def trans_c_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "bool")
         code.raw(f"""
         trans_c_ = val ? 1 : 0;
         """)
         return code
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.member_function
     def query_workspace_size(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("m,n,k,split_k_slices", "int")
         code.raw(f"""
         auto logical_tile_count =  GemmUtilsCPU::get_logical_tile_count(m, n, k, tile_shape[0], tile_shape[1], split_k_slices);
@@ -457,10 +497,10 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         """)
         return code.ret("int")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.member_function
     def supported(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("m,n,k", "int")
         code.raw(f"""
         bool res = true;
@@ -480,10 +520,10 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         """)
         return code.ret("bool")
 
-    @pccm.pybind.mark 
+    @pccm.pybind.mark
     @pccm.member_function
     def supported_ldx(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("lda, ldb, ldc", "int")
         code.raw(f"""
         bool res = true;
@@ -500,10 +540,11 @@ class GemmAlgoDesp(pccm.Class, pccm.pybind.PybindClassMixin):
         """)
         return code.ret("bool")
 
+
 class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView, GemmAlgoDesp)
+        self.add_dependency(TensorView, GemmAlgoDesp, CummNVRTCLib)
         # why not std::optional?
         # c++17 requires cuda11. to support cuda 10.2, we can't use c++17 for now.
         self.add_pybind_member("algo_desp",
@@ -530,14 +571,25 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
                                pyanno="cumm.tensorview.Tensor = Tensor()")
         self.add_pybind_member("alpha,beta", "float")
         self.add_pybind_member("stream", "std::uintptr_t", pyanno="int")
-        self.add_pybind_member("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer")
-
+        self.add_pybind_member("timer",
+                               "tv::CUDAKernelTimer",
+                               "tv::CUDAKernelTimer(false)",
+                               pyanno="cumm.tensorview.CUDAKernelTimer")
+        self.add_pybind_member("nvrtc_kernel",
+                               "std::shared_ptr<tv::NVRTCModule>",
+                               "std::shared_ptr<tv::NVRTCModule>{}",
+                               pyanno="cumm.tensorview.NVRTCModule")
+        self.add_pybind_member("nvrtc_kernel_name", "std::string", "\"\"")
 
     @pccm.pybind.mark
     @pccm.constructor
     def default_ctor(self):
-        code = pccm.FunctionCode()
-        code.arg("timer", "tv::CUDAKernelTimer", "tv::CUDAKernelTimer(false)", pyanno="cumm.tensorview.CUDAKernelTimer = CUDAKernelTimer(False)")
+        code = pccm.code()
+        code.arg(
+            "timer",
+            "tv::CUDAKernelTimer",
+            "tv::CUDAKernelTimer(false)",
+            pyanno="cumm.tensorview.CUDAKernelTimer = CUDAKernelTimer(False)")
         code.ctor_init("a", "tv::Tensor()")
         code.ctor_init("b", "tv::Tensor()")
         code.ctor_init("c", "tv::Tensor()")
@@ -556,7 +608,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark
     @pccm.member_function
     def check_valid(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         algo_desp.check_valid();
         TV_ASSERT_RT_ERR(!a.empty() && !b.empty() && !c.empty(), 
@@ -572,7 +624,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="a")
     @pccm.member_function
     def a_get(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return a;
         """)
@@ -581,7 +633,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="a")
     @pccm.member_function
     def a_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "tv::Tensor")
         code.raw(f"""
         a = val;
@@ -592,7 +644,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="b")
     @pccm.member_function
     def b_get(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return b;
         """)
@@ -601,7 +653,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="b")
     @pccm.member_function
     def b_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "tv::Tensor")
         code.raw(f"""
         b = val;
@@ -612,7 +664,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_getter(prop_name="c")
     @pccm.member_function
     def c_get(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         return c;
         """)
@@ -621,7 +673,7 @@ class GemmParams(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.pybind.mark_prop_setter(prop_name="c")
     @pccm.member_function
     def c_set(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "tv::Tensor")
         code.raw(f"""
         c = val;
@@ -693,22 +745,28 @@ SHUFFLE_SIMT_PARAMS: List[GemmAlgoParams] = [
     # fall back kernels if mat is misaligned for half
     *gen_shuffle_params(
         (128, 128, 8),
-        (32, 64, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+        (32, 64, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
         (32, 64, 32),
-        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
         (32, 32, 32),
-        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
         (64, 64, 16),
-        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
         (64, 128, 16),
-        (32, 64, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+        (32, 64, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Simt, None),
     *gen_shuffle_params(
         (64, 64, 8),
-        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2, kernel.GemmAlgo.Simt, None),
+        (32, 32, 8), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
+        kernel.GemmAlgo.Simt, None),
 ]
 
 SHUFFLE_VOLTA_PARAMS: List[GemmAlgoParams] = [
@@ -803,10 +861,12 @@ SHUFFLE_TURING_PARAMS: List[GemmAlgoParams] = [
 ]
 # SHUFFLE_TURING_PARAMS = []
 
+
 class GemmMainUnitTest(pccm.ParameterizedClass):
     def __init__(self, gemm_params: Optional[List[GemmAlgoParams]] = None):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, GemmParams)
+        self.add_dependency(TensorView, GemmBasic, GemmParams,
+                            kernel.GemmNVRTCParams, GemmUtilsCPU)
         if gemm_params is None:
             is_debug = os.getenv("CUMM_DEBUG", None)
             if is_debug is not None and is_debug == "1":
@@ -818,9 +878,9 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params((64, 64, 32),
                     #                  (32, 32, 32), 2, "s8,s8,s32,s32,s32",
                     #                  kernel.GemmAlgo.SimtDP4A, None),
-                    # *gen_gemm_params((128, 128, 8),
-                    #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
-                    #                 kernel.GemmAlgo.Simt, None),
+                    *gen_gemm_params((128, 128, 8),
+                                     (32, 64, 8), 2, "f32,f32,f32,f32,f32",
+                                     kernel.GemmAlgo.Simt, None),
                     # *gen_gemm_params((128, 128, 8),
                     #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
                     #                 kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAB, splitk_serial=True),
@@ -889,7 +949,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # interleave = 4:
                     # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
 
-                    *gen_gemm_params((64, 64, 16), (32, 32, 16), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params((64, 64, 16), (32, 32, 16), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
                     # *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
 
                     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
@@ -958,11 +1018,13 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             self.all_params = gemm_params
             self.all_kernels = [gen_gemm_kernels(p) for p in self.all_params]
         self.ker_names = [k.get_algo_name() for k in self.all_kernels]
-        assert len(set(self.ker_names)) == len(self.ker_names), "kernel must unique"
+        assert len(set(self.ker_names)) == len(
+            self.ker_names), "kernel must unique"
         # self.add_impl_only_dependency(self.shuffle_matmul_ref, SpconvKernel)
 
     @staticmethod
-    def matmul_select_helper_base(kernels: List[Union[kernel.GemmKernel, Any]], code: FunctionCode):
+    def matmul_select_helper_base(kernels: List[Union[kernel.GemmKernel, Any]],
+                                  code: FunctionCode):
         """if based algorithm selector
         """
         tabc_to_kers = codeops.group_by(
@@ -1020,14 +1082,21 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                                         ):
                                             if spks:
                                                 yield spks_kers
+
     @staticmethod
-    def matmul_select_helper_stage2(kernels: List[Union[kernel.GemmKernel, Any]], code: FunctionCode, has_shuffle: bool = True, is_end: bool = True):
+    def matmul_select_helper_stage2(kernels: List[Union[kernel.GemmKernel,
+                                                        Any]],
+                                    code: FunctionCode,
+                                    has_shuffle: bool = True,
+                                    is_end: bool = True):
         func3: Callable[[kernel.GemmKernel], Optional[Tuple[
             int, int, int]]] = lambda x: (x.tensorop[0], x.tensorop[
                 1], x.tensorop[2]) if x.tensorop is not None else None
 
-        for spks_kers in GemmMainUnitTest.matmul_select_helper_base(kernels, code):
-            apv_to_kers = codeops.group_by(lambda x: x.access_per_vector, spks_kers)
+        for spks_kers in GemmMainUnitTest.matmul_select_helper_base(
+                kernels, code):
+            apv_to_kers = codeops.group_by(lambda x: x.access_per_vector,
+                                           spks_kers)
             for apv, apv_kers in apv_to_kers.items():
                 if_test = f"algo_desp.access_per_vector == {apv}"
                 with code.if_(if_test):
@@ -1037,17 +1106,20 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                             lambda x: (x.algo, x.shuffle_stride), top_kers)
 
                         if top is None:
-                            for (algo, shuf), algo_kers in algo_to_kers.items():
+                            for (algo,
+                                 shuf), algo_kers in algo_to_kers.items():
                                 assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
                                 if_test = f"algo_desp.algo == \"{algo.value}\""
                                 if has_shuffle:
                                     if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
                                 with code.if_(if_test):
                                     dabc_to_kers = codeops.group_by(
-                                        lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
-                                                tv_dtype, x.dtype_c.tv_dtype),
+                                        lambda x:
+                                        (x.dtype_a.tv_dtype, x.dtype_b.
+                                         tv_dtype, x.dtype_c.tv_dtype),
                                         algo_kers)
-                                    for dabc, dabc_kers in dabc_to_kers.items():
+                                    for dabc, dabc_kers in dabc_to_kers.items(
+                                    ):
                                         if is_end:
                                             assert len(
                                                 dabc_kers
@@ -1057,23 +1129,27 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                                             f"algo_desp.dtype_b == tv::DType({dabc[1]})",
                                             f"algo_desp.dtype_c == tv::DType({dabc[2]})",
                                         ]
-                                        with code.if_(" && ".join(dtype_if_tests)):
+                                        with code.if_(
+                                                " && ".join(dtype_if_tests)):
                                             yield dabc_kers
                         else:
                             with code.if_(
                                     f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"
                             ):
-                                for (algo, shuf), algo_kers in algo_to_kers.items():
+                                for (algo,
+                                     shuf), algo_kers in algo_to_kers.items():
                                     assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
                                     if_test = f"algo_desp.algo == \"{algo.value}\""
                                     if has_shuffle:
                                         if_test += f"&& algo_desp.shuffle_type == \"{shuf.value}\""
                                     with code.if_(if_test):
                                         dabc_to_kers = codeops.group_by(
-                                            lambda x: (x.dtype_a.tv_dtype, x.dtype_b.
-                                                    tv_dtype, x.dtype_c.tv_dtype),
+                                            lambda x:
+                                            (x.dtype_a.tv_dtype, x.dtype_b.
+                                             tv_dtype, x.dtype_c.tv_dtype),
                                             algo_kers)
-                                        for dabc, dabc_kers in dabc_to_kers.items():
+                                        for dabc, dabc_kers in dabc_to_kers.items(
+                                        ):
                                             if is_end:
                                                 assert len(
                                                     dabc_kers
@@ -1083,13 +1159,14 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                                                 f"algo_desp.dtype_b == tv::DType({dabc[1]})",
                                                 f"algo_desp.dtype_c == tv::DType({dabc[2]})",
                                             ]
-                                            with code.if_(" && ".join(dtype_if_tests)):
+                                            with code.if_(" && ".join(
+                                                    dtype_if_tests)):
                                                 yield dabc_kers
 
     @pccm.pybind.mark
     @pccm.static_function
     def get_all_algo_desp(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         std::vector<GemmAlgoDesp> desps;
         """)
@@ -1136,14 +1213,24 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.static_function
     def extract_mnk(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("a_shape,b_shape", "std::vector<int64_t>")
         code.arg("trans_a,trans_b,trans_c", "bool")
-        code.arg("shuffle_type", "std::string", f"\"{ShuffleStrideType.NoShuffle.value}\"")
+        code.arg("shuffle_type", "std::string",
+                 f"\"{ShuffleStrideType.NoShuffle.value}\"")
 
-        code.arg("a_inds_shape", "std::vector<int64_t>", "std::vector<int64_t>{}", pyanno="List[int] = []")
-        code.arg("b_inds_shape", "std::vector<int64_t>", "std::vector<int64_t>{}", pyanno="List[int] = []")
-        code.arg("c_inds_shape", "std::vector<int64_t>", "std::vector<int64_t>{}", pyanno="List[int] = []")
+        code.arg("a_inds_shape",
+                 "std::vector<int64_t>",
+                 "std::vector<int64_t>{}",
+                 pyanno="List[int] = []")
+        code.arg("b_inds_shape",
+                 "std::vector<int64_t>",
+                 "std::vector<int64_t>{}",
+                 pyanno="List[int] = []")
+        code.arg("c_inds_shape",
+                 "std::vector<int64_t>",
+                 "std::vector<int64_t>{}",
+                 pyanno="List[int] = []")
 
         # TODO spatial sparse conv (implicit gemm)
         code.raw(f"""
@@ -1187,7 +1274,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.static_function
     def align_to_power2(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("val", "int")
         code.raw(f"""
         size_t r = 0;
@@ -1209,7 +1296,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.static_function
     def device_synchronize(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         checkCudaErrors(cudaDeviceSynchronize());
         """)
@@ -1218,7 +1305,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.static_function
     def stream_synchronize(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("stream", "std::uintptr_t", pyanno="int")
         code.raw(f"""
         auto res = cudaStreamSynchronize(reinterpret_cast<cudaStream_t>(stream));
@@ -1231,13 +1318,14 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.static_function
     def simple_select_tile_shape(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("m,n,k", "int")
         code.arg("tile_ms", "std::vector<int>")
         code.arg("tile_ns", "std::vector<int>")
         code.arg("tile_ks", "std::vector<int>")
 
-        code.arg("tile_shape_to_algos", "std::unordered_map<int64_t, std::vector<int>>")
+        code.arg("tile_shape_to_algos",
+                 "std::unordered_map<int64_t, std::vector<int>>")
         code.arg("large_k_first", "bool")
 
         code.raw(f"""
@@ -1291,11 +1379,11 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         """)
         return code.ret("std::vector<int>")
 
-
     @pccm.pybind.mark
     @pccm.cuda.static_function(name="matmul2")
     def matmul2(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
+        code.add_dependency(TensorViewKernel)
         for p, ker in zip(self.all_params, self.all_kernels):
             code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params,
                                  "GemmParams" + ker.get_algo_name())
@@ -1337,89 +1425,129 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         auto c_inds = params.c_inds;
         auto b_inds = params.b_inds;
         auto& evtimer = params.timer;
+
+        if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) and split_k_slices > 1){{
+            TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
+
+        }}
+        int m, n, k, k2;
+
+        if (algo_desp.shuffle_type == \"{ShuffleStrideType.ShuffleAC.value}\"){{
+            TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
+            if (!a_inds.empty()){{
+                m = a_inds.dim(0);
+            }}else{{
+                m = a.dim(0);
+            }}
+            TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+                "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+
+            k = a_ten.dim(int(!trans_a));
+            k2 = b_ten.dim(int(trans_b));
+            n = b_ten.dim(int(!trans_b) );
+            if (trans_c){{
+                tv::check_shape(c_ten, {{-1, m}});
+            }}else{{
+                tv::check_shape(c_ten, {{-1, n}});
+            }}
+        }}else if (algo_desp.shuffle_type == \"{ShuffleStrideType.ShuffleAB.value}\"){{
+            TV_ASSERT_RT_ERR(trans_a && !trans_b, "shuffle AB must be nt, i.e. backward weight");
+            m = a_ten.dim(int(trans_a));
+            k = a_inds.dim(0);
+            k2 = b_inds.dim(0);
+            auto n = b_ten.dim(int(!trans_b) );
+            TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * tv::bit_size(algo_desp.dtype_a)/ 8 < std::numeric_limits<int32_t>::max(), 
+                "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+            TV_ASSERT_RT_ERR(int64_t(b.dim(0)) * int64_t(b.dim(1)) * tv::bit_size(algo_desp.dtype_b) / 8 < std::numeric_limits<int32_t>::max(), 
+                "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+            if (trans_c){{
+                tv::check_shape(c_ten, {{n, m}});
+            }}else{{
+                tv::check_shape(c_ten, {{m, n}});
+            }}
+        }}else{{
+            m = a_ten.dim(int(trans_a));
+            k = a_ten.dim(int(!trans_a));
+            k2 = b_ten.dim(int(trans_b));
+            n = b_ten.dim(int(!trans_b) );
+            if (trans_c){{
+                tv::check_shape(c_ten, {{n, m}});
+            }}else{{
+                tv::check_shape(c_ten, {{m, n}});
+            }}
+        }}
+        TV_ASSERT_INVALID_ARG(algo_desp.supported(m, n, k), "this m, n, k isn't supported due to misaligned contiguous dim.")
+        TV_ASSERT_INVALID_ARG(k == k2, "error");
+        int workspace_size = algo_desp.query_workspace_size(m, n, k, split_k_slices);
+        auto ctx = tv::Context();
+        ctx.set_cuda_stream(reinterpret_cast<cudaStream_t>(params.stream));
+        if (workspace_size > 0){{
+            if (!workspace.empty()){{
+                workspace.zero_(ctx);
+                TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
+                    "workspace at least", workspace_size, "bytes.");
+            }}else{{
+                workspace = tv::empty({{workspace_size}}, tv::uint8, 0);
+                workspace.zero_(ctx);
+            }}
+        }}
+        void* workspace_ptr = nullptr;
+        if (workspace.empty()){{
+            workspace_ptr = workspace.raw_data();
+        }}
+        if (params.nvrtc_kernel){{
+            TV_ASSERT_RT_ERR(params.nvrtc_kernel_name != "", "you must provide name of your kernel");
+            GemmNVRTCParams kernel_params;
+            if (algo_desp.shuffle_type == \"{ShuffleStrideType.ShuffleAC.value}\"){{
+                const int* a_ptr = nullptr;
+                if (!a_inds.empty()){{
+                    a_ptr = a_inds.data_ptr<const int>();
+                }}
+                TV_ASSERT_RT_ERR(!c_inds.empty(), "c must not empty");
+                kernel_params = GemmNVRTCParams{{m, n, k, a_ten.raw_data(),  b_ten.raw_data(),  
+                    c_ten.raw_data(), c_ten.raw_data(), 
+                    a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
+                    a_ptr, c_inds.data_ptr<const int>(), float(params.alpha), float(params.beta), 
+                    split_k_slices, workspace_ptr}};
+            }}else if (algo_desp.shuffle_type == \"{ShuffleStrideType.ShuffleAB.value}\"){{
+                TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
+                kernel_params = GemmNVRTCParams{{m, n, k, a_ten.raw_data(),  b_ten.raw_data(),  
+                    c_ten.raw_data(), c_ten.raw_data(), 
+                    a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
+                    a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(), 
+                    float(params.alpha), float(params.beta), split_k_slices, workspace_ptr}};
+
+            }}else{{
+                kernel_params = GemmNVRTCParams{{m, n, k, a_ten.raw_data(),  b_ten.raw_data(),  
+                    c_ten.raw_data(), c_ten.raw_data(), 
+                    a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
+                    nullptr, nullptr, 
+                    float(params.alpha), float(params.beta), split_k_slices, workspace_ptr}};
+
+            }}
+            std::string algo_name = algo_desp.__repr__();
+            auto grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(m, n, k, algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices);
+            dim3 grid_dims;
+            grid_dims.x = grid_dims_arr[0];
+            grid_dims.y = grid_dims_arr[1];
+            grid_dims.z = grid_dims_arr[2];
+            {{
+                tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, reinterpret_cast<cudaStream_t>(params.stream));
+                auto kernel = params.nvrtc_kernel->kernel(params.nvrtc_kernel_name);
+                std::vector<void*> args{{&kernel_params, &grid_dims, &params.stream}};
+                TV_CUDA_RESULT_CHECK(params.nvrtc_kernel->cuDrvLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, reinterpret_cast<cudaStream_t>(params.stream), args.data(), 0));
+
+            }}
+            TV_CHECK_CUDA_ERR_V2(algo_name, "error with params", a.shape(), b.shape(), c.shape());
+            return;
+        }}
+
         """)
         for kers in self.matmul_select_helper_stage2(self.all_kernels, code):
             ker = kers[0]
             param_type_str = "GemmParams" + ker.get_algo_name()
             code.raw(f"""
             found = true;
-            """)
-            if not ker.support_splitk():
-                code.raw(f"""
-                if (split_k_slices > 1){{
-                    TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
-                }}
-                """)
-            code.raw(f"""
-            """)
-            if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
-                code.raw(f"""
-                TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
-                int m;
-                if (!a_inds.empty()){{
-                    m = a_inds.dim(0);
-                }}else{{
-                    m = a.dim(0);
-                }}
-                TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
-                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-
-                int k = a_ten.dim(int(!trans_a));
-                int k2 = b_ten.dim(int(trans_b));
-                int n = b_ten.dim(int(!trans_b) );
-                if (trans_c){{
-                    tv::check_shape(c_ten, {{-1, m}});
-                }}else{{
-                    tv::check_shape(c_ten, {{-1, n}});
-                }}
-                """)
-            elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
-                code.raw(f"""
-                TV_ASSERT_RT_ERR(trans_a && !trans_b, "shuffle AB must be nt, i.e. backward weight");
-                auto m = a_ten.dim(int(trans_a));
-                auto k = a_inds.dim(0);
-                auto k2 = b_inds.dim(0);
-                auto n = b_ten.dim(int(!trans_b) );
-                TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
-                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-                TV_ASSERT_RT_ERR(int64_t(b.dim(0)) * int64_t(b.dim(1)) * {ker.dtype_b.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
-                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-                if (trans_c){{
-                    tv::check_shape(c_ten, {{n, m}});
-                }}else{{
-                    tv::check_shape(c_ten, {{m, n}});
-                }}
-                """)
-            else:
-                code.raw(f"""
-                auto m = a_ten.dim(int(trans_a));
-                auto k = a_ten.dim(int(!trans_a));
-                auto k2 = b_ten.dim(int(trans_b));
-                auto n = b_ten.dim(int(!trans_b) );
-                if (trans_c){{
-                    tv::check_shape(c_ten, {{n, m}});
-                }}else{{
-                    tv::check_shape(c_ten, {{m, n}});
-                }}
-                """)
-
-            code.raw(f"""
-            TV_ASSERT_INVALID_ARG(algo_desp.supported(m, n, k), "this m, n, k isn't supported due to misaligned contiguous dim.")
-            TV_ASSERT_INVALID_ARG(k == k2, "error");
-            int workspace_size = algo_desp.query_workspace_size(m, n, k, split_k_slices);
-            auto ctx = tv::Context();
-            ctx.set_cuda_stream(reinterpret_cast<cudaStream_t>(params.stream));
-            if (workspace_size > 0){{
-                if (!workspace.empty()){{
-                    workspace.zero_(ctx);
-                    TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
-                        "workspace at least", workspace_size, "bytes.");
-                }}else{{
-                    workspace = tv::empty({{workspace_size}}, tv::uint8, 0);
-                    workspace.zero_(ctx);
-                }}
-            }}
-
             """)
             if CUTLASS_MODE:
                 code.raw(f"""
@@ -1533,12 +1661,12 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         }
         // return 0;
         """)
-        return code# .ret("float")
+        return code  # .ret("float")
 
     # @pccm.expose_main.mark
     # @pccm.cuda.static_function
     def main_function(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.ret("int")
         code.raw(f"""
         tv::ssprint("?");

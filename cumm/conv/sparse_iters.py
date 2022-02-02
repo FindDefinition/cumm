@@ -1,11 +1,11 @@
 # Copyright 2021 Yan Yan
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,13 +21,15 @@ from pccm.core import FunctionCode
 from pccm.targets.cuda_ptx import RegDType
 
 from cumm import cudasim, dtypes
-from cumm.common import GemmBasic, GemmBasicKernel, TensorView, TensorViewMath, TensorViewNVRTC
+from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
+                         TensorViewMath, TensorViewNVRTC)
 from cumm.conv import bases, params
 from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
 from cumm.gemm import codeops, constants, layout, thread_map
 from cumm.gemm.arch.memory import GlobalLoad
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
-from cumm.gemm.mask import Mask 
+from cumm.gemm.mask import Mask
+
 
 class SparseParams(bases.ConvIterParams):
     def __init__(self,
@@ -65,7 +67,7 @@ class SparseParams(bases.ConvIterParams):
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("problem", "ConvProblem const&")
         code.arg("indice_ptr", "int const*")
         code.arg("mask_argsort_ptr", "int const*")
@@ -97,6 +99,7 @@ class SparseParams(bases.ConvIterParams):
         """)
         return code
 
+
 class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
     """for spatial sparse convolution
     Fwd/Dgrad: NRSC @ KRSC
@@ -121,7 +124,11 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         element_count = self.thread_access_shape[0] * self.thread_access_shape[
             1] * sub_tile_shape.prod()
         self.tile_shape_mnk = tile_shape_mnk
-        super().__init__(dtype, element_count, sub_tile_shape[1], -1, access_per_vector=access_per_vector)
+        super().__init__(dtype,
+                         element_count,
+                         sub_tile_shape[1],
+                         -1,
+                         access_per_vector=access_per_vector)
         self.sub_tile_shape = sub_tile_shape
         self.op_type = op_type
         self.ndim = problem_size.ndim
@@ -130,7 +137,8 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         self.is_wgrad_out = is_wgrad_out
         self.is_wgrad_input = is_wgrad_input
         if self.is_wgrad:
-            assert sub_tile_shape[0] == 1, "backward weight don't support sub tile shape"
+            assert sub_tile_shape[
+                0] == 1, "backward weight don't support sub tile shape"
         else:
             assert tmap.iterations[1] == 1
         self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
@@ -138,11 +146,15 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         self.params = SparseParams(dtype, tile_shape_mnk, problem_size, tmap,
                                    is_output, increment_k_first)
         self.tmap = tmap
-        self.mask_cls = Mask(seq(self.tmap.iterations[0], self.tmap.iterations[1], self.sub_tile_shape[0], self.access_per_vector))
+        self.mask_cls = Mask(
+            seq(self.tmap.iterations[0], self.tmap.iterations[1],
+                self.sub_tile_shape[0], self.access_per_vector))
         self.add_param_class("mask", self.mask_cls, "Mask")
 
         assert tmap.iterations.prod() * self.sub_tile_shape[0] < 32
-        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(), level="L2", prefetch_size=128)
+        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(),
+                                level="L2",
+                                prefetch_size=128)
         self.add_param_class("gload", self.gload, "GlobalLoad")
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -165,12 +177,14 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
             self.add_member("reduce_channel_offset_", "int")
             self.add_member("reduce_channel_offset_backup_", "int")
 
-            self.add_member("mask_reset_backup_", f"tv::array<uint32_t, {self.access_per_vector}>")
+            self.add_member("mask_reset_backup_",
+                            f"tv::array<uint32_t, {self.access_per_vector}>")
         else:
             self.add_member("stride_offset_", f"int")
         # self.add_member("origin_indice_ptr_", f"int const*")
-        
-        self.add_member("mask_", f"tv::array<uint32_t, {self.access_per_vector}>")
+
+        self.add_member("mask_",
+                        f"tv::array<uint32_t, {self.access_per_vector}>")
 
         # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
         self.add_member(
@@ -183,7 +197,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params &")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -228,7 +242,8 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         if self.is_wgrad:
             C_or_K = "C" if self.is_wgrad_input else "K"
             with self.tmap.tmap_loop(code, "s", "c"):
-                with code.range_("v", self.access_per_vector, "TV_PRAGMA_UNROLL"):
+                with code.range_("v", self.access_per_vector,
+                                 "TV_PRAGMA_UNROLL"):
                     code.raw(f"""
                     uint32_t pred = ((stride_offset_ + s * {self.tmap.delta[0]}) < problem_.N) &&
                         (thread_offset[1] + c * {self.tmap.delta[1]} + v < problem_.{C_or_K});
@@ -569,9 +584,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get_indice_offset(self):
         code = FunctionCode()
         code.arg("stride, contig, ss", f"int")
@@ -580,9 +593,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         """)
         return code.ret(f"int")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.arg("indice_offset", f"int")
@@ -594,14 +605,15 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
         """)
         with self.tmap.tmap_loop(code, "s", "c"):
             with code.range_("ss", self.sub_tile_shape[0], "TV_PRAGMA_UNROLL"):
-                with code.range_("v", self.access_per_vector, "TV_PRAGMA_UNROLL"):
+                with code.range_("v", self.access_per_vector,
+                                 "TV_PRAGMA_UNROLL"):
                     code.raw(f"""
                     int mask_idx = s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + 
                         c * {self.sub_tile_shape[0]} + ss;
@@ -611,15 +623,15 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                     """)
                     if self.is_wgrad_out:
                         code.raw(
-                            f"bool valid = bool(mask_[v] & (1u << mask_idx));"
-                        )
+                            f"bool valid = bool(mask_[v] & (1u << mask_idx));")
                     else:
                         code.raw(
                             f"bool valid = bool(mask_[v] & (1u << mask_idx)) && (indice_offset >= 0);"
                         )
                     # if self.is_wgrad_out:
                     num_inds = self.tmap.iterations[0] * self.sub_tile_shape[0]
-                    inds_unpack = ", ".join([f"indices_[{i}]" for i in range(num_inds)])
+                    inds_unpack = ", ".join(
+                        [f"indices_[{i}]" for i in range(num_inds)])
                     code.raw(f"""
                     auto access_pointer = reinterpret_cast<{self.const_access_pointer}>(pointer_ + indice_offset + 
                         c * {self.dtype.nbytes_str(self.tmap.delta[1] * self.dtype.bitsize())}) + v;
@@ -646,6 +658,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&")
         return code
 
+
 class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
     """for spatial sparse convolution
     Fwd/Dgrad: NRSC @ KRSC
@@ -668,7 +681,10 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         element_count = self.thread_access_shape[0] * self.thread_access_shape[
             1] * sub_tile_shape.prod()
         self.tile_shape_mnk = tile_shape_mnk
-        super().__init__(dtype, element_count, sub_tile_shape[1], access_per_vector=access_per_vector)
+        super().__init__(dtype,
+                         element_count,
+                         sub_tile_shape[1],
+                         access_per_vector=access_per_vector)
         self.sub_tile_shape = sub_tile_shape
         self.op_type = op_type
         self.ndim = problem_size.ndim
@@ -677,7 +693,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         self.is_wgrad_out = is_wgrad_out
         self.is_wgrad_input = is_wgrad_input
         if self.is_wgrad:
-            assert sub_tile_shape[0] == 1, "backward weight don't support sub tile shape"
+            assert sub_tile_shape[
+                0] == 1, "backward weight don't support sub tile shape"
         else:
             assert tmap.iterations[1] == 1
         self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
@@ -685,11 +702,15 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         self.params = SparseParams(dtype, tile_shape_mnk, problem_size, tmap,
                                    is_output, increment_k_first)
         self.tmap = tmap
-        self.mask_cls = Mask(seq(self.tmap.iterations[0], self.tmap.iterations[1], self.sub_tile_shape[0], self.access_per_vector))
+        self.mask_cls = Mask(
+            seq(self.tmap.iterations[0], self.tmap.iterations[1],
+                self.sub_tile_shape[0], self.access_per_vector))
         self.add_param_class("mask", self.mask_cls, "Mask")
 
         assert tmap.iterations.prod() * self.sub_tile_shape[0] < 32
-        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(), level="L2", prefetch_size=128)
+        self.gload = GlobalLoad(self.element_per_acc * self.dtype.itemsize(),
+                                level="L2",
+                                prefetch_size=128)
         self.add_param_class("gload", self.gload, "GlobalLoad")
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.problem_size = problem_size
@@ -716,7 +737,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         else:
             self.add_member("stride_offset_", f"int")
         # self.add_member("origin_indice_ptr_", f"int const*")
-        
+
         self.add_member("mask_", f"Mask")
 
         # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
@@ -730,7 +751,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.arg("params", "Params &")
         code.arg("problem_size", "ConvProblem const&")
         code.arg("ptr", self.const_pointer)
@@ -769,7 +790,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         if self.is_wgrad:
             C_or_K = "C" if self.is_wgrad_input else "K"
             with self.tmap.tmap_loop(code, "s", "c"):
-                with code.range_("v", self.access_per_vector, "TV_PRAGMA_UNROLL"):
+                with code.range_("v", self.access_per_vector,
+                                 "TV_PRAGMA_UNROLL"):
                     code.raw(f"""
                     uint32_t pred = ((stride_offset_ + s * {self.tmap.delta[0]}) < problem_.N) &&
                         (thread_offset[1] + c * {self.tmap.delta[1]} + v < problem_.{C_or_K});
@@ -797,7 +819,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
             """)
             for v in range(self.access_per_vector):
                 pred = f"thread_offset[1] + {v * self.element_per_acc} >= problem_.{C_or_K}"
-                self.mask_cls.clear_mask_if_pred_template(code, pred, (None, None, None, v))
+                self.mask_cls.clear_mask_if_pred_template(
+                    code, pred, (None, None, None, v))
             code.raw(f"""
             // TV_PRAGMA_UNROLL
             // for (int v = 0; v < {self.access_per_vector}; ++v){{
@@ -820,7 +843,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
                     # code.raw(
                     #     f"pred{s}_{ss} = mask_[0] & (1u << ({s} * {self.sub_tile_shape[0]} + {ss}));"
                     # )
-                    code.raw(f"pred{s}_{ss} = mask_.query_coord({s}, 0, {ss}, 0);")
+                    code.raw(
+                        f"pred{s}_{ss} = mask_.query_coord({s}, 0, {ss}, 0);")
 
                     with code.asm_block() as asm:
                         mask_ptr = asm.reg_ptr("indices_", RegDType.B32)
@@ -924,7 +948,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
 
             for v in range(self.access_per_vector):
                 pred = f"reduce_channel_offset_ + {v * self.element_per_acc} >= problem_.{C_or_K}"
-                self.mask_cls.clear_mask_if_pred_template(code, pred, (None, None, None, v))
+                self.mask_cls.clear_mask_if_pred_template(
+                    code, pred, (None, None, None, v))
         return code
 
     @pccm.cuda.member_function(device=True, forceinline=True)
@@ -953,7 +978,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
             """)
             for v in range(self.access_per_vector):
                 pred = f"reduce_channel_offset_ + {v * self.element_per_acc} >= problem_.{C_or_K}"
-                self.mask_cls.clear_mask_if_pred_template(code, pred, (None, None, None, v))
+                self.mask_cls.clear_mask_if_pred_template(
+                    code, pred, (None, None, None, v))
         return code
 
     @pccm.cuda.member_function(device=True, forceinline=True)
@@ -963,14 +989,16 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         if self.is_wgrad:
             for s in range(self.tmap.iterations[0]):
                 pred = f"stride_offset_ + {s * self.tmap.delta[0]} >= problem_.N"
-                self.mask_cls.clear_mask_if_pred_template(code, pred, (s, None, None, None))
+                self.mask_cls.clear_mask_if_pred_template(
+                    code, pred, (s, None, None, None))
             return code
         if self.increment_k_first:
             return code
         else:
             for v in range(self.access_per_vector):
                 pred = f"reduce_channel_offset_ + {v * self.element_per_acc} >= problem_.{C_or_K}"
-                self.mask_cls.clear_mask_if_pred_template(code, pred, (None, None, None, v))
+                self.mask_cls.clear_mask_if_pred_template(
+                    code, pred, (None, None, None, v))
         return code
 
     @pccm.cuda.member_function(name="operator+=",
@@ -987,7 +1015,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
             """)
             for s in range(self.tmap.iterations[0]):
                 pred = f"stride_offset_ + {s * self.tmap.delta[0]} >= problem_.N"
-                self.mask_cls.clear_mask_if_pred_template(code, pred, (s, None, None, None))
+                self.mask_cls.clear_mask_if_pred_template(
+                    code, pred, (s, None, None, None))
             return code
         return code
 
@@ -1003,7 +1032,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         """)
         for v in range(self.access_per_vector):
             pred = f"reduce_channel_offset_ + {v * self.element_per_acc} >= problem_.{C_or_K}"
-            self.mask_cls.clear_mask_if_pred_template(code, pred, (None, None, None, v))
+            self.mask_cls.clear_mask_if_pred_template(code, pred,
+                                                      (None, None, None, v))
 
         # code.raw(f"""
         # TV_PRAGMA_UNROLL
@@ -1048,9 +1078,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         """)
         return code
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get_indice_offset(self):
         code = FunctionCode()
         code.arg("stride, contig, ss", f"int")
@@ -1059,9 +1087,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         """)
         return code.ret(f"int")
 
-    @pccm.cuda.member_function(device=True,
-                               forceinline=True,
-                               const=True)
+    @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
         code.arg("indice_offset", f"int")
@@ -1073,7 +1099,7 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_pointer_offset(self):
-        code = pccm.FunctionCode()
+        code = pccm.code()
         code.raw(f"""
         frag.clear();
         {self.access_t} *frag_ptr = reinterpret_cast<{self.access_t} *>(&frag);
@@ -1081,7 +1107,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         with self.tmap.tmap_loop(code, "s", "c"):
             with code.range_("ss", self.sub_tile_shape[0], "TV_PRAGMA_UNROLL"):
                 code.raw(f"auto indice_offset = get_indice_offset(s, c, ss);")
-                with code.range_("v", self.access_per_vector, "TV_PRAGMA_UNROLL"):
+                with code.range_("v", self.access_per_vector,
+                                 "TV_PRAGMA_UNROLL"):
                     code.raw(f"""
                     int mask_idx = s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + 
                         c * {self.sub_tile_shape[0]} + ss;

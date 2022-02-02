@@ -1,25 +1,27 @@
 /***************************************************************************************************
  * Copyright (c) 2017-2021, NVIDIA CORPORATION.  All rights reserved.
  *
- * Redistribution and use in source and binary forms, with or without modification, are permitted
- * provided that the following conditions are met:
- *     * Redistributions of source code must retain the above copyright notice, this list of
- *       conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright notice, this list of
- *       conditions and the following disclaimer in the documentation and/or other materials
- *       provided with the distribution.
- *     * Neither the name of the NVIDIA CORPORATION nor the names of its contributors may be used
- *       to endorse or promote products derived from this software without specific prior written
- *       permission.
+ * Redistribution and use in source and binary forms, with or without
+ *modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright notice,
+ *this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *notice, this list of conditions and the following disclaimer in the
+ *documentation and/or other materials provided with the distribution.
+ *     * Neither the name of the NVIDIA CORPORATION nor the names of its
+ *contributors may be used to endorse or promote products derived from this
+ *software without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
- * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
- * STRICT LIABILITY, OR TOR (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ *AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ *IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ *DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY DIRECT,
+ *INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ *DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ *OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TOR (INCLUDING
+ *NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+ *EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  **************************************************************************************************/
 
@@ -28,8 +30,8 @@
 #if defined(__CUDACC_RTC__)
 #include <cuda/std/cstdint>
 #else
-#include <cstdint>
 #include <cmath>
+#include <cstdint>
 #include <type_traits>
 #endif
 #include <tensorview/core/all.h>
@@ -50,46 +52,40 @@ namespace math {
 /**
  * Statically determine if N is a power-of-two
  */
-template <int N>
-struct is_pow2 {
+template <int N> struct is_pow2 {
   static bool const value = ((N & (N - 1)) == 0);
 };
 
 /**
  * Statically determine log2(N), rounded down
  */
-template <int N, int CurrentVal = N, int Count = 0>
-struct log2_down {
+template <int N, int CurrentVal = N, int Count = 0> struct log2_down {
   /// Static logarithm value
   enum { value = log2_down<N, (CurrentVal >> 1), Count + 1>::value };
 };
 
 // Base case
-template <int N, int Count>
-struct log2_down<N, 1, Count> {
+template <int N, int Count> struct log2_down<N, 1, Count> {
   enum { value = Count };
 };
 
 /**
  * Statically determine log2(N), rounded up
  */
-template <int N, int CurrentVal = N, int Count = 0>
-struct log2_up {
+template <int N, int CurrentVal = N, int Count = 0> struct log2_up {
   /// Static logarithm value
   enum { value = log2_up<N, (CurrentVal >> 1), Count + 1>::value };
 };
 
 // Base case
-template <int N, int Count>
-struct log2_up<N, 1, Count> {
+template <int N, int Count> struct log2_up<N, 1, Count> {
   enum { value = ((1 << Count) < N) ? Count + 1 : Count };
 };
 
 /**
  * Statically estimate sqrt(N) to the nearest power-of-two
  */
-template <int N>
-struct sqrt_est {
+template <int N> struct sqrt_est {
   enum { value = 1 << (log2_up<N>::value / 2) };
 };
 
@@ -97,8 +93,7 @@ struct sqrt_est {
  * For performing a constant-division with a compile-time assertion that the
  * Divisor evenly-divides the Dividend.
  */
-template <int Dividend, int Divisor>
-struct divide_assert {
+template <int Dividend, int Divisor> struct divide_assert {
   enum { value = Dividend / Divisor };
 
   static_assert((Dividend % Divisor == 0), "Not an even multiple");
@@ -112,7 +107,8 @@ struct divide_assert {
  * Round dividend up to the nearest multiple of divisor
  */
 template <typename dividend_t, typename divisor_t>
-TV_HOST_DEVICE_INLINE dividend_t round_nearest(dividend_t dividend, divisor_t divisor) {
+TV_HOST_DEVICE_INLINE dividend_t round_nearest(dividend_t dividend,
+                                               divisor_t divisor) {
   return ((dividend + divisor - 1) / divisor) * divisor;
 }
 
@@ -122,9 +118,11 @@ TV_HOST_DEVICE_INLINE dividend_t round_nearest(dividend_t dividend, divisor_t di
 template <typename value_t>
 TV_HOST_DEVICE_INLINE value_t gcd(value_t a, value_t b) {
   for (;;) {
-    if (a == 0) return b;
+    if (a == 0)
+      return b;
     b %= a;
-    if (b == 0) return a;
+    if (b == 0)
+      return a;
     a %= b;
   }
 }
@@ -139,17 +137,14 @@ TV_HOST_DEVICE_INLINE value_t lcm(value_t a, value_t b) {
   return temp ? (a / temp * b) : 0;
 }
 
-/// Returns the smallest value in the half-open range [a, a+b) that is a multiple of b
+/// Returns the smallest value in the half-open range [a, a+b) that is a
+/// multiple of b
 TV_HOST_DEVICE_INLINE
-constexpr int round_up(int a, int b) {
-  return ((a + b - 1) / b) * b;
-}
+constexpr int round_up(int a, int b) { return ((a + b - 1) / b) * b; }
 
 /// Returns the ceiling of (a / b)
 TV_HOST_DEVICE_INLINE
-constexpr int ceil_div(int a, int b) {
-  return (a + b - 1) / b;
-}
+constexpr int ceil_div(int a, int b) { return (a + b - 1) / b; }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -158,33 +153,32 @@ constexpr int ceil_div(int a, int b) {
  * difference between the below codes and
  * log2_up/down codes?
  */
-template <typename value_t>
-TV_HOST_DEVICE_INLINE value_t clz(value_t x) {
+template <typename value_t> TV_HOST_DEVICE_INLINE value_t clz(value_t x) {
   for (int i = 31; i >= 0; --i) {
-    if ((1 << i) & x) return 31 - i;
+    if ((1 << i) & x)
+      return 31 - i;
   }
   return 32;
 }
 
-template <typename value_t>
-TV_HOST_DEVICE_INLINE value_t find_log2(value_t x) {
+template <typename value_t> TV_HOST_DEVICE_INLINE value_t find_log2(value_t x) {
   int a = int(31 - clz(x));
-  a += (x & (x - 1)) != 0;  // Round up, add 1 if not a power of 2.
+  a += (x & (x - 1)) != 0; // Round up, add 1 if not a power of 2.
   return a;
 }
-
 
 /**
  * Find divisor, using find_log2
  */
-TV_HOST_DEVICE_INLINE 
-void find_divisor(unsigned int& mul, unsigned int& shr, unsigned int denom) {
+TV_HOST_DEVICE_INLINE
+void find_divisor(unsigned int &mul, unsigned int &shr, unsigned int denom) {
   if (denom == 1) {
     mul = 0;
     shr = 0;
   } else {
     unsigned int p = 31 + find_log2(denom);
-    unsigned m = unsigned(((1ull << p) + unsigned(denom) - 1) / unsigned(denom));
+    unsigned m =
+        unsigned(((1ull << p) + unsigned(denom) - 1) / unsigned(denom));
 
     mul = m;
     shr = p - 32;
@@ -194,15 +188,16 @@ void find_divisor(unsigned int& mul, unsigned int& shr, unsigned int denom) {
 /**
  * Find quotient and remainder using device-side intrinsics
  */
-TV_HOST_DEVICE_INLINE 
-void fast_divmod(int& quo, int& rem, int src, int div, unsigned int mul, unsigned int shr) {
+TV_HOST_DEVICE_INLINE
+void fast_divmod(int &quo, int &rem, int src, int div, unsigned int mul,
+                 unsigned int shr) {
 
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   // Use IMUL.HI if div != 1, else simply copy the source.
   quo = (div != 1) ? __umulhi(src, mul) >> shr : src;
-  #else
+#else
   quo = int((div != 1) ? int(((int64_t)src * mul) >> 32) >> shr : src);
-  #endif
+#endif
 
   // The remainder.
   rem = src - (quo * div);
@@ -210,14 +205,15 @@ void fast_divmod(int& quo, int& rem, int src, int div, unsigned int mul, unsigne
 
 // For long int input
 TV_HOST_DEVICE_INLINE
-void fast_divmod(int& quo, int64_t& rem, int64_t src, int div, unsigned int mul, unsigned int shr) {
+void fast_divmod(int &quo, int64_t &rem, int64_t src, int div, unsigned int mul,
+                 unsigned int shr) {
 
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   // Use IMUL.HI if div != 1, else simply copy the source.
   quo = (div != 1) ? __umulhi(src, mul) >> shr : src;
-  #else
+#else
   quo = int((div != 1) ? ((src * mul) >> 32) >> shr : src);
-  #endif
+#endif
   // The remainder.
   rem = src - (quo * div);
 }
@@ -226,9 +222,10 @@ void fast_divmod(int& quo, int64_t& rem, int64_t src, int div, unsigned int mul,
 
 /// Object to encapsulate the fast division+modulus operation.
 ///
-/// This object precomputes two values used to accelerate the computation and is best used
-/// when the divisor is a grid-invariant. In this case, it may be computed in host code and
-/// marshalled along other kernel arguments using the 'Params' pattern.
+/// This object precomputes two values used to accelerate the computation and is
+/// best used when the divisor is a grid-invariant. In this case, it may be
+/// computed in host code and marshalled along other kernel arguments using the
+/// 'Params' pattern.
 ///
 /// Example:
 ///
@@ -237,7 +234,7 @@ void fast_divmod(int& quo, int64_t& rem, int64_t src, int div, unsigned int mul,
 ///
 ///   FastDivmod divmod(divisor);
 ///
-///   divmod(quotient, remainder, dividend);  
+///   divmod(quotient, remainder, dividend);
 ///
 ///   // quotient = (dividend / divisor)
 ///   // remainder = (dividend % divisor)
@@ -250,38 +247,43 @@ struct FastDivmod {
 
   /// Construct the FastDivmod object, in host code ideally.
   ///
-  /// This precomputes some values based on the divisor and is computationally expensive.
+  /// This precomputes some values based on the divisor and is computationally
+  /// expensive.
 
   TV_HOST_DEVICE_INLINE
-  FastDivmod(): divisor(0), multiplier(0), shift_right(0) { }
+  FastDivmod() : divisor(0), multiplier(0), shift_right(0) {}
 
   TV_HOST_DEVICE_INLINE
-  FastDivmod(int divisor_): divisor(divisor_) {
+  FastDivmod(int divisor_) : divisor(divisor_) {
     find_divisor(multiplier, shift_right, divisor);
   }
 
-  /// Computes integer division and modulus using precomputed values. This is computationally
-  /// inexpensive.
+  /// Computes integer division and modulus using precomputed values. This is
+  /// computationally inexpensive.
   TV_HOST_DEVICE_INLINE
   void operator()(int &quotient, int &remainder, int dividend) const {
-    fast_divmod(quotient, remainder, dividend, divisor, multiplier, shift_right);
+    fast_divmod(quotient, remainder, dividend, divisor, multiplier,
+                shift_right);
   }
 
-  /// Computes integer division and modulus using precomputed values. This is computationally
-  /// inexpensive.
+  /// Computes integer division and modulus using precomputed values. This is
+  /// computationally inexpensive.
   TV_HOST_DEVICE_INLINE
   void operator()(int &quotient, int64_t &remainder, int64_t dividend) const {
-    fast_divmod(quotient, remainder, dividend, divisor, multiplier, shift_right);
+    fast_divmod(quotient, remainder, dividend, divisor, multiplier,
+                shift_right);
   }
 };
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-/// Object to encapsulate the fast division+modulus operation for 64b integer division.
+/// Object to encapsulate the fast division+modulus operation for 64b integer
+/// division.
 ///
-/// This object precomputes two values used to accelerate the computation and is best used
-/// when the divisor is a grid-invariant. In this case, it may be computed in host code and
-/// marshalled along other kernel arguments using the 'Params' pattern.
+/// This object precomputes two values used to accelerate the computation and is
+/// best used when the divisor is a grid-invariant. In this case, it may be
+/// computed in host code and marshalled along other kernel arguments using the
+/// 'Params' pattern.
 ///
 /// Example:
 ///
@@ -290,7 +292,7 @@ struct FastDivmod {
 ///
 ///   FastDivmodU64 divmod(divisor);
 ///
-///   divmod(quotient, remainder, dividend);  
+///   divmod(quotient, remainder, dividend);
 ///
 ///   // quotient = (dividend / divisor)
 ///   // remainder = (dividend % divisor)
@@ -306,7 +308,8 @@ struct FastDivmodU64 {
   // Static methods
   //
 
-  /// Computes b, where 2^b is the greatest power of two that is less than or equal to x
+  /// Computes b, where 2^b is the greatest power of two that is less than or
+  /// equal to x
   TV_HOST_DEVICE_INLINE
   static uint32_t integer_log2(uint64_t x) {
     uint32_t n = 0;
@@ -318,21 +321,22 @@ struct FastDivmodU64 {
 
   /// Default ctor
   TV_HOST_DEVICE_INLINE
-  FastDivmodU64(): divisor(0), multiplier(0), shift_right(0), round_up(0) { }
+  FastDivmodU64() : divisor(0), multiplier(0), shift_right(0), round_up(0) {}
 
   /// Construct the FastDivmod object, in host code ideally.
   ///
-  /// This precomputes some values based on the divisor and is computationally expensive.
+  /// This precomputes some values based on the divisor and is computationally
+  /// expensive.
   TV_HOST_DEVICE_INLINE
-  FastDivmodU64(uint64_t divisor_): divisor(divisor_), multiplier(1), shift_right(0), round_up(0) {
+  FastDivmodU64(uint64_t divisor_)
+      : divisor(divisor_), multiplier(1), shift_right(0), round_up(0) {
 
     if (divisor) {
       shift_right = integer_log2(divisor);
 
       if ((divisor & (divisor - 1)) == 0) {
         multiplier = 0;
-      }
-      else {
+      } else {
         uint64_t power_of_two = (uint64_t(1) << shift_right);
         uint64_t multiplier_lo = uint128_t(0, power_of_two) / divisor;
         multiplier = uint128_t(power_of_two, power_of_two) / divisor;
@@ -346,16 +350,17 @@ struct FastDivmodU64 {
   uint64_t divide(uint64_t dividend) const {
     uint64_t quotient = 0;
 
-    #ifdef __CUDA_ARCH__
-      uint64_t x = dividend;
-      if (multiplier) {
-        x = __umul64hi(dividend + round_up, multiplier);
-      }
-      quotient = (x >> shift_right);
-    #else
-      // TODO - use proper 'fast' division here also. No reason why x86-code shouldn't be optimized.
-      quotient = dividend / divisor;
-    #endif
+#ifdef __CUDA_ARCH__
+    uint64_t x = dividend;
+    if (multiplier) {
+      x = __umul64hi(dividend + round_up, multiplier);
+    }
+    quotient = (x >> shift_right);
+#else
+    // TODO - use proper 'fast' division here also. No reason why x86-code
+    // shouldn't be optimized.
+    quotient = dividend / divisor;
+#endif
 
     return quotient;
   }
@@ -366,7 +371,8 @@ struct FastDivmodU64 {
     return uint32_t(dividend - quotient * divisor);
   }
 
-  /// Returns the quotient of floor(dividend / divisor) and computes the remainder
+  /// Returns the quotient of floor(dividend / divisor) and computes the
+  /// remainder
   TV_HOST_DEVICE_INLINE
   uint64_t divmod(uint64_t &remainder, uint64_t dividend) const {
     uint64_t quotient = divide(dividend);
@@ -374,10 +380,11 @@ struct FastDivmodU64 {
     return quotient;
   }
 
-  /// Computes integer division and modulus using precomputed values. This is computationally
-  /// inexpensive.
+  /// Computes integer division and modulus using precomputed values. This is
+  /// computationally inexpensive.
   TV_HOST_DEVICE_INLINE
-  void operator()(uint64_t &quotient, uint64_t &remainder, uint64_t dividend) const {
+  void operator()(uint64_t &quotient, uint64_t &remainder,
+                  uint64_t dividend) const {
     quotient = divmod(remainder, dividend);
   }
 };
@@ -386,12 +393,12 @@ struct FastDivmodU64 {
 
 /// Computes the coordinate decomposition from a linear index.
 ///
-/// This decomposition is accelerated by the FastDivmodU64 object. It is assumed that
-/// a coordinate of <Rank> indices can be decomposed by <Rank - 1> div/mod operations.
-/// Note, is assumed that element divmod[0] divides by extent[1].
+/// This decomposition is accelerated by the FastDivmodU64 object. It is assumed
+/// that a coordinate of <Rank> indices can be decomposed by <Rank - 1> div/mod
+/// operations. Note, is assumed that element divmod[0] divides by extent[1].
 ///
-/// For example, assume 4-D coordinate (n, p, q, c) is mapped to a linear index `npqc`. This
-/// can be decomposed via three divide and modulus operations:
+/// For example, assume 4-D coordinate (n, p, q, c) is mapped to a linear index
+/// `npqc`. This can be decomposed via three divide and modulus operations:
 ///
 ///      c = npqc % C;         |  divmod[2] = FastDivmodU64(C)
 ///    npq = npqc / C;         |   coord[3] = c
@@ -406,10 +413,12 @@ struct FastDivmodU64 {
 ///
 template <size_t Rank>
 TV_HOST_DEVICE_INLINE array<int, Rank> CoordinateDecomposition(
-  uint64_t linear_idx,                    ///< Linear index to decompose
-  FastDivmodU64 const *divmod) {          ///< Pointer to array of Rank-1 FastDivmodU64 objects
+    uint64_t linear_idx, ///< Linear index to decompose
+    FastDivmodU64 const
+        *divmod) { ///< Pointer to array of Rank-1 FastDivmodU64 objects
 
-  static_assert(Rank > 0, "CoordinateDecomposition requires Rank=1 or greater.");
+  static_assert(Rank > 0,
+                "CoordinateDecomposition requires Rank=1 or greater.");
 
   array<int, Rank> coord;
 
@@ -429,180 +438,165 @@ TV_HOST_DEVICE_INLINE array<int, Rank> CoordinateDecomposition(
 // Min/Max
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-template <int A, int B>
-struct Min {
+template <int A, int B> struct Min {
   static int const kValue = (A < B) ? A : B;
 };
 
-template <int A, int B>
-struct Max {
+template <int A, int B> struct Max {
   static int const kValue = (A > B) ? A : B;
 };
 
 TV_HOST_DEVICE_INLINE
-constexpr int const_min(int a, int b) {
-    return (b < a ? b : a);
-}
+constexpr int const_min(int a, int b) { return (b < a ? b : a); }
 
 TV_HOST_DEVICE_INLINE
-constexpr int const_max(int a, int b) {
-    return (b > a ? b : a);
-}
+constexpr int const_max(int a, int b) { return (b > a ? b : a); }
 
-template <typename T>
-TV_HOST_DEVICE_INLINE
-T fast_min(T a, T b) {
+template <typename T> TV_HOST_DEVICE_INLINE T fast_min(T a, T b) {
   return (b < a ? b : a);
 }
 
-template <>
-TV_HOST_DEVICE_INLINE
-float fast_min(float a, float b) {
+template <> TV_HOST_DEVICE_INLINE float fast_min(float a, float b) {
   return fminf(a, b);
 }
 
-template <typename T>
-TV_HOST_DEVICE_INLINE
-T fast_max(T a, T b) {
+template <typename T> TV_HOST_DEVICE_INLINE T fast_max(T a, T b) {
   return (a < b ? b : a);
 }
 
-template <>
-TV_HOST_DEVICE_INLINE
-float fast_max(float a, float b) {
+template <> TV_HOST_DEVICE_INLINE float fast_max(float a, float b) {
   return fmaxf(a, b);
 }
 
 TV_HOST_DEVICE_INLINE
 float fast_cos(float theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::cosf(theta);
-  #else
+#else
   return std::cos(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 double fast_cos(double theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::cos(theta);
-  #else
+#else
   return std::cos(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 float fast_sin(float theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::sinf(theta);
-  #else
+#else
   return std::sin(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 double fast_sin(double theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::sin(theta);
-  #else
+#else
   return std::sin(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 float fast_acos(float theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::acosf(theta);
-  #else
+#else
   return std::acos(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 double fast_acos(double theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::acos(theta);
-  #else
+#else
   return std::acos(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 float fast_asin(float theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::asinf(theta);
-  #else
+#else
   return std::asin(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 double fast_asin(double theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::asin(theta);
-  #else
+#else
   return std::asin(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 float fast_sqrt(float theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::sqrtf(theta);
-  #else
+#else
   return std::sqrt(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 double fast_sqrt(double theta) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::sqrt(theta);
-  #else
+#else
   return std::sqrt(theta);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 float fast_log(float x) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::logf(x);
-  #else
+#else
   return std::log(x);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 double fast_log(double x) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::log(x);
-  #else
+#else
   return std::log(x);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 float fast_tanh(float x) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::tanhf(x);
-  #else
+#else
   return std::tanh(x);
-  #endif
+#endif
 }
 
 TV_HOST_DEVICE_INLINE
 double fast_tanh(double x) {
-  #if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__)
   return ::tanh(x);
-  #else
+#else
   return std::tanh(x);
-  #endif
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 
-}  // namespace cutlass
-}  // namespace cutlass
+} // namespace math
+} // namespace tv
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-
