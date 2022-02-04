@@ -50,7 +50,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     TV_ASSERT_RT_ERR(input.ndim() == io_dim, "error");
     TV_ASSERT_RT_ERR(weight.ndim() == weight_ndim, "error");
     TV_ASSERT_RT_ERR(output.ndim() == io_dim, "error");
-    if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) and split_k_slices > 1){{
+    if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) && split_k_slices > 1){{
         TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
     }}
     int kernel_volume = 1;
@@ -84,6 +84,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     sp_kernel_params.alpha = kernel_params.alpha;
     sp_kernel_params.beta = kernel_params.beta;
     sp_kernel_params.ndim = kernel_params.ndim;
+    constexpr int int_max = std::numeric_limits<int32_t>::max();
 
     if (algo_desp.mask_sparse){{
         if (algo_desp.op_type == tv::gemm::ConvOpType::kBackwardWeight){{
@@ -97,17 +98,17 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
         N = indices.dim(1);
         if (algo_desp.op_type == tv::gemm::ConvOpType::kBackwardWeight){{
             TV_ASSERT_RT_ERR(N == output.dim(0), "error");
-            TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_b) / 8 < std::numeric_limits<int32_t>::max(), 
+            TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_b) / 8 < int_max, 
                 "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-            TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+            TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < int_max, 
                 "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
 
         }}else if (algo_desp.op_type == tv::gemm::ConvOpType::kForward){{
             TV_ASSERT_RT_ERR(N == output.dim(0), "error");
-            TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+            TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_a) / 8 < int_max, 
                 "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
         }}else{{
-                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < int_max, 
                     "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
                 TV_ASSERT_RT_ERR(N == input.dim(0), "error");
 

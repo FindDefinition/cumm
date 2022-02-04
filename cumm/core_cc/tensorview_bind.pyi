@@ -358,6 +358,8 @@ def get_compute_capability(index: int) -> Tuple[int, int]:
 def is_cpu_only() -> bool:
     ...
 
+def cufilt(name: str) -> str:
+    ...
 
 class ConvOpType(Enum):
     Forward = 0

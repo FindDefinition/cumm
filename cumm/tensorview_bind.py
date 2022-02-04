@@ -36,16 +36,24 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_dependency(TensorView, PyBind11)
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
+        self.add_include("limits")
+
         if not CUMM_CPU_ONLY_BUILD:
             self.add_include("tensorview/cuda/nvrtc.h")
             self.add_include("tensorview/gemm/core/nvrtc_bases.h")
             self.add_include("tensorview/gemm/core/params.h")
             self.add_include("tensorview/gemm/core/nvrtc_params.h")
+            # cufilt (nv_decode.h) is used to demangle
+            # c++ names in ptx.
 
-            self.build_meta.add_libraries("nvrtc")
+            self.add_include("nv_decode.h")
+            self.build_meta.add_libraries("nvrtc", "cufilt")
             if not compat.InWindows:
                 self.build_meta.add_libraries("dl")
-
+            else:
+                # disable min/max macro if include Windows.h
+                self.build_meta.add_cflags("cl", "/DNOMINMAX")
+    
     @pccm.pybind.mark
     @pccm.static_function
     def hello(self):
@@ -587,6 +595,16 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     return true;
 #endif
   }); 
+  m.def("cufilt", [](std::string name){
+    int status;
+#ifdef TV_CUDA
+    std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
+    TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
+    return std::string(realname.get());
+#else
+    return std::string();
+#endif
+  }, py::arg("name")); 
   bind_gemm_algo_desp(m);
   bind_conv_algo_desp(m);
   bind_conv_params(m);

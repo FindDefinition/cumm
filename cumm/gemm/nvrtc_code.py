@@ -67,12 +67,12 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
     auto b_inds = params.b_inds;
     auto& evtimer = params.timer;
 
-    if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) and split_k_slices > 1){{
+    if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) && split_k_slices > 1){{
         TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
 
     }}
     int m, n, k, k2;
-
+    constexpr int int_max = std::numeric_limits<int32_t>::max();
     if (algo_desp.shuffle_type == tv::gemm::ShuffleStrideType::kShuffleAC){{
         TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
         if (!a_inds.empty()){{
@@ -80,7 +80,7 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
         }}else{{
             m = a.dim(0);
         }}
-        TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
+        TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * tv::bit_size(algo_desp.dtype_a) / 8 < int_max, 
             "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
 
         k = a_ten.dim(int(!trans_a));
@@ -97,9 +97,9 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
         k = a_inds.dim(0);
         k2 = b_inds.dim(0);
         auto n = b_ten.dim(int(!trans_b) );
-        TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * tv::bit_size(algo_desp.dtype_a)/ 8 < std::numeric_limits<int32_t>::max(), 
+        TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * tv::bit_size(algo_desp.dtype_a)/ 8 < int_max, 
             "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-        TV_ASSERT_RT_ERR(int64_t(b.dim(0)) * int64_t(b.dim(1)) * tv::bit_size(algo_desp.dtype_b) / 8 < std::numeric_limits<int32_t>::max(), 
+        TV_ASSERT_RT_ERR(int64_t(b.dim(0)) * int64_t(b.dim(1)) * tv::bit_size(algo_desp.dtype_b) / 8 < int_max, 
             "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
         if (trans_c){{
             tv::check_shape(c_ten, {{n, m}});

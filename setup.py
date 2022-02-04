@@ -41,7 +41,6 @@ REQUIRED = [
     "fire",
     "numpy",
     "contextvars; python_version == \"3.6\"",
-    "cxxfilt",
 ]
 
 # What packages are optional?

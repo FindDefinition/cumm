@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-import cxxfilt
 import pccm
 from ccimport import compat
 from pccm import Argument
@@ -99,7 +98,7 @@ class CummNVRTCModule(tv.NVRTCModule):
                 parts = line.split(" ")
                 name = parts[4]
                 if len(parts) == 7:
-                    name = cxxfilt.demangle(name)
+                    name = tv.cufilt(name)
                     name = "::".join(name.split("::")[1:])
                     const_values[name] = int(parts[-1].replace(";", " "))
         # print(const_values)

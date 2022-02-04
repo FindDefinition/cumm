@@ -142,7 +142,7 @@ def gen_gemm_params(op_types: List[ConvOpType],
     return res
 
 
-ConvFwdAndBwdInput = [ConvOpType.kForward, ConvOpType.kBackwardInput]
+ConvFwdAndBwdInput = [ConvOpType.kBackwardInput, ConvOpType.kForward, ]
 ConvBwdWeight = [ConvOpType.kBackwardWeight]
 ConvAllOp = [
     ConvOpType.kForward, ConvOpType.kBackwardInput, ConvOpType.kBackwardWeight

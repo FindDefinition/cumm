@@ -336,34 +336,32 @@ def _asdv_test_simt_python_v2():
 
             inp_th.requires_grad = True
             weight_th.requires_grad = True
-        th_t = time.time()
-        if ndim == 1:
-            out_ref = F.conv1d(inp_th,
-                               weight_th,
-                               padding=padding,
-                               stride=stride,
-                               dilation=dilation)
-        elif ndim == 2:
-            out_ref = F.conv2d(inp_th,
-                               weight_th,
-                               padding=padding,
-                               stride=stride,
-                               dilation=dilation)
-        elif ndim == 3:
-            out_ref = F.conv3d(inp_th,
-                               weight_th,
-                               padding=padding,
-                               stride=stride,
-                               dilation=dilation)
-        else:
-            raise NotImplementedError
-        torch.cuda.synchronize()
-        print("TORCH time", time.time() - th_t)
-        th_t = time.time()
-        if params.dtype_a.itemsize() != 1:
-            out_ref.backward(doutput_th)
-        torch.cuda.synchronize()
-        print("TORCH BW time", time.time() - th_t)
+        with tv.measure_and_print("torch_fw", stream=torch.cuda.current_stream().cuda_stream):
+            if ndim == 1:
+                out_ref = F.conv1d(inp_th,
+                                weight_th,
+                                padding=padding,
+                                stride=stride,
+                                dilation=dilation)
+            elif ndim == 2:
+                out_ref = F.conv2d(inp_th,
+                                weight_th,
+                                padding=padding,
+                                stride=stride,
+                                dilation=dilation)
+            elif ndim == 3:
+                out_ref = F.conv3d(inp_th,
+                                weight_th,
+                                padding=padding,
+                                stride=stride,
+                                dilation=dilation)
+            else:
+                raise NotImplementedError
+        # print("TORCH time", time.time() - th_t)
+        with tv.measure_and_print("torch_bw", stream=torch.cuda.current_stream().cuda_stream):
+            if params.dtype_a.itemsize() != 1:
+                out_ref.backward(doutput_th)
+        # print("TORCH BW time", time.time() - th_t)
 
         out_ref_nhwc = out_ref.detach().permute(
             *nchw_to_nhwc_inds).contiguous().cpu().numpy()
@@ -458,7 +456,7 @@ def _asdv_test_simt_python_v2():
             nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
         elif nvrtc_mode == NVRTCMode.ConstantMemory:
             nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
-            print(nvrtc_params.kernel_name)
+            # print(nvrtc_params.kernel_name)
             print(mod.get_kernel_attrs(nvrtc_params.kernel_name))
 
             nvrtc_params.init_kernel_name = mod.get_lowered_name(
@@ -473,12 +471,12 @@ def _asdv_test_simt_python_v2():
         else:
             raise NotImplementedError
         kt = tv.KernelTimer()
-        params_cpp.timer = kt.get_cpp_object()
+        # params_cpp.timer = kt.get_cpp_object()
         if lib_object is None :
             params_cpp.nvrtc_params = nvrtc_params
 
         # print("CUDA PREPARED")
-        for i in range(1):
+        for i in range(3):
             if lib_object is not None :
                 lib_object.implicit_gemm2(params_cpp)  # type: tv.Tensor
             else:
@@ -494,7 +492,7 @@ def _asdv_test_simt_python_v2():
             if params.dtype_a.itemsize() == 1:
                 output_cpu = output_cpu.astype(np.float32)
             duration = time.time() - t
-            print(output_cpu.reshape(-1)[:10], out_ref_nhwc.reshape(-1)[:10])
+            # print(output_cpu.reshape(-1)[:10], out_ref_nhwc.reshape(-1)[:10])
             print(ker.get_algo_name(),
                   np.linalg.norm(out_ref_nhwc - output_cpu), "Time=",
                   op_duration)
@@ -502,13 +500,13 @@ def _asdv_test_simt_python_v2():
             print(ker.input_spec.tmap_b.iterations)
             din_cpu = inp_tv.cpu().numpy()
             duration = time.time() - t
-            print(din_cpu.reshape(-1)[:10], din_ref_nhwc.reshape(-1)[:10])
+            # print(din_cpu.reshape(-1)[:10], din_ref_nhwc.reshape(-1)[:10])
             print(ker.get_algo_name(),
                   np.linalg.norm(din_cpu - din_ref_nhwc), "Time=", op_duration)
         else:
             dw_cpu = weight_tv.cpu().numpy()
             duration = time.time() - t
-            print(dw_cpu.reshape(-1)[:10], dw_ref_nhwc.reshape(-1)[:10])
+            # print(dw_cpu.reshape(-1)[:10], dw_ref_nhwc.reshape(-1)[:10])
             print(ker.get_algo_name(), np.linalg.norm(dw_cpu - dw_ref_nhwc),
                   "Time=", op_duration)
 

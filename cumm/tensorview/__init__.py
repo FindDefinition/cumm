@@ -503,3 +503,5 @@ def is_cpu_only():
     return tensorview_bind.is_cpu_only()
 
 
+def cufilt(name: str):
+    return tensorview_bind.cufilt(name)
