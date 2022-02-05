@@ -24,7 +24,7 @@ from cumm import dtypes
 from cumm.common import (GemmBasic, GemmBasicKernel, TensorViewMath,
                          TensorViewNVRTC)
 from cumm.conv import bases, params
-from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
+from cumm.conv.bases import LAYOUT_TYPES, ConvMode, ConvOpType
 from cumm.gemm import codeops, constants, layout, thread_map
 from cumm.gemm.arch.memory import GlobalLoad
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
@@ -104,7 +104,7 @@ class IOOptParams(bases.ConvIterParams):
                              thread_map.PitchLinearWarpRaked],
                  is_output: bool = False):
         super().__init__()
-        self.add_dependency(TensorViewMath, ConvEnum)
+        self.add_dependency(TensorViewMath)
         if not isinstance(input_layout, layout.TensorGeneric):
             raise NotImplementedError
         self.dtype = dtype
@@ -129,10 +129,6 @@ class IOOptParams(bases.ConvIterParams):
         self.inc_next_ = [0] * (problem.ndim + 1)
         self.filter_c_delta_ = 0
 
-    # @pccm.cuda.constructor(device=True, host=True, forceinline=True)
-    # def defctor(self):
-    #     return pccm.code()
-
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
         code = pccm.code()
@@ -148,12 +144,12 @@ class IOOptParams(bases.ConvIterParams):
                        f"LayoutNPQ::from_shape({{problem.N, {pqs}}})")
         if self.is_output:
             code.raw(f"""
-            int conv_sign = problem.mode == ConvEnum::Mode::kConvolution ? 1 : -1;
+            int conv_sign = problem.mode == tv::gemm::ConvMode::kConvolution ? 1 : -1;
             int prev_back = 0;
             """)
         else:
             code.raw(f"""
-            int conv_sign = problem.mode == ConvEnum::Mode::kConvolution ? -1 : 1;
+            int conv_sign = problem.mode == tv::gemm::ConvMode::kConvolution ? -1 : 1;
             int prev_back = 0;
             """)
 
@@ -211,7 +207,7 @@ class WeightOptParams(bases.ConvIterParams):
                              thread_map.PitchLinearWarpRaked],
                  increment_k_first: bool = False):
         super().__init__()
-        self.add_dependency(TensorViewMath, ConvEnum)
+        self.add_dependency(TensorViewMath)
         if not isinstance(input_layout, layout.TensorGeneric):
             raise NotImplementedError
         self.dtype = dtype
@@ -240,10 +236,6 @@ class WeightOptParams(bases.ConvIterParams):
         self.inc_rs_ = 0
         self.inc_c_ = 0
         self.filter_c_delta_ = 0
-
-    # @pccm.cuda.constructor(device=True, host=True, forceinline=True)
-    # def defctor(self):
-    #     return pccm.code()
 
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
@@ -370,7 +362,7 @@ class InputNPQIterator(bases.ConvInputIterator):
         self.optimized = optimized
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
-        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, ConvEnum)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         self.params = AnalyticParams(problem_size,
                                      input_layout,
                                      is_output=True,
@@ -425,7 +417,7 @@ class InputNPQIterator(bases.ConvInputIterator):
                 for i in range(self.ndim):
                     code.raw(f"""
                     int r_{i} = rsc_offset_per_c[{i}];
-                    if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+                    if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                         r_{i} = (problem_size_.ksize[{i}] - 1 - rsc_offset_per_c[{i}]);
                     }}
                     rsc_offset_per_c[{i}] = - problem_size_.padding[{i}] + r_{i} * problem_size_.dilation[{i}];
@@ -462,7 +454,7 @@ class InputNPQIterator(bases.ConvInputIterator):
             else:
                 code.raw(f"""
                 int r_{i} = rsc[{i}];
-                if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+                if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                     r_{i} = (problem_size_.ksize[{i}] - 1 - rsc[{i}]);
                 }}
                 int h_{i} = npq[{i + 1}] * problem_size_.stride[{i}] - problem_size_.padding[{i}] + r_{i} * problem_size_.dilation[{i}];
@@ -547,7 +539,7 @@ class OutputNPQParams(bases.ConvIterParams):
                  tmap: Union[thread_map.PitchLinear,
                              thread_map.PitchLinearWarpRaked]):
         super().__init__()
-        self.add_dependency(TensorViewMath, ConvEnum)
+        self.add_dependency(TensorViewMath)
         if not isinstance(input_layout, layout.TensorGeneric):
             raise NotImplementedError
         self.dtype = dtype
@@ -1853,7 +1845,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         assert tmap.iterations[1] == 1
-        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, ConvEnum)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         is_output = op_type == ConvOpType.kBackwardInput
         if op_type != ConvOpType.kForward:
             assert sub_tile_shape[
@@ -1967,7 +1959,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
                         TV_PRAGMA_UNROLL
                         for (int ss = 0; ss < {self.tmap.sub_tile_shape[0]}; ++ss ){{
                             int ksize_idx_ = ksize_idx;
-                            if (problem_size.mode == ConvEnum::Mode::kConvolution){{
+                            if (problem_size.mode == tv::gemm::ConvMode::kConvolution){{
                                 ksize_idx_ = problem_size.ksize[{dim}] - 1 - ksize_idx;
                             }}
                             int h = {h_stmt};
@@ -2130,7 +2122,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
             for i in range(self.ndim):
                 code.raw(f"""
                 int r_{i} = filter_kernel_idxes_[{i}];
-                if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+                if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                     r_{i} = (problem_size_.ksize[{i}] - 1 - filter_kernel_idxes_[{i}]);
                 }}
                 int h_{i} = npq[{i + 1}] * problem_size_.stride[{i}] - problem_size_.padding[{i}] + r_{i} * problem_size_.dilation[{i}];
@@ -2149,7 +2141,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         for i in range(self.ndim):
             code.raw(f"""
             int r_{i} = rs[{i}];
-            if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+            if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                 r_{i} = (problem_size_.ksize[{i}] - 1 - rs[{i}]);
             }}
             int h_{i} = npq[{i + 1}] * problem_size_.stride[{i}] - problem_size_.padding[{i}] + r_{i} * problem_size_.dilation[{i}];
@@ -2169,7 +2161,7 @@ class ForwardDgradIOIteratorDP4A(bases.ConvInputIterator):
         for i in range(self.ndim):
             code.raw(f"""
             int r_{i} = rs[{i}];
-            if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+            if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                 r_{i} = (problem_size_.ksize[{i}] - 1 - rs[{i}]);
             }}
             int h_{i} = (npq[{i + 1}] + problem_size_.padding[{i}] - r_{i} * problem_size_.dilation[{i}]) / (NoStride ? 1 : problem_size_.stride[{i}]);
@@ -2357,7 +2349,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         self.ndim = problem_size.ndim
         # for RR input (dgrad weight), it's possible to have tmap.iterations[1] > 1
         assert tmap.iterations[1] == 1
-        self.add_dependency(TensorViewNVRTC, GemmBasicKernel, ConvEnum)
+        self.add_dependency(TensorViewNVRTC, GemmBasicKernel)
         is_output = op_type == ConvOpType.kBackwardInput
         if not optimized:
             self.params = AnalyticParams(problem_size, input_layout)
@@ -2459,7 +2451,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
                     TV_PRAGMA_UNROLL
                     for (int stride = 0; stride < {self.tmap.iterations[0]}; ++stride ){{
                         int ksize_idx_ = ksize_idx;
-                        if (problem_size.mode == ConvEnum::Mode::kConvolution){{
+                        if (problem_size.mode == tv::gemm::ConvMode::kConvolution){{
                             ksize_idx_ = problem_size.ksize[{dim}] - 1 - ksize_idx;
                         }}
                         int h = {h_stmt};
@@ -2617,7 +2609,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
             for i in range(self.ndim):
                 code.raw(f"""
                 int r_{i} = filter_kernel_idxes_[{i}];
-                if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+                if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                     r_{i} = (problem_size_.ksize[{i}] - 1 - filter_kernel_idxes_[{i}]);
                 }}
                 int h_{i} = npq[{i + 1}] * problem_size_.stride[{i}] - problem_size_.padding[{i}] + r_{i} * problem_size_.dilation[{i}];
@@ -2636,7 +2628,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         for i in range(self.ndim):
             code.raw(f"""
             int r_{i} = rs[{i}];
-            if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+            if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                 r_{i} = (problem_size_.ksize[{i}] - 1 - rs[{i}]);
             }}
             int h_{i} = npq[{i + 1}] * problem_size_.stride[{i}] - problem_size_.padding[{i}] + r_{i} * problem_size_.dilation[{i}];
@@ -2656,7 +2648,7 @@ class ForwardDgradIOIterator(bases.ConvInputIterator):
         for i in range(self.ndim):
             code.raw(f"""
             int r_{i} = rs[{i}];
-            if (problem_size_.mode == ConvEnum::Mode::kConvolution) {{
+            if (problem_size_.mode == tv::gemm::ConvMode::kConvolution) {{
                 r_{i} = (problem_size_.ksize[{i}] - 1 - rs[{i}]);
             }}
             int h_{i} = (npq[{i + 1}] + problem_size_.padding[{i}] - r_{i} * problem_size_.dilation[{i}]) / (NoStride ? 1 : problem_size_.stride[{i}]);

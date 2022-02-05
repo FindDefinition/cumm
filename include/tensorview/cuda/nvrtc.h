@@ -131,6 +131,8 @@ public:
 
   std::string program_name() const { return program_name_; }
 
+  std::vector<std::string> name_exprs() const { return name_exprs_; }
+
   std::string get_lowered_name(std::string name) {
 #ifdef TV_CUDA
     const char *lowered_name;
@@ -219,6 +221,33 @@ public:
     return k;
   }
 #endif
+  std::unordered_map<std::string, int> get_kernel_attributes(std::string name) {
+    std::unordered_map<std::string, int> res;
+#ifdef TV_CUDA
+    auto k = kernel(name);
+    int pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k));
+    res["max_threads_per_block"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, k));
+    res["shared_size_bytes"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, k));
+    res["const_size_bytes"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, k));
+    res["local_size_bytes"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_NUM_REGS, k));
+    res["num_regs"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_PTX_VERSION, k));
+    res["ptx_version"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_BINARY_VERSION, k));
+    res["binary_version"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, k));
+    res["max_dynamic_shared_size_bytes"] = pi;
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT, k));
+    res["preferred_shared_memory_carveout"] = pi;
+#endif 
+    return res;
+  }
+
   std::shared_ptr<NVRTCProgram> get_program() { return program_; }
 
   std::string get_lowered_name(std::string name) {

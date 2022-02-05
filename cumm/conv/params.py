@@ -72,23 +72,23 @@ def get_gemm_trans_abc(op_type: bases.ConvOpType):
 class ConvProblemCommon(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(bases.ConvEnum, TensorViewNVRTC)
+        self.add_dependency(TensorViewNVRTC, GemmBasic)
 
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def implicit_gemm_mnk(self):
         code = pccm.code()
-        code.arg("op_type", "ConvEnum::OpType")
+        code.arg("op_type", "tv::gemm::ConvOpType")
         code.arg("N, C, K", "int")
         code.arg("kernel_volume, in_prod, out_prod", "int")
         code.arg("mask_sparse", "bool")
         code.raw(f"""
         if (mask_sparse){{
             switch (op_type) {{
-                case ConvEnum::OpType::kForward:
+                case tv::gemm::ConvOpType::kForward:
                     return {{N, K, C * kernel_volume}};
-                case ConvEnum::OpType::kBackwardInput:
+                case tv::gemm::ConvOpType::kBackwardInput:
                     return {{N, C, K * kernel_volume}};
-                case ConvEnum::OpType::kBackwardWeight:
+                case tv::gemm::ConvOpType::kBackwardWeight:
                     return {{K, C * kernel_volume, N}};
                 default:
                     return {{}};
@@ -96,11 +96,11 @@ class ConvProblemCommon(pccm.Class):
             return {{}};
         }}else{{
             switch (op_type) {{
-                case ConvEnum::OpType::kForward:
+                case tv::gemm::ConvOpType::kForward:
                     return {{N * out_prod, K, C * kernel_volume}};
-                case ConvEnum::OpType::kBackwardInput:
+                case tv::gemm::ConvOpType::kBackwardInput:
                     return {{N * in_prod, C, K * kernel_volume}};
-                case ConvEnum::OpType::kBackwardWeight:
+                case tv::gemm::ConvOpType::kBackwardWeight:
                     return {{K, C * kernel_volume, N * out_prod}};
                 default:
                     return {{}};
@@ -114,14 +114,14 @@ class ConvProblemCommon(pccm.Class):
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def conv_iwo_012_to_abc(self):
         code = pccm.code()
-        code.arg("op_type", "ConvEnum::OpType")
+        code.arg("op_type", "tv::gemm::ConvOpType")
         code.raw(f"""
         switch (op_type) {{
-            case ConvEnum::OpType::kForward:
+            case tv::gemm::ConvOpType::kForward:
                 return {{0, 1, 2}};
-            case ConvEnum::OpType::kBackwardInput:
+            case tv::gemm::ConvOpType::kBackwardInput:
                 return {{2, 1, 0}};
-            case ConvEnum::OpType::kBackwardWeight:
+            case tv::gemm::ConvOpType::kBackwardWeight:
                 return {{1, 2, 0}};
             default:
                 return {{}};
@@ -134,14 +134,14 @@ class ConvProblemCommon(pccm.Class):
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def gemm_abc_012_to_iwo(self):
         code = pccm.code()
-        code.arg("op_type", "ConvEnum::OpType")
+        code.arg("op_type", "tv::gemm::ConvOpType")
         code.raw(f"""
         switch (op_type) {{
-            case ConvEnum::OpType::kForward:
+            case tv::gemm::ConvOpType::kForward:
                 return {{0, 1, 2}};
-            case ConvEnum::OpType::kBackwardInput:
+            case tv::gemm::ConvOpType::kBackwardInput:
                 return {{2, 1, 0}};
-            case ConvEnum::OpType::kBackwardWeight:
+            case tv::gemm::ConvOpType::kBackwardWeight:
                 return {{2, 0, 1}};
             default:
                 return {{}};
@@ -161,7 +161,7 @@ class ConvProblem(pccm.ParameterizedClass):
                  layout_desp_output: bases.ConvLayout,
                  mask_sparse: bool = False):
         super().__init__()
-        self.add_dependency(bases.ConvEnum, ConvProblemCommon)
+        self.add_dependency(ConvProblemCommon)
         self.ndim = ndim
         self.op_type = op_type
         self.layout_desp_input = layout_desp_input
@@ -178,7 +178,7 @@ class ConvProblem(pccm.ParameterizedClass):
                 f"tv::array<int, {ndim}>")
         else:
             self.add_member("kernel_volume", f"int")
-        self.add_member("mode", "ConvEnum::Mode")
+        self.add_member("mode", "tv::gemm::ConvMode")
         self.add_member("split_k_slices, groups", "int")
 
         # cudasim
@@ -210,7 +210,7 @@ class ConvProblem(pccm.ParameterizedClass):
                 "input_dims, output_dims, ksize, padding, stride, dilation",
                 f"tv::array<int, {self.ndim}>")
 
-        code.arg("mode", "ConvEnum::Mode", "ConvEnum::Mode::kCrossCorrelation")
+        code.arg("mode", "tv::gemm::ConvMode", "tv::gemm::ConvMode::kCrossCorrelation")
         code.arg("split_k_slices", "int", "1")
         code.arg("groups", "int", "1")
 
@@ -268,7 +268,7 @@ class ConvProblem(pccm.ParameterizedClass):
     @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def implicit_gemm_mnk(self):
         code = pccm.code()
-        code.arg("op_type", "ConvEnum::OpType")
+        code.arg("op_type", "tv::gemm::ConvOpType")
         if self.mask_sparse:
             code.raw(f"""
             return ConvProblemCommon::implicit_gemm_mnk(op_type, N, C, K, kernel_volume, -1, -1, true);
@@ -301,16 +301,16 @@ class ConvProblem(pccm.ParameterizedClass):
     @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def implicit_gemm_k_iterations(self):
         code = pccm.code()
-        code.arg("op_type", "ConvEnum::OpType")
+        code.arg("op_type", "tv::gemm::ConvOpType")
         code.arg("tile_shape_k", "int")
         if self.mask_sparse:
             code.raw(f"""
             switch (op_type) {{
-                case ConvEnum::OpType::kForward:
+                case tv::gemm::ConvOpType::kForward:
                     return kernel_volume * tv::div_up(tv::div_up(C, split_k_slices), tile_shape_k);
-                case ConvEnum::OpType::kBackwardInput:
+                case tv::gemm::ConvOpType::kBackwardInput:
                     return kernel_volume * tv::div_up(tv::div_up(K, split_k_slices), tile_shape_k);
-                case ConvEnum::OpType::kBackwardWeight:
+                case tv::gemm::ConvOpType::kBackwardWeight:
                     return tv::div_up(tv::div_up(N, split_k_slices), tile_shape_k);
                 default:
                     return 0;
@@ -323,11 +323,11 @@ class ConvProblem(pccm.ParameterizedClass):
             int in_prod = tv::arrayops::prod(input_dims);
             int out_prod = tv::arrayops::prod(output_dims);
             switch (op_type) {{
-                case ConvEnum::OpType::kForward:
+                case tv::gemm::ConvOpType::kForward:
                     return ksize_prod * tv::div_up(tv::div_up(C, split_k_slices), tile_shape_k);
-                case ConvEnum::OpType::kBackwardInput:
+                case tv::gemm::ConvOpType::kBackwardInput:
                     return ksize_prod * tv::div_up(tv::div_up(K, split_k_slices), tile_shape_k);
-                case ConvEnum::OpType::kBackwardWeight:
+                case tv::gemm::ConvOpType::kBackwardWeight:
                     return tv::div_up(tv::div_up(N * out_prod, split_k_slices), tile_shape_k);
                 default:
                     return 0;

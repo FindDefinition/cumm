@@ -43,7 +43,7 @@ public:
     checkCudaErrors(cudaEventRecord(event_, stream));
   }
 
-  void sync(cudaStream_t stream = nullptr) {
+  void sync() {
     checkCudaErrors(cudaEventSynchronize(event_));
   }
 
@@ -60,12 +60,13 @@ public:
   CUDAEvent(std::string name)
       : event_(std::make_shared<CUDAEventCore>()), name(name) {}
 
-  void record(std::uintptr_t stream = 0) {
+  CUDAEvent& record(std::uintptr_t stream = 0) {
     TV_ASSERT_RT_ERR(event_, "event is empty");
     event_->record(reinterpret_cast<cudaStream_t>(stream));
+    return *this;
   }
 
-  void sync(std::uintptr_t stream = 0) {
+  void sync() {
     TV_ASSERT_RT_ERR(event_, "event is empty");
     event_->sync();
   }
@@ -77,6 +78,12 @@ public:
     checkCudaErrors(cudaEventElapsedTime(&ms, start.event_->get_event(),
                                          stop.event_->get_event()));
     return ms;
+  }
+
+  static float sync_and_duration(CUDAEvent start, CUDAEvent stop) {
+    start.sync();
+    stop.sync();
+    return duration(start, stop);
   }
 };
 #else
@@ -90,11 +97,12 @@ public:
 
   CUDAEvent(std::string name) : name(name) {}
 
-  void record(std::uintptr_t stream = 0) {
+  CUDAEvent& record(std::uintptr_t stream = 0) {
     cur_time_ = std::chrono::steady_clock::now();
+    return *this;
   }
 
-  void sync(std::uintptr_t stream = 0) {}
+  void sync() {}
 
   static float duration(CUDAEvent start, CUDAEvent stop) {
     float ms = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -103,6 +111,12 @@ public:
                1000.0f;
     return ms;
   }
+
+  static float sync_and_duration(CUDAEvent start, CUDAEvent stop) {
+    
+    return duration(start, stop);
+  }
+
 };
 #endif
 
@@ -166,13 +180,14 @@ public:
     }
   }
 
-  void insert_pair(std::string name, std::string start, std::string stop) {
+  std::string insert_pair(std::string name, std::string start, std::string stop) {
     name = add_namespace_to_name(name);
     start = add_namespace_to_name(start);
     stop = add_namespace_to_name(stop);
     TV_ASSERT_RT_ERR(name_to_pair_.find(name) == name_to_pair_.end(),
                      "your name", name, "already exists");
     name_to_pair_[name] = {start, stop};
+    return name;
   }
 
   std::unordered_map<std::string, float> get_all_pair_duration() {
@@ -187,6 +202,17 @@ public:
     }
     return res;
   }
+
+  float get_pair_duration(std::string name) {
+    TV_ASSERT_RT_ERR(name_to_pair_.find(name) != name_to_pair_.end(), "can't find your pair", name);
+    auto& p = name_to_pair_.at(name);
+    auto &ev_start = name_to_event_.at(p.first);
+    auto &ev_stop = name_to_event_.at(p.second);
+    ev_start.sync();
+    ev_stop.sync();
+    return CUDAEvent::duration(ev_start, ev_stop);
+  }
+
 };
 
 class CUDAKernelTimer {
@@ -225,12 +251,14 @@ public:
       }
     }
   }
-  void insert_pair(std::string name, std::string start, std::string stop) {
+  std::string insert_pair(std::string name, std::string start, std::string stop) {
     if (enable_) {
       {
         TV_ASSERT_RT_ERR(timer_ptr_, "event is empty");
         return timer_ptr_->insert_pair(name, start, stop);
       }
+    }else{
+      return "";
     }
   }
 
@@ -261,6 +289,18 @@ public:
     }
     return res;
   }
+
+  float get_pair_duration(std::string name) {
+    if (enable_) {
+      {
+        TV_ASSERT_RT_ERR(timer_ptr_, "event is empty");
+        return timer_ptr_->get_pair_duration(name);
+      }
+    }else{
+      return -1;
+    }
+  }
+
 };
 
 #ifdef TV_CUDA

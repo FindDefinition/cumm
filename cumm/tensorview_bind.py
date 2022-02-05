@@ -21,8 +21,9 @@ from pccm.utils import project_is_editable, project_is_installed
 
 from cumm.common import PyBind11, TensorView, TensorViewCPU
 from cumm.constants import CUMM_CPU_ONLY_BUILD, PACKAGE_ROOT
-
 from .constants import PACKAGE_NAME
+from cumm.conv.nvrtc_code import nvrtc_conv_template
+from cumm.gemm.nvrtc_code import nvrtc_gemm_template
 
 _TENSORVIEW_BIND_CODE_ANNO_PATH = PACKAGE_ROOT / "tensorview_bind_anno.pyi"
 with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
@@ -37,6 +38,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_include("tensorview/profile/all.h")
         if not CUMM_CPU_ONLY_BUILD:
             self.add_include("tensorview/cuda/nvrtc.h")
+            self.add_include("tensorview/gemm/core/nvrtc_bases.h")
+            self.add_include("tensorview/gemm/core/params.h")
+            self.add_include("tensorview/gemm/core/nvrtc_params.h")
+
             self.build_meta.add_libraries("nvrtc")
             if not compat.InWindows:
                 self.build_meta.add_libraries("dl")
@@ -46,6 +51,285 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def hello(self):
         code = pccm.code()
         return code
+
+    @pccm.static_function
+    def run_nvrtc_conv_kernel(self):
+        code = pccm.code()
+        if CUMM_CPU_ONLY_BUILD:
+            return code 
+        code.arg("params", "tv::gemm::ConvParams", pyanno="cumm.tensorview.gemm.ConvParams")
+        nvrtc_conv_template(code)
+        code.raw(f"""
+        TV_THROW_RT_ERR("you must use nvrtc kernel to run conv by this function");
+        """)
+        return code 
+
+
+    @pccm.static_function
+    def run_nvrtc_gemm_kernel(self):
+        code = pccm.code()
+        if CUMM_CPU_ONLY_BUILD:
+            return code 
+        code.arg("params", "tv::gemm::GemmParams", pyanno="cumm.tensorview.gemm.GemmParams")
+        nvrtc_gemm_template(code)
+        code.raw(f"""
+        TV_THROW_RT_ERR("you must use nvrtc kernel to run gemm by this function");
+        """)
+        return code 
+
+    @pccm.static_function
+    def bind_enums(self):
+        code = pccm.code()
+        code.arg("module_", "pybind11::module_")
+        code.raw("""
+        py::enum_<tv::gemm::ConvOpType>(module_, "ConvOpType")
+            .value("Forward", tv::gemm::ConvOpType::kForward)
+            .value("BackwardInput", tv::gemm::ConvOpType::kBackwardInput)
+            .value("BackwardWeight", tv::gemm::ConvOpType::kBackwardWeight);
+        py::enum_<tv::gemm::ConvMode>(module_, "ConvMode")
+            .value("Convolution", tv::gemm::ConvMode::kConvolution)
+            .value("CrossCorrelation", tv::gemm::ConvMode::kCrossCorrelation);
+        py::enum_<tv::gemm::ConvIterAlgo>(module_, "ConvIterAlgo")
+            .value("Analytic", tv::gemm::ConvIterAlgo::kAnalytic)
+            .value("Optimized", tv::gemm::ConvIterAlgo::kOptimized);
+
+        py::enum_<tv::gemm::ConvLayoutType>(module_, "ConvLayoutType")
+            .value("ChannelFirst", tv::gemm::ConvLayoutType::kChannelFirst)
+            .value("ChannelLast", tv::gemm::ConvLayoutType::kChannelLast)
+            .value("SpatialFirst", tv::gemm::ConvLayoutType::kSpatialFirst);
+        py::enum_<tv::gemm::ShuffleStrideType>(module_, "ShuffleStrideType")
+            .value("NoShuffle", tv::gemm::ShuffleStrideType::kNoShuffle)
+            .value("ShuffleAC", tv::gemm::ShuffleStrideType::kShuffleAC)
+            .value("ShuffleAB", tv::gemm::ShuffleStrideType::kShuffleAB);
+        """)
+        return code 
+
+    @pccm.static_function
+    def bind_nvrtc_params(self):
+        code = pccm.code()
+        code.arg("module_", "pybind11::module_")
+        code.raw("""
+        py::class_<tv::gemm::NVRTCParams, std::shared_ptr<tv::gemm::NVRTCParams>>(module_, "NVRTCParams")
+          .def(py::init<>())
+          .def_readwrite("cumodule", &tv::gemm::NVRTCParams::cumodule)
+          .def_readwrite("kernel_name", &tv::gemm::NVRTCParams::kernel_name)
+          .def_readwrite("init_kernel_name", &tv::gemm::NVRTCParams::init_kernel_name)
+          .def_readwrite("constant_name", &tv::gemm::NVRTCParams::constant_name)
+          .def_readwrite("param_size", &tv::gemm::NVRTCParams::param_size)
+          .def_readwrite("param_storage", &tv::gemm::NVRTCParams::param_storage)
+          .def_readwrite("param_storage_cpu", &tv::gemm::NVRTCParams::param_storage_cpu)
+          .def_readwrite("num_threads", &tv::gemm::NVRTCParams::num_threads)
+          .def_readwrite("smem_size", &tv::gemm::NVRTCParams::smem_size)
+          .def_readwrite("mode", &tv::gemm::NVRTCParams::mode);
+        """)
+        return code 
+
+    @pccm.static_function
+    def bind_gemm_algo_desp(self):
+        code = pccm.code()
+        code.arg("module_", "pybind11::module_")
+        code.raw("""
+        pybind11::class_<tv::gemm::GemmAlgoDesp> m_cls(
+            module_, "GemmAlgoDesp", pybind11::module_local());
+        m_cls.def(pybind11::init<>());
+        m_cls.def("__repr__", &tv::gemm::GemmAlgoDesp::__repr__,
+                  pybind11::return_value_policy::automatic);
+        m_cls.def_property("split_k_serial",
+                          &tv::gemm::GemmAlgoDesp::split_k_serial,
+                          &tv::gemm::GemmAlgoDesp::split_k_serial_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def_property("split_k_parallel",
+                          &tv::gemm::GemmAlgoDesp::split_k_parallel,
+                          &tv::gemm::GemmAlgoDesp::split_k_parallel_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def("check_valid", &tv::gemm::GemmAlgoDesp::check_valid,
+                  pybind11::return_value_policy::automatic);
+        m_cls.def_property("trans_a", &tv::gemm::GemmAlgoDesp::trans_a,
+                          &tv::gemm::GemmAlgoDesp::trans_a_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def_property("trans_b", &tv::gemm::GemmAlgoDesp::trans_b,
+                          &tv::gemm::GemmAlgoDesp::trans_b_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def_property("trans_c", &tv::gemm::GemmAlgoDesp::trans_c,
+                          &tv::gemm::GemmAlgoDesp::trans_c_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def("query_workspace_size",
+                  &tv::gemm::GemmAlgoDesp::query_workspace_size,
+                  pybind11::arg("m"), pybind11::arg("n"), pybind11::arg("k"),
+                  pybind11::arg("split_k_slices"),
+                  pybind11::return_value_policy::automatic);
+        m_cls.def("supported", &tv::gemm::GemmAlgoDesp::supported,
+                  pybind11::arg("m"), pybind11::arg("n"), pybind11::arg("k"),
+                  pybind11::return_value_policy::automatic);
+        m_cls.def("supported_ldx", &tv::gemm::GemmAlgoDesp::supported_ldx,
+                  pybind11::arg("lda"), pybind11::arg("ldb"), pybind11::arg("ldc"),
+                  pybind11::return_value_policy::automatic);
+        m_cls.def_readwrite("dtype_a", &tv::gemm::GemmAlgoDesp::dtype_a);
+        m_cls.def_readwrite("dtype_b", &tv::gemm::GemmAlgoDesp::dtype_b);
+        m_cls.def_readwrite("dtype_c", &tv::gemm::GemmAlgoDesp::dtype_c);
+        m_cls.def_readwrite("tile_shape",
+                            &tv::gemm::GemmAlgoDesp::tile_shape);
+        m_cls.def_readwrite("warp_tile_shape",
+                            &tv::gemm::GemmAlgoDesp::warp_tile_shape);
+        m_cls.def_readwrite("num_stage",
+                            &tv::gemm::GemmAlgoDesp::num_stage);
+        m_cls.def_readwrite("dacc", &tv::gemm::GemmAlgoDesp::dacc);
+        m_cls.def_readwrite("dcomp", &tv::gemm::GemmAlgoDesp::dcomp);
+        m_cls.def_readwrite("algo", &tv::gemm::GemmAlgoDesp::algo);
+        m_cls.def_readwrite("tensorop", &tv::gemm::GemmAlgoDesp::tensorop);
+        m_cls.def_readwrite("split_k_serial_",
+                            &tv::gemm::GemmAlgoDesp::split_k_serial_);
+        m_cls.def_readwrite("split_k_parallel_",
+                            &tv::gemm::GemmAlgoDesp::split_k_parallel_);
+        m_cls.def_readwrite("shuffle_type",
+                            &tv::gemm::GemmAlgoDesp::shuffle_type);
+        m_cls.def_readwrite("element_per_access_a",
+                            &tv::gemm::GemmAlgoDesp::element_per_access_a);
+        m_cls.def_readwrite("element_per_access_b",
+                            &tv::gemm::GemmAlgoDesp::element_per_access_b);
+        m_cls.def_readwrite("element_per_access_c",
+                            &tv::gemm::GemmAlgoDesp::element_per_access_c);
+        m_cls.def_readwrite("access_per_vector",
+                            &tv::gemm::GemmAlgoDesp::access_per_vector);
+
+        """)
+        return code 
+
+    @pccm.static_function
+    def bind_conv_algo_desp(self):
+        code = pccm.code()
+        code.arg("module_", "pybind11::module_")
+        code.raw("""
+        pybind11::class_<tv::gemm::ConvAlgoDesp,
+                        tv::gemm::GemmAlgoDesp>
+            m_cls(module_, "ConvAlgoDesp");
+        m_cls.def(pybind11::init<int, tv::gemm::ConvOpType>(), pybind11::arg("ndim"),
+                  pybind11::arg("op_type"));
+        m_cls.def("__repr__", &tv::gemm::ConvAlgoDesp::__repr__,
+                  pybind11::return_value_policy::automatic);
+        m_cls.def_static("conv_iwo_012_to_abc",
+                        &tv::gemm::ConvAlgoDesp::conv_iwo_012_to_abc,
+                        pybind11::arg("op_type"),
+                        pybind11::return_value_policy::automatic);
+        m_cls.def_static("gemm_abc_012_to_iwo",
+                        &tv::gemm::ConvAlgoDesp::gemm_abc_012_to_iwo,
+                        pybind11::arg("op_type"),
+                        pybind11::return_value_policy::automatic);
+        m_cls.def_property_readonly("dtype_input",
+                                    &tv::gemm::ConvAlgoDesp::dtype_input,
+                                    pybind11::return_value_policy::automatic);
+        m_cls.def_property_readonly("dtype_weight",
+                                    &tv::gemm::ConvAlgoDesp::dtype_weight,
+                                    pybind11::return_value_policy::automatic);
+        m_cls.def_property_readonly("dtype_output",
+                                    &tv::gemm::ConvAlgoDesp::dtype_output,
+                                    pybind11::return_value_policy::automatic);
+        m_cls.def("supported", &tv::gemm::ConvAlgoDesp::supported,
+                  pybind11::arg("m"), pybind11::arg("n"), pybind11::arg("k"),
+                  pybind11::arg("C"), pybind11::arg("K"),
+                  pybind11::arg("mask_width"),
+                  pybind11::return_value_policy::automatic);
+        m_cls.def("query_conv_workspace_size",
+                  &tv::gemm::ConvAlgoDesp::query_conv_workspace_size,
+                  pybind11::arg("m"), pybind11::arg("n"), pybind11::arg("k"),
+                  pybind11::arg("split_k_slices"), pybind11::arg("kv"),
+                  pybind11::return_value_policy::automatic);
+        m_cls.def("supported_ldx_conv",
+                  &tv::gemm::ConvAlgoDesp::supported_ldx_conv,
+                  pybind11::arg("ldi"), pybind11::arg("ldw"), pybind11::arg("ldo"),
+                  pybind11::return_value_policy::automatic);
+        m_cls.def_readwrite("ndim", &tv::gemm::ConvAlgoDesp::ndim);
+        m_cls.def_readwrite("op_type", &tv::gemm::ConvAlgoDesp::op_type);
+        m_cls.def_readwrite("iter_algo",
+                            &tv::gemm::ConvAlgoDesp::iter_algo);
+        m_cls.def_readwrite("layout_i", &tv::gemm::ConvAlgoDesp::layout_i);
+        m_cls.def_readwrite("layout_w", &tv::gemm::ConvAlgoDesp::layout_w);
+        m_cls.def_readwrite("layout_o", &tv::gemm::ConvAlgoDesp::layout_o);
+        m_cls.def_readwrite("interleave_i",
+                            &tv::gemm::ConvAlgoDesp::interleave_i);
+        m_cls.def_readwrite("interleave_w",
+                            &tv::gemm::ConvAlgoDesp::interleave_w);
+        m_cls.def_readwrite("interleave_o",
+                            &tv::gemm::ConvAlgoDesp::interleave_o);
+        m_cls.def_readwrite("mask_sparse",
+                            &tv::gemm::ConvAlgoDesp::mask_sparse);
+        m_cls.def_readwrite("increment_k_first",
+                            &tv::gemm::ConvAlgoDesp::increment_k_first);
+
+        """)
+        return code 
+
+    @pccm.static_function
+    def bind_conv_params(self):
+        code = pccm.code()
+        code.arg("module_", "pybind11::module_")
+        code.raw("""
+        pybind11::class_<tv::gemm::ConvParams> m_cls(module_, "ConvParams");
+        m_cls.def(pybind11::init<int, tv::gemm::ConvOpType, tv::CUDAKernelTimer>(),
+                  pybind11::arg("ndim"), pybind11::arg("op_type"),
+                  pybind11::arg("timer") = tv::CUDAKernelTimer(false));
+        m_cls.def_readwrite("conv_algo_desp",
+                            &tv::gemm::ConvParams::conv_algo_desp);
+        m_cls.def_readwrite("input", &tv::gemm::ConvParams::input);
+        m_cls.def_readwrite("weight", &tv::gemm::ConvParams::weight);
+        m_cls.def_readwrite("output", &tv::gemm::ConvParams::output);
+        m_cls.def_readwrite("split_k_slices",
+                            &tv::gemm::ConvParams::split_k_slices);
+        m_cls.def_readwrite("padding", &tv::gemm::ConvParams::padding);
+        m_cls.def_readwrite("stride", &tv::gemm::ConvParams::stride);
+        m_cls.def_readwrite("dilation", &tv::gemm::ConvParams::dilation);
+        m_cls.def_readwrite("alpha", &tv::gemm::ConvParams::alpha);
+        m_cls.def_readwrite("beta", &tv::gemm::ConvParams::beta);
+        m_cls.def_readwrite("mask_width", &tv::gemm::ConvParams::mask_width);
+        m_cls.def_readwrite("mask_filter", &tv::gemm::ConvParams::mask_filter);
+        m_cls.def_readwrite("reverse_mask", &tv::gemm::ConvParams::reverse_mask);
+        m_cls.def_readwrite("verbose", &tv::gemm::ConvParams::verbose);
+        m_cls.def_readwrite("timer", &tv::gemm::ConvParams::timer);
+        m_cls.def_readwrite("workspace", &tv::gemm::ConvParams::workspace);
+        m_cls.def_readwrite("mask", &tv::gemm::ConvParams::mask);
+        m_cls.def_readwrite("mask_argsort", &tv::gemm::ConvParams::mask_argsort);
+        m_cls.def_readwrite("indices", &tv::gemm::ConvParams::indices);
+        m_cls.def_readwrite("mask_output", &tv::gemm::ConvParams::mask_output);
+        m_cls.def_readwrite("stream", &tv::gemm::ConvParams::stream);
+        m_cls.def_readwrite("nvrtc_params", &tv::gemm::ConvParams::nvrtc_params);
+        """)
+        return code 
+
+    @pccm.static_function
+    def bind_gemm_params(self):
+        code = pccm.code()
+        code.arg("module_", "pybind11::module_")
+        code.raw("""
+
+        pybind11::class_<tv::gemm::GemmParams> m_cls(module_, "GemmParams");
+        m_cls.def(pybind11::init<tv::CUDAKernelTimer>(),
+                  pybind11::arg("timer") = tv::CUDAKernelTimer(false));
+        m_cls.def("check_valid", &tv::gemm::GemmParams::check_valid,
+                  pybind11::return_value_policy::automatic);
+        m_cls.def_property("a", &tv::gemm::GemmParams::a_get,
+                          &tv::gemm::GemmParams::a_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def_property("b", &tv::gemm::GemmParams::b_get,
+                          &tv::gemm::GemmParams::b_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def_property("c", &tv::gemm::GemmParams::c_get,
+                          &tv::gemm::GemmParams::c_set,
+                          pybind11::return_value_policy::automatic);
+        m_cls.def_readwrite("algo_desp", &tv::gemm::GemmParams::algo_desp);
+        m_cls.def_readwrite("split_k_slices",
+                            &tv::gemm::GemmParams::split_k_slices);
+        m_cls.def_readwrite("workspace", &tv::gemm::GemmParams::workspace);
+        m_cls.def_readwrite("a_inds", &tv::gemm::GemmParams::a_inds);
+        m_cls.def_readwrite("b_inds", &tv::gemm::GemmParams::b_inds);
+        m_cls.def_readwrite("c_inds", &tv::gemm::GemmParams::c_inds);
+        m_cls.def_readwrite("alpha", &tv::gemm::GemmParams::alpha);
+        m_cls.def_readwrite("beta", &tv::gemm::GemmParams::beta);
+        m_cls.def_readwrite("stream", &tv::gemm::GemmParams::stream);
+        m_cls.def_readwrite("timer", &tv::gemm::GemmParams::timer);
+        m_cls.def_readwrite("nvrtc_params", &tv::gemm::GemmParams::nvrtc_params);
+
+        """)
+        return code 
 
     @pccm.pybind.mark_bind_raw(raw_bind_anno=_TENSORVIEW_BIND_CODE_ANNO)
     @pccm.static_function
@@ -70,6 +354,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("has_pair", &tv::CUDAKernelTimer::has_pair, py::arg("name"))
     .def("sync_all_event", &tv::CUDAKernelTimer::sync_all_event)
     .def_property_readonly("enable", &tv::CUDAKernelTimer::enable)
+    .def("get_pair_duration", &tv::CUDAKernelTimer::get_pair_duration, py::arg("name"))
     .def("get_all_pair_duration", &tv::CUDAKernelTimer::get_all_pair_duration);
 
   py::class_<tv::NVRTCProgram, std::shared_ptr<tv::NVRTCProgram>>(m, "NVRTCProgram")
@@ -80,6 +365,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("compile_log", &tv::NVRTCProgram::compile_log)
     .def("get_lowered_name", &tv::NVRTCProgram::get_lowered_name);
   
+
+
   py::class_<tv::NVRTCModule, std::shared_ptr<tv::NVRTCModule>> nvrtc_m(m, "NVRTCModule");
   nvrtc_m.def(py::init(&tv::NVRTCModule::create), py::arg("code"), py::arg("headers") = std::unordered_map<std::string, std::string>{}, 
          py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
@@ -91,6 +378,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("load", &tv::NVRTCModule::load)
     .def_property_readonly("program", &tv::NVRTCModule::get_program)
     .def("get_lowered_name", &tv::NVRTCModule::get_lowered_name)
+    .def("get_kernel_attributes", &tv::NVRTCModule::get_kernel_attributes, py::arg("name"))
     .def("run_kernel", &tv::NVRTCModule::run_kernel);
 
   py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")
@@ -277,12 +565,17 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   // m.def("full_float_managed", [](std::vector<int64_t> shape, float val, int dtype){
   //   return tv::full(shape, val, tv::DType(dtype), 0, false, true);
   // }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0); 
+#endif
   m.def("get_compute_capability", [](int index){
+#ifdef TV_CUDA
     cudaDeviceProp prop;
     checkCudaErrors(cudaGetDeviceProperties(&prop, index));
     return std::make_tuple(prop.major, prop.minor);
-  }, py::arg("index")); 
+#else 
+    return std::make_tuple(-1, -1);
 #endif
+  }, py::arg("index")); 
+
   m.def("from_numpy", [](py::array arr){
     return tv::array2tensor(arr);
   }); 
@@ -294,6 +587,14 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     return true;
 #endif
   }); 
+  bind_gemm_algo_desp(m);
+  bind_conv_algo_desp(m);
+  bind_conv_params(m);
+  bind_nvrtc_params(m);
+  bind_enums(m);
+  bind_gemm_params(m);
+  m.def("run_nvrtc_conv_kernel", &run_nvrtc_conv_kernel, py::arg("params"));
+  m.def("run_nvrtc_gemm_kernel", &run_nvrtc_gemm_kernel, py::arg("params"));
 
         """)
         return code

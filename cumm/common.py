@@ -302,7 +302,7 @@ class CummNVRTCLib(pccm.Class):
         super().__init__()
         self.add_dependency(TensorView)
         self.add_include("tensorview/cuda/nvrtc.h")
-        # self.build_meta.add_cflags("nvcc", "-dc")
+        self.add_include("tensorview/gemm/core/nvrtc_bases.h")
 
 
 class CompileInfo(pccm.Class):
@@ -354,13 +354,6 @@ class TensorViewNVRTCKernel(pccm.Class):
         self.add_dependency(TensorViewNVRTC)
         self.add_include("tensorview/cuda/device_ops.h")
         self.add_include("tensorview/gemm/debug.h")
-        # self.add_include("tensorview/gemm/dtypes/all.h")
-        # self.add_include("tensorview/gemm/core/all.h")
-        # self.add_include("tensorview/gemm/arch/memory.h")
-        # self.add_include("tensorview/gemm/arch/transpose.h")
-        # self.add_include("tensorview/gemm/arch/semaphore.h")
-        # self.add_include("tensorview/hash/all.cu.h")
-        # self.add_include("tensorview/gemm/arch/memory_sm75.h")
 
 
 class TensorViewHashKernel(pccm.Class):
@@ -379,7 +372,6 @@ class TensorViewMath(pccm.Class):
 class GemmDTypes(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_include("tensorview/gemm/core/all.h")
         self.add_include("tensorview/gemm/dtypes/all.h")
 
 
@@ -388,9 +380,16 @@ class GemmBasic(pccm.Class):
         super().__init__()
         self.add_include("cuda_runtime_api.h"
                          )  # for __global__, __host__ and other cuda attrs.
-        self.add_include("tensorview/gemm/core/all.h")
+        self.add_include("tensorview/gemm/core/constants.h")
+        self.add_include("tensorview/gemm/core/utils.h")
+        self.add_include("tensorview/gemm/core/nvrtc_params.h")
         self.add_include("tensorview/gemm/dtypes/all.h")
 
+class GemmBasicHost(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/gemm/core/params.h")
+        self.add_include("tensorview/gemm/core/nvrtc_bases.h")
 
 class GemmBasicKernel(pccm.Class):
     def __init__(self):

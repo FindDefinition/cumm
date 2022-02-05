@@ -27,12 +27,12 @@ from pccm.core import CodeFormatter
 # from myclang import clangformat
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import CummNVRTCLib, GemmBasic, TensorView, TensorViewKernel
+from cumm.common import CummNVRTCLib, GemmBasic, GemmBasicHost, TensorView, TensorViewKernel
 from cumm.constants import CUMM_MAXIMUM_NVRTC_CONV_NDIM, CUTLASS_MODE
 from cumm.conv import kernel
-from cumm.conv.bases import (NCHW, NHWC, ConvEnum, ConvIterAlgo, ConvLayout,
+from cumm.conv.bases import (NCHW, NHWC, ConvIterAlgo, ConvLayout,
                              ConvLayoutType, ConvMode, ConvOpType)
-from cumm.conv.params import (ConvProblem, ConvProblemCommon,
+from cumm.conv.params import (ConvProblem,
                               conv_iwo_012_to_abc, gemm_abc_012_to_iwo,
                               get_gemm_trans_abc)
 from cumm.core_cc.csrc.arrayref import ArrayPtr
@@ -40,304 +40,10 @@ from cumm.gemm import codeops
 from cumm.gemm.algospec import GemmAlgo
 from cumm.gemm.algospec.core import TensorOpParams
 from cumm.gemm.core.metaarray import MetaArray
-from cumm.gemm.kernel import GemmKernel, GemmUtilsCPU
-from cumm.gemm.main import (GemmAlgoDesp, GemmAlgoParams, GemmMainUnitTest,
-                            GemmParams, NVRTCMode, NVRTCParams)
-
-
-class ConvAlgoDesp(GemmAlgoDesp):
-    def __init__(self):
-        super().__init__()
-        self.add_dependency(kernel.ConvUtils)
-        self.add_pybind_member("ndim", "int")
-        self.add_pybind_member("op_type", "int")
-        self.add_pybind_member("iter_algo", "int")
-        self.add_pybind_member("layout_i, layout_w, layout_o", "int")
-        self.add_pybind_member("interleave_i, interleave_w, interleave_o",
-                               "int")
-        self.add_pybind_member("mask_sparse", "bool", "false")
-        self.add_pybind_member("increment_k_first", "bool", "false")
-
-        self.add_member("conv2gemm_inds", "std::array<int, 3>")
-        self.add_member("gemm2conv_inds", "std::array<int, 3>")
-
-    @pccm.pybind.mark
-    @pccm.constructor
-    def default_ctor(self):
-        code = pccm.code()
-        code.arg("ndim", "int")
-        code.arg("op_type", "int")
-        code.ctor_init("GemmAlgoDesp", "")
-        code.ctor_init("ndim", "ndim")
-        code.ctor_init("op_type", f"op_type")
-        code.ctor_init("iter_algo", f"{ConvIterAlgo.Optimized.value}")
-        code.ctor_init("layout_i", f"{ConvLayoutType.ChannelLast.value}")
-        code.ctor_init("layout_w", f"{ConvLayoutType.ChannelLast.value}")
-        code.ctor_init("layout_o", f"{ConvLayoutType.ChannelLast.value}")
-        code.ctor_init("interleave_i", f"1")
-        code.ctor_init("interleave_w", f"1")
-        code.ctor_init("interleave_o", f"1")
-        code.ctor_init("conv2gemm_inds", f"conv_iwo_012_to_abc(op_type)")
-        code.ctor_init("gemm2conv_inds", f"gemm_abc_012_to_iwo(op_type)")
-        return code
-
-    @pccm.pybind.mark
-    @pccm.member_function(name="__repr__")
-    def repr(self):
-        code = pccm.code()
-        code.raw(f"""
-        check_valid();
-        std::stringstream ss;
-        ss << GemmAlgoDesp::__repr__();
-        ss << "_C" << ndim << "_" << op_type << iter_algo;
-        std::string layout_i_str = layout_i == {ConvLayoutType.ChannelFirst.value} ? "F" : "L";
-        std::string layout_w_str = layout_w == {ConvLayoutType.ChannelFirst.value} ? "F" : "L";
-        std::string layout_o_str = layout_o == {ConvLayoutType.ChannelFirst.value} ? "F" : "L";
-        if (interleave_i > 1){{
-            layout_i_str += std::to_string(interleave_i);
-        }}
-        if (interleave_w > 1){{
-            layout_w_str += std::to_string(interleave_w);
-        }}
-        if (interleave_o > 1){{
-            layout_o_str += std::to_string(interleave_o);
-        }}
-
-        ss << layout_i_str << layout_w_str << layout_o_str;
-        if (mask_sparse){{
-            ss << "_" << increment_k_first ? "SF" : "SK";
-        }}
-        return ss.str();
-        """)
-        return code.ret("std::string")
-
-    @pccm.pybind.mark
-    @pccm.static_function
-    def conv_iwo_012_to_abc(self):
-        code = pccm.code()
-        code.arg("op_type", "int")
-        code.raw(f"""
-        if (op_type == {ConvOpType.kForward.value}){{
-            return {{0, 1, 2}};
-        }}
-        if (op_type == {ConvOpType.kBackwardInput.value}){{
-            return {{2, 1, 0}};
-        }}
-        if (op_type == {ConvOpType.kBackwardWeight.value}){{
-            return {{1, 2, 0}};
-        }}
-        TV_THROW_RT_ERR("unknown op type",op_type);
-        """)
-        return code.ret("std::array<int, 3>")
-
-    @pccm.pybind.mark
-    @pccm.static_function
-    def gemm_abc_012_to_iwo(self):
-        code = pccm.code()
-        code.arg("op_type", "int")
-        code.raw(f"""
-        if (op_type == {ConvOpType.kForward.value}){{
-            return {{0, 1, 2}};
-        }}
-        if (op_type == {ConvOpType.kBackwardInput.value}){{
-            return {{2, 1, 0}};
-        }}
-        if (op_type == {ConvOpType.kBackwardWeight.value}){{
-            return {{2, 0, 1}};
-        }}
-        TV_THROW_RT_ERR("unknown op type",op_type);
-        """)
-        return code.ret("std::array<int, 3>")
-
-    @pccm.pybind.mark_prop_getter(prop_name="dtype_input")
-    @pccm.member_function
-    def dtype_input(self):
-        code = pccm.code()
-        code.raw(f"""
-        std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
-        return dtypes[conv2gemm_inds[0]];
-        """)
-        return code.ret("int")
-
-    @pccm.pybind.mark_prop_getter(prop_name="dtype_weight")
-    @pccm.member_function
-    def dtype_weight(self):
-        code = pccm.code()
-        code.raw(f"""
-        std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
-        return dtypes[conv2gemm_inds[1]];
-        """)
-        return code.ret("int")
-
-    @pccm.pybind.mark_prop_getter(prop_name="dtype_output")
-    @pccm.member_function
-    def dtype_output(self):
-        code = pccm.code()
-        code.raw(f"""
-        std::array<int, 3> dtypes{{dtype_a, dtype_b, dtype_c}};
-        return dtypes[conv2gemm_inds[2]];
-        """)
-        return code.ret("int")
-
-    @pccm.pybind.mark
-    @pccm.member_function
-    def supported(self):
-        code = pccm.code()
-        code.arg("m,n,k, C, K, mask_width", "int")
-        code.raw(f"""
-        bool res = GemmAlgoDesp::supported(m, n, k);
-        if (mask_sparse){{
-            if (op_type == {ConvOpType.kForward.value}){{
-                // NC -> NRSC @ KRSC
-                res &= C % element_per_access_a == 0;
-            }}else if (op_type == {ConvOpType.kBackwardInput.value}){{
-                // NK -> NRSK @ KRSC -> RSKC
-                res &= K % element_per_access_a == 0;
-            }}else{{
-                // NK @ NC -> NRSC
-                // we must ensure every k iteration only have one mask (from forward),
-                res &= mask_width % tile_shape[2] == 0;
-                res &= K % element_per_access_a == 0;
-                res &= C % element_per_access_b == 0;
-            }}
-        }}
-        return res;
-        """)
-        return code.ret("bool")
-
-    @pccm.pybind.mark
-    @pccm.member_function
-    def query_conv_workspace_size(self):
-        code = pccm.code()
-        code.arg("m,n,k,split_k_slices,kv", "int")
-        code.raw(f"""
-        if (!mask_sparse){{
-            return query_workspace_size(m, n, k, split_k_slices);
-        }}
-        auto logical_tile_count = ConvUtils::get_spconv_logical_tile_count(m, n, k, 
-            tile_shape[0], tile_shape[1], split_k_slices, kv, op_type);
-        int workspace_size = 0;
-        if (split_k_slices > 1){{
-            if (split_k_serial()){{
-                workspace_size = sizeof(int) * logical_tile_count[0] * logical_tile_count[1];
-            }} else if (split_k_parallel()){{
-                workspace_size = tv::detail::sizeof_dtype(tv::DType(dacc)) * m * n * logical_tile_count[2];
-            }} else{{
-                TV_THROW_INVALID_ARG("not impemented");
-            }}
-        }}
-        return workspace_size;
-        """)
-        return code.ret("int")
-
-    @pccm.pybind.mark
-    @pccm.member_function
-    def supported_ldx_conv(self):
-        code = pccm.code()
-        code.arg("ldi, ldw, ldo", "int")
-        code.raw(f"""
-        bool res = true;
-        std::array<int, 3> epas{{element_per_access_a, element_per_access_b, element_per_access_c}};
-        int epa_i = epas[conv2gemm_inds[0]];
-        int epa_w = epas[conv2gemm_inds[1]];
-        int epa_o = epas[conv2gemm_inds[2]];
-
-        if (epa_i > 0){{
-            res &= ldi % epa_i == 0;
-        }}
-        if (epa_w > 0){{
-            res &= ldw % epa_w == 0;
-        }}
-        if (epa_o > 0){{
-            res &= ldo % epa_o == 0;
-        }}
-        return res;
-        """)
-        return code.ret("bool")
-
-
-class ConvParams(pccm.Class, pccm.pybind.PybindClassMixin):
-    def __init__(self):
-        super().__init__()
-        self.add_dependency(ConvAlgoDesp, CummNVRTCLib, NVRTCParams)
-        self.add_pybind_member("conv_algo_desp", "ConvAlgoDesp")
-        self.add_pybind_member("input,weight,output",
-                               "tv::Tensor",
-                               pyanno="cumm.tensorview.Tensor")
-        self.add_pybind_member("split_k_slices", "int", "1")
-        self.add_pybind_member("padding,stride,dilation", "std::vector<int>")
-        self.add_pybind_member("alpha,beta", "float")
-        self.add_pybind_member("mask_width", "int")
-        self.add_pybind_member("mask_filter", "uint32_t")
-        self.add_pybind_member("reverse_mask", "bool")
-        self.add_pybind_member("verbose", "bool")
-        self.add_pybind_member("timer",
-                               "tv::CUDAKernelTimer",
-                               "tv::CUDAKernelTimer(false)",
-                               pyanno="cumm.tensorview.CUDAKernelTimer")
-
-        self.add_pybind_member("workspace",
-                               "tv::Tensor",
-                               "tv::Tensor()",
-                               pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_pybind_member("mask",
-                               "tv::Tensor",
-                               "tv::Tensor()",
-                               pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_pybind_member("mask_argsort",
-                               "tv::Tensor",
-                               "tv::Tensor()",
-                               pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_pybind_member("indices",
-                               "tv::Tensor",
-                               "tv::Tensor()",
-                               pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_pybind_member("mask_output",
-                               "tv::Tensor",
-                               "tv::Tensor()",
-                               pyanno="cumm.tensorview.Tensor = Tensor()")
-        self.add_pybind_member("stream", "std::uintptr_t", "0", pyanno="int")
-        self.add_pybind_member("nvrtc_params", "NVRTCParams", "NVRTCParams()")
-
-    @pccm.pybind.mark
-    @pccm.static_function
-    def create_nvrtc_params(self):
-        code = pccm.code()
-        code.raw(f"""
-        return NVRTCParams();
-        """)
-        return code.ret("NVRTCParams")
-
-    @pccm.pybind.mark
-    @pccm.constructor
-    def default_ctor(self):
-        code = pccm.code()
-        code.arg("ndim", "int")
-        code.arg("op_type", "int")
-        code.arg(
-            "timer",
-            "tv::CUDAKernelTimer",
-            "tv::CUDAKernelTimer(false)",
-            pyanno="cumm.tensorview.CUDAKernelTimer = CUDAKernelTimer(False)")
-
-        code.ctor_init("conv_algo_desp", "ndim, op_type")
-        code.ctor_init("input", "tv::Tensor()")
-        code.ctor_init("weight", "tv::Tensor()")
-        code.ctor_init("output", "tv::Tensor()")
-        code.ctor_init("padding", "std::vector<int>()")
-        code.ctor_init("stride", "std::vector<int>()")
-        code.ctor_init("dilation", "std::vector<int>()")
-        code.ctor_init("alpha", "1.0")
-        code.ctor_init("beta", "0.0")
-        code.ctor_init("mask_width", "-1")
-        code.ctor_init("mask_filter", "0xffffffff")
-        code.ctor_init("reverse_mask", "false")
-        code.ctor_init("verbose", "false")
-        code.ctor_init("timer", "timer")
-
-        return code
-
-
+from cumm.gemm.kernel import GemmKernel
+from cumm.gemm.main import (GemmAlgoParams, GemmMainUnitTest,
+                            NVRTCMode)
+from cumm.conv.nvrtc_code import nvrtc_conv_template
 def seq(*vals):
     return np.array([*vals], dtype=np.int64)
 
@@ -396,14 +102,6 @@ class ConvAlgoParams(GemmAlgoParams):
             return True
 
         return super().skipped()
-
-    def get_algo_name(self):
-        res = super().get_algo_name()
-        res += f"_C{self.ndim}{self.op_type.value}{self.iter_algo.value}"
-        res += f"{self.layout_desp_input}{self.layout_desp_weight}{self.layout_desp_output}"
-        if self.mask_sparse:
-            res += "_SF" if not self.increment_k_first else "_SK"
-        return res
 
 
 def gen_gemm_params(op_types: List[ConvOpType],
@@ -509,9 +207,8 @@ SHUFFLE_TURING_PARAMS = []
 class ConvMainUnitTest(pccm.Class):
     def __init__(self, conv_params: Optional[List[ConvAlgoParams]] = None):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, ConvEnum, ConvParams,
-                            ConvProblemCommon, kernel.ConvNVRTCParams,
-                            GemmUtilsCPU, NVRTCParams)
+        self.add_dependency(TensorView, GemmBasic, GemmBasicHost, kernel.ConvNVRTCParams,
+                            CummNVRTCLib)
         # unit test params: [ts, wts, stage, dtypes, trans, algo, tensorop]
         if conv_params is None:
             is_debug = os.getenv("CUMM_DEBUG", None)
@@ -656,17 +353,17 @@ class ConvMainUnitTest(pccm.Class):
         for ndim_op_iter, ndim_op_iter_kers in ndim_op_iter_to_kers.items():
             if_tests = [
                 f"algo_desp.ndim == {ndim_op_iter[0]}",
-                f"algo_desp.op_type == {ndim_op_iter[1].value}",
-                f"algo_desp.iter_algo == {ndim_op_iter[2].value}",
+                f"static_cast<int>(algo_desp.op_type) == {ndim_op_iter[1].value}",
+                f"static_cast<int>(algo_desp.iter_algo) == {ndim_op_iter[2].value}",
             ]
             with code.if_(" && ".join(if_tests)):
                 li_lw_lo_to_kers = codeops.group_by(
                     ConvMainUnitTest._get_layout_types, ndim_op_iter_kers)
                 for li_lw_lo, lilwlo_kers in li_lw_lo_to_kers.items():
                     if_tests = [
-                        f"algo_desp.layout_i == {li_lw_lo[0].value}",
-                        f"algo_desp.layout_w == {li_lw_lo[1].value}",
-                        f"algo_desp.layout_o == {li_lw_lo[2].value}",
+                        f"static_cast<int>(algo_desp.layout_i) == {li_lw_lo[0].value}",
+                        f"static_cast<int>(algo_desp.layout_w) == {li_lw_lo[1].value}",
+                        f"static_cast<int>(algo_desp.layout_o) == {li_lw_lo[2].value}",
                     ]
                     with code.if_(" && ".join(if_tests)):
                         lii_lwi_loi_to_kers = codeops.group_by(
@@ -711,8 +408,8 @@ class ConvMainUnitTest(pccm.Class):
         code.arg("kernel_volume, in_prod, out_prod", "int")
         code.arg("mask_sparse", "bool")
         code.raw(f"""
-        auto op_type_enum = static_cast<ConvEnum::OpType>(op_type);
-        auto res = ConvProblemCommon::implicit_gemm_mnk(op_type_enum, N, C, K, 
+        auto op_type_enum = static_cast<tv::gemm::ConvOpType>(op_type);
+        auto res = tv::gemm::implicit_gemm_mnk(op_type_enum, N, C, K, 
             kernel_volume, in_prod, out_prod, mask_sparse);
         return {{res[0], res[1], res[2]}};
         """)
@@ -727,264 +424,10 @@ class ConvMainUnitTest(pccm.Class):
                                  "ConvParams" + ker.get_algo_name())
             code.add_param_class(ker.get_algo_name(), ker,
                                  "Conv" + ker.get_algo_name())
-        code.arg("params", "ConvParams", pyanno="ConvParams")
+        code.arg("params", "tv::gemm::ConvParams", pyanno="cumm.tensorview.gemm.ConvParams")
         code.add_dependency(TensorViewKernel)
         ch_first = ConvLayoutType.ChannelFirst.value
-        code.raw(f"""
-        // auto rtxtimer = tv::CPUTimer<>();
-        int groups = 1;
-        bool found = false;
-        auto& algo_desp = params.conv_algo_desp;
-        auto dacc = tv::DType(algo_desp.dacc);
-        auto dcomp = tv::DType(algo_desp.dcomp);
-        ConvEnum::IterAlgo iter_algo = static_cast<ConvEnum::IterAlgo>(algo_desp.iter_algo);
-        ConvEnum::OpType op_type = static_cast<ConvEnum::OpType>(algo_desp.op_type);
-        ConvEnum::LayoutType i_ltype = static_cast<ConvEnum::LayoutType>(algo_desp.layout_i);
-        ConvEnum::LayoutType w_ltype = static_cast<ConvEnum::LayoutType>(algo_desp.layout_w);
-        ConvEnum::LayoutType o_ltype = static_cast<ConvEnum::LayoutType>(algo_desp.layout_o);
-
-        int split_k_slices = params.split_k_slices;
-        auto workspace = params.workspace;
-        auto input = params.input;
-        auto weight = params.weight;
-        auto output = params.output;
-
-        auto indices = params.indices;
-        auto mask = params.mask;
-        auto mask_argsort = params.mask_argsort;
-        auto mask_output = params.mask_output;
-        auto padding = params.padding;
-        auto stride = params.stride;
-        auto dilation = params.dilation;
-        auto mask_width = params.mask_width;
-        auto evtimer = params.timer;
-        int io_dim = algo_desp.mask_sparse ? 2 : algo_desp.ndim + 2;
-        int weight_ndim = algo_desp.mask_sparse ? 3 : algo_desp.ndim + 2;
-        int dim_start =  algo_desp.layout_w == {ch_first} ? 2 : 1;
-        int ndim = algo_desp.ndim;
-        TV_ASSERT_RT_ERR(input.ndim() == io_dim, "error");
-        TV_ASSERT_RT_ERR(weight.ndim() == weight_ndim, "error");
-        TV_ASSERT_RT_ERR(output.ndim() == io_dim, "error");
-        if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) and split_k_slices > 1){{
-            TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
-        }}
-        int kernel_volume = 1;
-        int N = input.dim(0);
-        int K = weight.dim(0);
-        int C = algo_desp.layout_i == {ch_first} ? input.dim(1) : input.dim(io_dim - 1);
-        int K2 = algo_desp.layout_o == {ch_first} ? output.dim(1) : output.dim(io_dim - 1);
-        TV_ASSERT_RT_ERR(K2 == K, "error");
-        tv::array<int, 3> mnk;
-        auto inv_indices = ConvProblemCommon::gemm_abc_012_to_iwo(ConvEnum::OpType(algo_desp.op_type));
-        std::vector<tv::Tensor> conv_inputs{{input, weight, output}};
-        auto a_ten = conv_inputs[inv_indices[0]];
-        auto b_ten = conv_inputs[inv_indices[1]];
-        auto c_ten = conv_inputs[inv_indices[2]];
-        auto& nvrtc_params = params.nvrtc_params;
-        ConvNVRTCParams kernel_params;
-        kernel_params.ptr_A = a_ten.raw_data();
-        kernel_params.ptr_B = b_ten.raw_data();
-        kernel_params.ptr_C = c_ten.raw_data();
-        kernel_params.ptr_D = c_ten.raw_data();
-        kernel_params.alpha = params.alpha;
-        kernel_params.beta = params.beta;
-        kernel_params.ndim = ndim;
-
-        if (algo_desp.mask_sparse){{
-            if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
-                TV_ASSERT_RT_ERR(mask_width > 0 && mask_width % algo_desp.tile_shape[2] == 0, "error");
-
-            }}
-            TV_ASSERT_RT_ERR(!indices.empty(), "error");
-            TV_ASSERT_RT_ERR(!mask.empty(), "error");
-            TV_ASSERT_RT_ERR(!mask_argsort.empty(), "error");
-            kernel_volume = weight.dim(dim_start);
-            tv::check_shape(indices, {{kernel_volume, -1}});
-            N = indices.dim(1);
-            if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
-                TV_ASSERT_RT_ERR(N == output.dim(0), "error");
-                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_b) / 8 < std::numeric_limits<int32_t>::max(), 
-                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
-                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-
-            }}else if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
-                TV_ASSERT_RT_ERR(N == output.dim(0), "error");
-                TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
-                    "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-            }}else{{
-                    TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * tv::bit_size(algo_desp.dtype_a) / 8 < std::numeric_limits<int32_t>::max(), 
-                        "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
-                    TV_ASSERT_RT_ERR(N == input.dim(0), "error");
-
-            }}
-            mnk = ConvProblemCommon::implicit_gemm_mnk(ConvEnum::OpType(algo_desp.op_type), N, C, K, kernel_volume, -1, -1, true);
-        }}else{{
-            TV_ASSERT_RT_ERR(algo_desp.ndim <= {CUMM_MAXIMUM_NVRTC_CONV_NDIM}, "ndim too large");
-            tv::array<int, {CUMM_MAXIMUM_NVRTC_CONV_NDIM}> ksize, padding_arr, stride_arr, dilation_arr, input_dims, output_dims;
-            TV_ASSERT_RT_ERR(ndim == padding.size() && ndim == stride.size() && ndim == dilation.size(), "error");
-            for (int i = dim_start; i < dim_start + ndim; ++i){{
-                ksize[i - dim_start] = weight.dim(i);
-                input_dims[i - dim_start] = input.dim(i);
-                output_dims[i - dim_start] = output.dim(i);
-            }}
-            for (int i = 0; i < ndim; ++i){{
-                padding_arr[i] = padding[i];
-                stride_arr[i] = stride[i];
-                dilation_arr[i] = dilation[i];
-            }}
-            kernel_volume = 1;
-            int in_prod = 1;
-            int out_prod = 1;
-            for (int i = 0; i < ndim; ++i){{
-                kernel_volume *= ksize[i];
-                in_prod *= input_dims[i];
-                out_prod *= output_dims[i];
-            }}
-            mnk = ConvProblemCommon::implicit_gemm_mnk(ConvEnum::OpType(algo_desp.op_type), N, C, K, kernel_volume, in_prod, out_prod, false);
-            kernel_params.input_dims = input_dims;
-            kernel_params.output_dims = output_dims;
-            kernel_params.ksize = ksize;
-            kernel_params.padding = padding_arr;
-            kernel_params.stride = stride_arr;
-            kernel_params.dilation = dilation_arr;
-        }}
-        TV_ASSERT_RT_ERR(algo_desp.supported(mnk[0], mnk[1], mnk[2], C, K, mask_width), "error");
-
-        int workspace_size = algo_desp.query_conv_workspace_size(mnk[0], mnk[1], mnk[2], split_k_slices, kernel_volume);
-
-        auto ctx = tv::Context();
-        ctx.set_cuda_stream(reinterpret_cast<cudaStream_t>(params.stream));
-        if (workspace_size > 0){{
-            if (!workspace.empty()){{
-                workspace.zero_(ctx);
-                TV_ASSERT_RT_ERR(workspace.nbytes() >= workspace_size, 
-                    "workspace at least", workspace_size, "bytes.");
-            }}else{{
-                workspace = tv::empty({{workspace_size}}, tv::uint8, 0);
-                workspace.zero_(ctx);
-            }}
-        }}
-        void* workspace_ptr = nullptr;
-        if (workspace.empty()){{
-            workspace_ptr = workspace.raw_data();
-        }}
-        if (nvrtc_params.module){{
-            TV_ASSERT_RT_ERR(nvrtc_params.kernel_name != "", "you must provide name of your kernel");
-            kernel_params.N = N;
-            kernel_params.C = C;
-            kernel_params.K = K;
-            kernel_params.kernel_volume = kernel_volume;
-            kernel_params.mode = ConvEnum::Mode::kCrossCorrelation;
-            kernel_params.split_k_slices = split_k_slices;
-            kernel_params.groups = groups;
-            kernel_params.workspace = workspace_ptr;
-
-            tv::array<int, 3> grid_dims_arr;
-            if (algo_desp.mask_sparse){{
-                kernel_params.C = C;
-                kernel_params.mask_out_ptr = mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>();
-                kernel_params.mask_width = mask_width;
-                kernel_params.mask_ptr = mask.data_ptr<uint32_t>();
-                kernel_params.reverse_mask = params.reverse_mask;
-                kernel_params.mask_filter = params.mask_filter;
-                grid_dims_arr = ConvUtils::get_spconv_logical_tile_count(mnk[0], mnk[1], mnk[2], 
-                                algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices, kernel_volume, algo_desp.op_type);
-            }}else{{
-                grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(mnk[0], mnk[1], mnk[2], 
-                                algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices);
-
-            }}
-            dim3 grid_dims;
-            grid_dims.x = grid_dims_arr[0];
-            grid_dims.y = grid_dims_arr[1];
-            grid_dims.z = grid_dims_arr[2];
-            if (algo_desp.op_type == {ConvOpType.kBackwardWeight.value}){{
-                int num_reduced_mask = tv::div_up(kernel_params.N, kernel_params.mask_width);
-                TV_ASSERT_RT_ERR(mask.dim(0) >= num_reduced_mask, "error");
-            }}
-            std::string algo_name = algo_desp.__repr__();
-            auto kernel = nvrtc_params.module->kernel(nvrtc_params.kernel_name);
-            cudaStream_t stream = reinterpret_cast<cudaStream_t>(params.stream);
-            if (nvrtc_params.mode == {NVRTCMode.DynamicParallism.value}){{
-                {{
-                    tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
-                    std::vector<void*> args{{&kernel_params, &grid_dims, &params.stream}};
-                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, 1, 1, 1, 
-                        1, 1, 1, 0, stream, args.data(), 0));
-                }}
-
-            }}else if (nvrtc_params.mode == {NVRTCMode.KernelAndCPU.value}){{
-                // use kernel-cpu-kernel
-                auto init_kernel = nvrtc_params.module->kernel(nvrtc_params.init_kernel_name);
-                tv::Tensor temp_data = nvrtc_params.param_storage;
-                if (nvrtc_params.param_storage.empty()){{
-                    temp_data = tv::empty({{nvrtc_params.param_size}}, tv::uint8, 0);
-                }}else{{
-                    TV_ASSERT_RT_ERR(temp_data.nbytes() >= nvrtc_params.param_size, "your params storage too small");
-                }}
-                void* raw_data_ptr;
-                void* temp_data_ptr = temp_data.raw_data();
-                tv::Tensor temp_data_cpu = nvrtc_params.param_storage_cpu;
-
-                {{
-                    tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
-                    std::vector<void*> args{{&kernel_params, &temp_data_ptr}};
-                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
-                    if (nvrtc_params.param_storage_cpu.empty()){{
-                        temp_data_cpu = temp_data.cpu(ctx);
-                    }}else{{
-                        temp_data_cpu.copy_(temp_data, ctx);
-                    }}
-                    // we must sync here because following kernel launch requires cpu data.
-                    checkCudaErrors(cudaStreamSynchronize(stream));
-                    raw_data_ptr = temp_data_cpu.raw_data();
-                }}
-                {{
-                    tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
-                    std::vector<void*> args{{raw_data_ptr}};
-                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
-                        nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
-                }}
-            }}else if (nvrtc_params.mode == {NVRTCMode.Direct.value}){{
-                tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
-                std::vector<void*> args{{&kernel_params}};
-                TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
-                    nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
-
-            }}else if (nvrtc_params.mode == {NVRTCMode.ConstantMemory.value}){{
-                auto init_kernel = nvrtc_params.module->kernel(nvrtc_params.init_kernel_name);
-                tv::Tensor temp_data = nvrtc_params.param_storage;
-                if (nvrtc_params.param_storage.empty()){{
-                    temp_data = tv::empty({{nvrtc_params.param_size}}, tv::uint8, 0);
-                }}else{{
-                    TV_ASSERT_RT_ERR(temp_data.nbytes() >= nvrtc_params.param_size, "your params storage too small");
-                }}
-                void* temp_data_ptr = temp_data.raw_data();
-                {{
-                    tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
-                    std::vector<void*> args{{&kernel_params, &temp_data_ptr}};
-                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
-                }}
-                {{
-                    tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
-                    auto ptr = nvrtc_params.module->get_global_ptr(nvrtc_params.constant_name);
-                    auto constant_ten = tv::from_blob(ptr, {{nvrtc_params.param_size}}, tv::uint8, 0);
-                    constant_ten.copy_(temp_data, ctx);
-                    std::vector<void*> args{{}};
-                    TV_CUDA_RESULT_CHECK(nvrtc_params.module->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
-                        nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
-                }}
-
-            }}else{{
-                TV_THROW_RT_ERR("not implemented");
-            }}
-            TV_CHECK_CUDA_ERR_V2(algo_name, "error with params", input.shape(), output.shape(), weight.shape());
-            return;
-        }}
-
-        """)
-
+        nvrtc_conv_template(code)
         for kers in self.conv_select_helper(self.all_kernels, code):
             ker = kers[0]
             p = ker.problem
@@ -1028,7 +471,7 @@ class ConvMainUnitTest(pccm.Class):
                 N = indices.dim(1);
 
                 {param_cls_ns}::ConvProblem problem(N, C, K, kernel_volume, 
-                    ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
+                    tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
                 """)
                 if p.op_type == ConvOpType.kBackwardWeight:
                     code.raw(f"""
@@ -1069,7 +512,7 @@ class ConvMainUnitTest(pccm.Class):
                     TV_ASSERT_RT_ERR(output_dims_check_again[i] == output_dims[i], "error");
                 }}
                 {param_cls_ns}::ConvProblem problem(N, C, K, input_dims, output_dims, ksize, padding_arr, stride_arr, dilation_arr, 
-                    ConvEnum::Mode::kCrossCorrelation, split_k_slices, groups);
+                    tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
                 """)
             if p.mask_sparse:
                 mask_out_ptr = "mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>(), "
@@ -1160,12 +603,12 @@ class ConvMainUnitTest(pccm.Class):
     def get_all_conv_algo_desp(self):
         code = pccm.code()
         code.raw(f"""
-        std::vector<ConvAlgoDesp> desps;
+        std::vector<tv::gemm::ConvAlgoDesp> desps;
         """)
         for ker in self.all_kernels:
             code.raw("{")
             code.raw(f"""
-            ConvAlgoDesp desp({ker.problem.ndim}, {ker.problem.op_type.value});
+            tv::gemm::ConvAlgoDesp desp({ker.problem.ndim}, tv::gemm::ConvOpType({ker.problem.op_type.value}));
             desp.dtype_a = {ker.dtype_a.tv_dtype};
             desp.dtype_b = {ker.dtype_b.tv_dtype};
             desp.dtype_c = {ker.dtype_c.tv_dtype};
@@ -1189,7 +632,7 @@ class ConvMainUnitTest(pccm.Class):
             desp.algo = "{ker.algo.value}";
             desp.split_k_serial_set({pccm.boolean(ker.splitk_serial)});
             desp.split_k_parallel_set({pccm.boolean(ker.splitk_parallel)});
-            desp.shuffle_type = "{ker.shuffle_stride.value}";
+            desp.shuffle_type = static_cast<tv::gemm::ShuffleStrideType>({ker.shuffle_stride.value});
             desp.element_per_access_a = {ker.input_spec.input_iter_a.element_per_acc};
             desp.element_per_access_b = {ker.input_spec.input_iter_b.element_per_acc};
             desp.element_per_access_c = {ker.output_spec.out_iter.element_per_acc};
@@ -1197,23 +640,24 @@ class ConvMainUnitTest(pccm.Class):
 
             // Conv attrs
             desp.ndim = {ker.problem.ndim};
-            desp.op_type = {ker.problem.op_type.value};
-            desp.iter_algo = {ker.iter_algo.value};
-            desp.layout_i = {ker.problem.layout_desp_input.layout_type.value};
-            desp.layout_w = {ker.problem.layout_desp_weight.layout_type.value};
-            desp.layout_o = {ker.problem.layout_desp_output.layout_type.value};
+            desp.op_type = static_cast<tv::gemm::ConvOpType>({ker.problem.op_type.value});
+            desp.iter_algo = static_cast<tv::gemm::ConvIterAlgo>({ker.iter_algo.value});
+            desp.layout_i = static_cast<tv::gemm::ConvLayoutType>({ker.problem.layout_desp_input.layout_type.value});
+            desp.layout_w = static_cast<tv::gemm::ConvLayoutType>({ker.problem.layout_desp_weight.layout_type.value});
+            desp.layout_o = static_cast<tv::gemm::ConvLayoutType>({ker.problem.layout_desp_output.layout_type.value});
             desp.interleave_i = {ker.problem.layout_desp_input.interleave};
             desp.interleave_w = {ker.problem.layout_desp_weight.interleave};
             desp.interleave_o = {ker.problem.layout_desp_output.interleave};
             desp.mask_sparse = {pccm.boolean(ker.mask_sparse)};
             desp.increment_k_first = {pccm.boolean(ker.increment_k_first)};
+            TV_ASSERT_RT_ERR(desp.__repr__() == {ker.get_algo_name()});
             desps.push_back(desp);
             """)
             code.raw("}")
         code.raw(f"""
         return desps;
         """)
-        return code.ret("std::vector<ConvAlgoDesp>",
+        return code.ret("std::vector<tv::gemm::ConvAlgoDesp>",
                         pyanno="List[ConvAlgoDesp]")
 
     # @lineprof.lineprof_wrapper_cpp

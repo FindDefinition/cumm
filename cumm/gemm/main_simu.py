@@ -756,7 +756,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
                 dcomp=params.dtype_comp,
                 algo=params.algo.value,
                 tensorop=[0, 0, 0],
-                split_k_slice=1)
+                split_k_slices=1)
             duration = time.time() - t
             vis_res = {}
             for k, v in vis_res_per_thread.items():

@@ -29,7 +29,7 @@ from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
 from cumm.constants import CUMM_MAXIMUM_NVRTC_CONV_NDIM
 from cumm.conv import input_iters
 from cumm.conv.algospec import get_algo_spec
-from cumm.conv.bases import (LAYOUT_TYPES, ConvEnum, ConvIterAlgo,
+from cumm.conv.bases import (LAYOUT_TYPES, ConvIterAlgo,
                              ConvIterParams, ConvLayout, ConvOpType)
 from cumm.conv.params import ConvProblem
 from cumm.core_cc.csrc.arrayref import ArrayPtr
@@ -40,10 +40,10 @@ from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases
 from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
-from cumm.gemm.main import NVRTCMode
+from cumm.gemm.constants import NVRTCMode
 from cumm.gemm.outputs import Output, OutputSmemStorage
 from cumm.gemm.utils import GemmUtilsCPU
-
+from cumm.gemm.constants import NVRTCConstants
 
 def div_up(a, b):
     return (a + b - 1) // b
@@ -57,7 +57,7 @@ class ConvUtils(pccm.Class):
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def get_spconv_logical_tile_count(self):
         code = pccm.code()
-        code.arg("m,n,k,tile_m, tile_n, split_k_slice, kv, op_type", "int")
+        code.arg("m,n,k,tile_m, tile_n, split_k_slices, kv, op_type", "int")
         code.ret("tv::array<int, 3>")
         code.raw(f"""
         tv::array<int, 3> grid_dims;
@@ -74,7 +74,7 @@ class ConvUtils(pccm.Class):
             grid_dims[1] = tv::div_up(n, tile_n);
         }}
         grid_dims[0] = tv::div_up(m, tile_m);
-        grid_dims[2] = split_k_slice;
+        grid_dims[2] = split_k_slices;
         return grid_dims;
         """)
         return code
@@ -85,7 +85,6 @@ class ConvNVRTCParams(pccm.Class):
     """
     def __init__(self):
         super().__init__()
-        self.add_dependency(ConvEnum)
         self.add_member("ptr_A", f"const void*")
         self.add_member("ptr_B", f"const void*")
         self.add_member("ptr_C", f"void*")
@@ -108,7 +107,7 @@ class ConvNVRTCParams(pccm.Class):
             f"tv::array<int, {CUMM_MAXIMUM_NVRTC_CONV_NDIM}>")
         self.add_member("kernel_volume", f"int")
 
-        self.add_member("mode", f"ConvEnum::Mode")
+        self.add_member("mode", f"tv::gemm::ConvMode")
         self.add_member("split_k_slices", f"int")
         self.add_member("groups", f"int")
 
@@ -131,7 +130,7 @@ class ConvParams(pccm.ParameterizedClass):
                  mask_sparse: bool = False,
                  increment_k_first: bool = True):
         super().__init__()
-        self.add_dependency(TensorViewNVRTC, GemmBasic, ConvEnum, ConvUtils,
+        self.add_dependency(TensorViewNVRTC, GemmBasic, ConvUtils,
                             GemmUtilsCPU)
         self.ndim = problem.ndim
         self.op_type = problem.op_type
@@ -214,7 +213,7 @@ class ConvParams(pccm.ParameterizedClass):
                     D: ArrayPtr,
                     alpha: float,
                     beta: float,
-                    split_k_slice: int = 1):
+                    split_k_slices: int = 1):
         new_obj = ConvParams(self.problem, self.tile_shape, self.dtype_a,
                              self.dtype_b, self.dtype_c, self.dtype_comp,
                              self.layout_a, self.layout_b, self.layout_c,
@@ -227,7 +226,7 @@ class ConvParams(pccm.ParameterizedClass):
         k = mnk[2]
         new_obj.grid_dims.x = codeops.div_up(m, new_obj.tile_shape[0])
         new_obj.grid_dims.y = codeops.div_up(n, new_obj.tile_shape[1])
-        new_obj.grid_dims.z = split_k_slice
+        new_obj.grid_dims.z = split_k_slices
         gemm_k_iterations = problem.implicit_gemm_k_iterations_python(
             self.op_type, new_obj.tile_shape[2])
         new_obj.gemm_k_iterations = gemm_k_iterations
@@ -281,7 +280,7 @@ class ConvParams(pccm.ParameterizedClass):
 
         code.arg("alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(1)")
         code.arg("beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
-        code.arg("split_k_slice", "int", "1")
+        code.arg("split_k_slices", "int", "1")
         if self.have_workspace:
             code.arg("workspace", "void*", "nullptr")
 
@@ -342,9 +341,9 @@ class ConvParams(pccm.ParameterizedClass):
         if self.have_workspace:
             code.ctor_init("workspace", "workspace")
         optype_to_cpp = {
-            ConvOpType.kForward: "ConvEnum::OpType::kForward",
-            ConvOpType.kBackwardWeight: "ConvEnum::OpType::kBackwardWeight",
-            ConvOpType.kBackwardInput: "ConvEnum::OpType::kBackwardInput",
+            ConvOpType.kForward: "tv::gemm::ConvOpType::kForward",
+            ConvOpType.kBackwardWeight: "tv::gemm::ConvOpType::kBackwardWeight",
+            ConvOpType.kBackwardInput: "tv::gemm::ConvOpType::kBackwardInput",
         }
         code.raw(f"""
         auto mnk = problem.implicit_gemm_mnk({optype_to_cpp[self.op_type]});
@@ -362,7 +361,7 @@ class ConvParams(pccm.ParameterizedClass):
             if self.op_type == ConvOpType.kBackwardWeight:
                 # for backward weight, we need to ensure the whole block is inside only one filter offset.
                 # output is A, input is B (row major), so the block contiguous is tile_shape[1]
-                # code.raw(f"gemm_k_size_per_split = GemmUtils::get_gemm_k_size_per_split(k, split_k_slice);")
+                # code.raw(f"gemm_k_size_per_split = GemmUtils::get_gemm_k_size_per_split(k, split_k_slices);")
                 pass
                 # code.raw(
                 #     f"TV_ASSERT_RT_ERR(problem.C % {self.tile_shape[1]} == 0, \"error\");"
@@ -374,17 +373,17 @@ class ConvParams(pccm.ParameterizedClass):
                 #endif
                 """)
                 # code.raw(
-                #     f"TV_ASSERT_RT_ERR(problem.{C_or_K} % (split_k_slice * {self.tile_shape[2]}) == 0, \"error\");"
+                #     f"TV_ASSERT_RT_ERR(problem.{C_or_K} % (split_k_slices * {self.tile_shape[2]}) == 0, \"error\");"
                 # )
         if self.mask_sparse:
             code.raw(f"""
             auto grid_dims_arr = ConvUtils::get_spconv_logical_tile_count(m, n, k, 
-                {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slice, problem.kernel_volume, {self.op_type.value});
+                {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slices, problem.kernel_volume, {self.op_type.value});
             """)
         else:
             code.raw(f"""
             auto grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(m, n, k, 
-                {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slice);
+                {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slices);
             """)
         code.raw(f"""
         grid_dims.x = grid_dims_arr[0];
@@ -392,7 +391,7 @@ class ConvParams(pccm.ParameterizedClass):
         grid_dims.z = grid_dims_arr[2];
         """)
         # code.raw(f"""
-        # tv::ssprint("gemm_k_size", m, n, k, split_k_slice, gemm_k_iterations,
+        # tv::ssprint("gemm_k_size", m, n, k, split_k_slices, gemm_k_iterations,
         #     "GX", grid_dims.x, "GY", grid_dims.y, "GZ", grid_dims.z);
         # """)
         if self.mask_sparse and not self.op_type == ConvOpType.kBackwardWeight:
@@ -451,8 +450,7 @@ class ConvKernel(pccm.ParameterizedClass):
         """
         super().__init__()
         self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
-                            layout.ColumnMajor, GemmBasicKernel,
-                            ConvNVRTCParams)
+                            layout.ColumnMajor, GemmBasicKernel, GemmBasic)
         self.need_source = need_source
         self.nvrtc_mode = nvrtc_mode
         self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
@@ -560,17 +558,19 @@ class ConvKernel(pccm.ParameterizedClass):
         self.add_param_class("conv_params", self.gemm_params, "ConvParams")
         self.add_param_class("conv_params", self.gemm_params.problem,
                              "ConvProblem")
-        self.conv_param_key = "kSizeOfConvParams"
         # use constexpr int to save metadata to ptx in nvrtc.
         self.add_code_before_class(f"""
-        constexpr int {self.conv_param_key} = sizeof(ConvParams);
-        constexpr int kNumThreads = {self.num_threads};
-        constexpr int kSmemSize = {self.smem_size};
+        constexpr int {NVRTCConstants.SIZEOF_KEY} = sizeof(ConvParams);
+        constexpr int {NVRTCConstants.NUM_THREADS_KEY} = {self.num_threads};
+        constexpr int {NVRTCConstants.SMEM_KEY} = {self.smem_size};
         """)
         if self.nvrtc_mode == NVRTCMode.ConstantMemory:
             self.add_code_before_class(f"""
-            __constant__ tv::array<uint8_t, sizeof(ConvParams)> params_raw;
+            __constant__ tv::array<uint8_t, sizeof(ConvParams)> {NVRTCConstants.CONSTANT_PARAM_KEY};
             """)
+        self.nvrtc_params_name = "tv::gemm::ConvNVRTCParams"
+        if self.mask_sparse:
+            self.nvrtc_params_name = "tv::gemm::SparseConvNVRTCParams"
 
         # self.add_static_const("kSizeOfConvParams", "int", "sizeof(ConvParams)")
         # first_input_clear: for gemm, we don't need to clear frag in every input load
@@ -600,10 +600,6 @@ class ConvKernel(pccm.ParameterizedClass):
     def support_splitk(self):
         return self.splitk_serial or self.splitk_parallel
 
-    def get_sizeof_conv_param_key(self):
-        assert self.namespace is not None
-        return self.namespace + "::" + self.conv_param_key
-
     def get_algo_name(self):
         res = f"{self.algo.value}_{self.dtype_a.shortcut()}{self.dtype_b.shortcut()}{self.dtype_c.shortcut()}"
         res += f"{self.dtype_acc.shortcut()}{self.dtype_comp.shortcut()}"
@@ -613,12 +609,11 @@ class ConvKernel(pccm.ParameterizedClass):
         res += f"{las}{lbs}{lcs}"
         res += f"_m{self.tile_shape[0]}n{self.tile_shape[1]}k{self.tile_shape[2]}"
         res += f"m{self.warp_tile_shape[0]}n{self.warp_tile_shape[1]}k{self.warp_tile_shape[2]}"
+        res += f"A{self.access_per_vector}"
         if self.tensorop is not None:
             tes = self.tensorop.shape
             res += f"T{tes[0]}{tes[1]}{tes[2]}"
         res += f"_{self.num_stage}"
-        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
-            res += f"_{self.shuffle_stride.value}"
         if self.splitk_serial:
             res += "1"
         else:
@@ -627,9 +622,10 @@ class ConvKernel(pccm.ParameterizedClass):
             res += "1"
         else:
             res += "0"
+        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
+            res += f"_S{self.shuffle_stride.value}"
         res += f"_C{self.problem.ndim}{self.problem.op_type.value}{self.iter_algo.value}"
         res += f"{self.problem.layout_desp_input}{self.problem.layout_desp_weight}{self.problem.layout_desp_output}"
-        res += f"A{self.access_per_vector}"
         if self.mask_sparse:
             res += "_SF" if not self.increment_k_first else "_SK"
         return res
@@ -641,13 +637,15 @@ class ConvKernel(pccm.ParameterizedClass):
         if self.is_nvrtc:
             if self.nvrtc_mode != NVRTCMode.ConstantMemory:
                 if self.nvrtc_mode == NVRTCMode.Direct:
-                    code.arg("conv_nvrtc_params", "ConvNVRTCParams")
+
+                    code.arg("conv_nvrtc_params", self.nvrtc_params_name)
                     self._nvrtc_params_template(code, "conv_nvrtc_params")
                 else:
                     code.arg("params", "ConvParams")
             else:
                 code.raw(f"""
-                ConvParams& params = *(reinterpret_cast<ConvParams*>(params_raw.data()));
+                ConvParams& params = *(reinterpret_cast<ConvParams*>(
+                    {NVRTCConstants.CONSTANT_PARAM_KEY}.data()));
                 """)
         else:
             code.arg("params", "ConvParams")
@@ -908,11 +906,12 @@ class ConvKernel(pccm.ParameterizedClass):
                 tv::arrayops::slice<0, {ndim}>({p}.padding), 
                 tv::arrayops::slice<0, {ndim}>({p}.stride), 
                 tv::arrayops::slice<0, {ndim}>({p}.dilation), 
-                {p}.mode, {p}.split_k_slices, {p}.groups);
+                static_cast<tv::gemm::ConvMode>({p}.mode), {p}.split_k_slices, {p}.groups);
             """)
         else:
             code.raw(f"""
-            ConvProblem problem({p}.N, {p}.C, {p}.K, {p}.kernel_volume, {p}.mode, {p}.split_k_slices, {p}.groups);
+            ConvProblem problem({p}.N, {p}.C, {p}.K, {p}.kernel_volume, static_cast<tv::gemm::ConvMode>({p}.mode), 
+                {p}.split_k_slices, {p}.groups);
             """)
         args = [
             "problem",
@@ -947,7 +946,7 @@ class ConvKernel(pccm.ParameterizedClass):
 
         """
         code = pccm.code()
-        code.arg("p", "ConvNVRTCParams")
+        code.arg("p", self.nvrtc_params_name)
         if not dynamic_parallism:
             code.arg("out", "ConvParams*")
         else:

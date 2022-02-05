@@ -30,8 +30,8 @@ from cumm.conv.bases import NCHW, NHWC, ConvIterAlgo, ConvOpType
 from cumm.conv.main import ConvMainUnitTest, gen_gemm_kernels
 from cumm.conv.params import ConvProblem
 from cumm.gemm import kernel
-from cumm.gemm.main import NVRTCMode
-from cumm.nvrtc import CummNVRTCModule
+from cumm.gemm.constants import NVRTCConstants, NVRTCMode
+from cumm.nvrtc import CummNVRTCModule, get_cudadevrt_path
 
 os.environ["CUMM_DEBUG"] = "1"
 torch.backends.cuda.matmul.allow_tf32 = False
@@ -234,30 +234,34 @@ def _asdv_test_simt_python():
 def _asdv_test_simt_python_v2():
     np.random.seed(12315)
     main_cu = ConvMainUnitTest()
-    lib = pccm.builder.build_pybind([main_cu],
-                                    Path(__file__).parent / "imgemm_test",
-                                    includes=[
-                                        PACKAGE_ROOT / "include",
-                                    ],
-                                    namespace_root=PACKAGE_ROOT / "cumm",
-                                    build_dir=Path(__file__).parent / "build" /
-                                    "build_unittest_conv",
-                                    pybind_file_suffix=".cc",
-                                    verbose=True,
-                                    disable_anno=True)
+    lib_object = None 
+    use_nvrtc = True 
+    if not use_nvrtc:
+        lib = pccm.builder.build_pybind([main_cu],
+                                        Path(__file__).parent / "imgemm_test",
+                                        includes=[
+                                            PACKAGE_ROOT / "include",
+                                        ],
+                                        namespace_root=PACKAGE_ROOT / "cumm",
+                                        build_dir=Path(__file__).parent / "build" /
+                                        "build_unittest_conv",
+                                        pybind_file_suffix=".cc",
+                                        verbose=False,
+                                        disable_anno=True)
+        lib_object = lib.cumm.conv.main.ConvMainUnitTest()
 
-    lib_object = lib.cumm.conv.main.ConvMainUnitTest()
-    algo_cls = lib.cumm.conv.main.ConvAlgoDesp
-    params_cls = lib.cumm.conv.main.ConvParams
+    algo_cls = tv.gemm.ConvAlgoDesp
+    params_cls = tv.gemm.ConvParams
     a = tv.zeros([3], tv.int32, 0)
     nvrtc_mode = NVRTCMode.ConstantMemory
     for params in main_cu.all_params:
         if params.mask_sparse:
             continue
         # NCHW -> KCRS @ NCRSPQ = NKPQ
-        print(params.get_algo_name())
         ndim = params.ndim
         ker = gen_gemm_kernels(params)
+        print(ker.get_algo_name())
+
         ker_nvrtc = gen_gemm_kernels(params, nvrtc_mode=nvrtc_mode)
         ker_nvrtc.namespace = "wtf"
         t = time.time()
@@ -265,16 +269,16 @@ def _asdv_test_simt_python_v2():
         if nvrtc_mode == NVRTCMode.ConstantMemory:
             custom_names = ["&wtf::params_raw"]
         mod = CummNVRTCModule([ker_nvrtc],
-                              cudadevrt_path="",
+                              cudadevrt_path=str(get_cudadevrt_path()),
                               verbose=False,
                               custom_names=custom_names)
-        print(ker_nvrtc.get_sizeof_conv_param_key())
         # breakpoint()
         # print(mod.get_ptx())
+        print("RTC COMPILE TIME", time.time() - t)
 
         mod.load()
         print(mod.kernels)
-        print("RTC COMPILE TIME", time.time() - t)
+        print("RTC COMPILE LOAD TIME", time.time() - t)
         # breakpoint()
 
         # print("START", params.get_algo_name())
@@ -394,7 +398,7 @@ def _asdv_test_simt_python_v2():
             spk = 32
 
         t = time.time()
-        algo = algo_cls(ker.problem.ndim, ker.problem.op_type.value)
+        algo = algo_cls(ker.problem.ndim, tv.gemm.ConvOpType(ker.problem.op_type.value))
         algo.tile_shape = params.ts
         algo.warp_tile_shape = params.wts
         algo.num_stage = params.num_stage
@@ -414,7 +418,8 @@ def _asdv_test_simt_python_v2():
 
         if params.tensorop is not None:
             algo.tensorop = params.tensorop.shape
-        params_cpp = params_cls(ker.problem.ndim, ker.problem.op_type.value)
+        assert str(algo) == ker.get_algo_name()
+        params_cpp = params_cls(ker.problem.ndim, tv.gemm.ConvOpType(ker.problem.op_type.value))
         params_cpp.conv_algo_desp = algo
         params_cpp.split_k_slices = spk
         params_cpp.input = inp_tv
@@ -426,24 +431,24 @@ def _asdv_test_simt_python_v2():
 
         params_cpp.beta = 0.0
         use_dyn_parallel = False
-        nvrtc_params = params_cls.create_nvrtc_params()
-        nvrtc_params.module = mod.get_cpp_object()
+        nvrtc_params = tv.gemm.NVRTCParams()
+        # breakpoint()
+        nvrtc_params.cumodule = mod.get_cpp_object()
         nvrtc_params.mode = nvrtc_mode.value
+        nvrtc_params.num_threads = ker.num_threads
+        nvrtc_params.smem_size = ker.smem_size
+
         if nvrtc_mode == NVRTCMode.DynamicParallism:
             nvrtc_params.kernel_name = mod.get_lowered_name(
                 "wtf::nvrtc_kernel")
-            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
-            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
 
         elif nvrtc_mode == NVRTCMode.KernelAndCPU:
             nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
             nvrtc_params.init_kernel_name = mod.get_lowered_name(
                 "wtf::nvrtc_kernel_cpu_out")
             nvrtc_params.param_size = mod.const_values[
-                "wtf::kSizeOfConvParams"]
+                f"wtf::{NVRTCConstants.SIZEOF_KEY}"]
 
-            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
-            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
             nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
                                                   tv.uint8, 0)
             nvrtc_params.param_storage_cpu = tv.empty(
@@ -451,17 +456,15 @@ def _asdv_test_simt_python_v2():
 
         elif nvrtc_mode == NVRTCMode.Direct:
             nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
-            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
-            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
         elif nvrtc_mode == NVRTCMode.ConstantMemory:
             nvrtc_params.kernel_name = mod.get_lowered_name("wtf::conv_kernel")
+            print(nvrtc_params.kernel_name)
+            print(mod.get_kernel_attrs(nvrtc_params.kernel_name))
+
             nvrtc_params.init_kernel_name = mod.get_lowered_name(
                 "wtf::nvrtc_kernel_cpu_out")
             nvrtc_params.param_size = mod.const_values[
-                "wtf::kSizeOfConvParams"]
-
-            nvrtc_params.num_threads = mod.const_values["wtf::kNumThreads"]
-            nvrtc_params.smem_size = mod.const_values["wtf::kSmemSize"]
+                f"wtf::{NVRTCConstants.SIZEOF_KEY}"]
             nvrtc_params.constant_name = mod.get_lowered_name(
                 "&wtf::params_raw")
             nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
@@ -470,13 +473,17 @@ def _asdv_test_simt_python_v2():
         else:
             raise NotImplementedError
         kt = tv.KernelTimer()
-        params_cpp.timer = kt._timer
-        params_cpp.nvrtc_params = nvrtc_params
+        params_cpp.timer = kt.get_cpp_object()
+        if lib_object is None :
+            params_cpp.nvrtc_params = nvrtc_params
 
         # print("CUDA PREPARED")
         for i in range(1):
-            lib_object.implicit_gemm2(params_cpp)  # type: tv.Tensor
-
+            if lib_object is not None :
+                lib_object.implicit_gemm2(params_cpp)  # type: tv.Tensor
+            else:
+                with tv.measure_and_print():
+                    tv.gemm.run_nvrtc_conv_kernel(params_cpp)
             # print(time.time() - t)
             if i != 9:
                 t = time.time()
@@ -488,7 +495,7 @@ def _asdv_test_simt_python_v2():
                 output_cpu = output_cpu.astype(np.float32)
             duration = time.time() - t
             print(output_cpu.reshape(-1)[:10], out_ref_nhwc.reshape(-1)[:10])
-            print(params.get_algo_name(),
+            print(ker.get_algo_name(),
                   np.linalg.norm(out_ref_nhwc - output_cpu), "Time=",
                   op_duration)
         elif params.op_type == ConvOpType.kBackwardInput:
@@ -496,13 +503,13 @@ def _asdv_test_simt_python_v2():
             din_cpu = inp_tv.cpu().numpy()
             duration = time.time() - t
             print(din_cpu.reshape(-1)[:10], din_ref_nhwc.reshape(-1)[:10])
-            print(params.get_algo_name(),
+            print(ker.get_algo_name(),
                   np.linalg.norm(din_cpu - din_ref_nhwc), "Time=", op_duration)
         else:
             dw_cpu = weight_tv.cpu().numpy()
             duration = time.time() - t
             print(dw_cpu.reshape(-1)[:10], dw_ref_nhwc.reshape(-1)[:10])
-            print(params.get_algo_name(), np.linalg.norm(dw_cpu - dw_ref_nhwc),
+            print(ker.get_algo_name(), np.linalg.norm(dw_cpu - dw_ref_nhwc),
                   "Time=", op_duration)
 
 

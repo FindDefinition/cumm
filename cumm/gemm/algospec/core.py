@@ -60,11 +60,11 @@ def get_available_algo_str_from_arch(arch: Tuple[int, int]):
 
 
 class ShuffleStrideType(enum.Enum):
-    NoShuffle = "NS"
+    NoShuffle = 0
     # A and C have indices, for spatial spconv forward and backward input
-    ShuffleAC = "SAC"
+    ShuffleAC = 1
     # A and B have indices, for spatial spconv backward weight
-    ShuffleAB = "SAB"
+    ShuffleAB = 2
 
 
 class TensorOpParams(object):

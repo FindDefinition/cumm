@@ -9,7 +9,7 @@ from pccm.targets.cuda_ptx import RegDType
 from cumm import dtypes
 from cumm.common import GemmBasic, GemmBasicKernel, TensorView, TensorViewMath
 from cumm.conv import bases, params
-from cumm.conv.bases import LAYOUT_TYPES, ConvEnum, ConvMode, ConvOpType
+from cumm.conv.bases import LAYOUT_TYPES, ConvMode, ConvOpType
 from cumm.gemm import codeops, constants, layout, thread_map
 from cumm.gemm.arch.memory import GlobalLoad
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq

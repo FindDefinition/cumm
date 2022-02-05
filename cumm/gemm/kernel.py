@@ -33,10 +33,11 @@ from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases, get_algo_spec
 from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.constants import NVRTCMode
 from cumm.gemm.outputs import Output, OutputSmemStorage
 from cumm.gemm.utils import GemmUtils, GemmUtilsCPU
 from cumm.gemm.wmma.simt import WarpMmaSimt
-
+from cumm.gemm.constants import NVRTCConstants
 
 def div_up(a, b):
     return (a + b - 1) // b
@@ -62,7 +63,7 @@ class GemmNVRTCParams(pccm.Class):
         self.add_member("IndiceBorC", f"const int*")
 
         self.add_member("alpha, beta", f"float")
-        self.add_member("split_k_slice", f"int")
+        self.add_member("split_k_slices", f"int")
         self.add_member("workspace", "void*")
 
 
@@ -165,14 +166,14 @@ class GemmParams(pccm.ParameterizedClass):
                     D: ArrayPtr,
                     alpha: float,
                     beta: float,
-                    split_k_slice: int = 1):
+                    split_k_slices: int = 1):
         new_obj = GemmParams(self.tile_shape, self.dtype_a, self.dtype_b,
                              self.dtype_c, self.dtype_comp, self.trans_a,
                              self.trans_b, self.trans_c, self.itera_params,
                              self.iterb_params, self.out_params)
         new_obj.grid_dims.x = mask_iters.div_up(m, new_obj.tile_shape[0])
         new_obj.grid_dims.y = mask_iters.div_up(n, new_obj.tile_shape[1])
-        new_obj.grid_dims.z = split_k_slice
+        new_obj.grid_dims.z = split_k_slices
 
         total_gemm_k_iterations = mask_iters.div_up(k, new_obj.tile_shape[2])
         gemm_k_iterations = mask_iters.div_up(total_gemm_k_iterations,
@@ -217,7 +218,7 @@ class GemmParams(pccm.ParameterizedClass):
             """)
         else:
             code.raw(f"""
-            auto grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(m, n, k, {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slice);
+            auto grid_dims_arr = GemmUtilsCPU::get_logical_tile_count(m, n, k, {self.tile_shape[0]}, {self.tile_shape[1]}, split_k_slices);
             grid_dims.x = grid_dims_arr[0];
             grid_dims.y = grid_dims_arr[1];
             grid_dims.z = grid_dims_arr[2];
@@ -227,7 +228,7 @@ class GemmParams(pccm.ParameterizedClass):
         // int gemm_k_iterations_per_split =
         //     tv::div_up(total_gemm_k_iterations, int(grid_dims.z)); // 10, 4 = 3
         // gemm_k_size_per_split = gemm_k_iterations_per_split * {self.tile_shape[2]}; // 3 * 16 = 48, 0-48, 48-96, 96-144, 144-192
-        gemm_k_size_per_split = GemmUtils::get_gemm_k_size_per_split(k, split_k_slice);
+        gemm_k_size_per_split = GemmUtils::get_gemm_k_size_per_split(k, split_k_slices);
         // tv::ssprint("gemm_k_size_per_split", m, n, k, gemm_k_size_per_split, grid_dims.x, grid_dims.y, grid_dims.z);
         """)
         # if CUTLASS_INPUT_ITER:
@@ -322,7 +323,7 @@ class GemmParams(pccm.ParameterizedClass):
 
         code.arg("alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(1)")
         code.arg("beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
-        code.arg("split_k_slice", "int", "1")
+        code.arg("split_k_slices", "int", "1")
         if self.have_workspace:
             code.arg("workspace", "void*", "nullptr")
         code.ctor_init("m", "m")
@@ -365,7 +366,7 @@ class GemmKernel(pccm.ParameterizedClass):
             need_source: bool = True,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
             access_per_vector: int = 1,
-            is_nvrtc: bool = False):
+            nvrtc_mode: NVRTCMode = NVRTCMode.Disabled):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -385,7 +386,9 @@ class GemmKernel(pccm.ParameterizedClass):
         self.splitk_parallel = splitk_parallel
         self.need_source = need_source
         self.access_per_vector = access_per_vector
-        self.is_nvrtc = is_nvrtc
+        self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
+        self.nvrtc_mode = nvrtc_mode
+
         transpose_gemm = trans_c
         if transpose_gemm:
             self.dtype_a = dtype_b
@@ -468,6 +471,15 @@ class GemmKernel(pccm.ParameterizedClass):
                                       have_workspace, shuffle_stride)
         self.add_dependency(GemmNVRTCParams)
         self.add_param_class("gemm_params", self.gemm_params, "GemmParams")
+        self.add_code_before_class(f"""
+        constexpr int {NVRTCConstants.SIZEOF_KEY} = sizeof(GemmParams);
+        constexpr int {NVRTCConstants.NUM_THREADS_KEY} = {self.num_threads};
+        constexpr int {NVRTCConstants.SMEM_KEY} = {self.smem_size};
+        """)
+        if self.nvrtc_mode == NVRTCMode.ConstantMemory:
+            self.add_code_before_class(f"""
+            __constant__ tv::array<uint8_t, sizeof(GemmParams)> {NVRTCConstants.CONSTANT_PARAM_KEY};
+            """)
 
         self.cutlass_smem_a_type = ("Mma::SmemIteratorA")
         self.cutlass_smem_b_type = ("Mma::SmemIteratorB")
@@ -496,12 +508,11 @@ class GemmKernel(pccm.ParameterizedClass):
         res += f"{las}{lbs}{lcs}"
         res += f"_m{self.tile_shape[0]}n{self.tile_shape[1]}k{self.tile_shape[2]}"
         res += f"m{self.warp_tile_shape[0]}n{self.warp_tile_shape[1]}k{self.warp_tile_shape[2]}"
+        res += f"A{self.access_per_vector}"
         if self.tensorop is not None:
             tes = self.tensorop.shape
             res += f"T{tes[0]}{tes[1]}{tes[2]}"
         res += f"_{self.num_stage}"
-        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
-            res += f"_{self.shuffle_stride.value}"
         if self.splitk_serial:
             res += "1"
         else:
@@ -510,6 +521,8 @@ class GemmKernel(pccm.ParameterizedClass):
             res += "1"
         else:
             res += "0"
+        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
+            res += f"_S{self.shuffle_stride.value}"
         return res
 
     def support_splitk(self):
@@ -518,8 +531,18 @@ class GemmKernel(pccm.ParameterizedClass):
     @pccm.cuda.cuda_global_function  # (inline=True)
     def gemm_kernel(self):
         code = pccm.code()
-        if CUTLASS_MODE:
-            code.arg("params", "CutlassGemm::GemmKernel::Params")
+        if self.is_nvrtc:
+            if self.nvrtc_mode != NVRTCMode.ConstantMemory:
+                if self.nvrtc_mode == NVRTCMode.Direct:
+                    code.arg("gemm_nvrtc_params", "GemmNVRTCParams")
+                    self._nvrtc_params_template(code, "gemm_nvrtc_params")
+                else:
+                    code.arg("params", "GemmParams")
+            else:
+                code.raw(f"""
+                GemmParams& params = *(reinterpret_cast<GemmParams*>(
+                    {NVRTCConstants.CONSTANT_PARAM_KEY}.data()));
+                """)
         else:
             code.arg("params", "GemmParams")
         min_arch = get_min_arch_of_algo(self.algo)
@@ -833,42 +856,74 @@ class GemmKernel(pccm.ParameterizedClass):
         code.macro_endif_()
         return code
 
-    @pccm.cuda.cuda_global_function
-    def nvrtc_kernel(self):
+    def _nvrtc_params_template(self,
+                               code: pccm.FunctionCode,
+                               param_name: str = "p"):
+        p = param_name
+        args = [
+            f"{p}.m, {p}.n, {p}.k",
+            f"reinterpret_cast<const {self.dtype_a}*>({p}.ptr_A)",
+            f"reinterpret_cast<const {self.dtype_b}*>({p}.ptr_B)",
+            f"reinterpret_cast<{self.dtype_c}*>({p}.ptr_C)",
+            f"reinterpret_cast<const {self.dtype_c}*>({p}.ptr_D)",
+            f"{p}.stride_A, {p}.stride_B, {p}.stride_C, {p}.stride_D", 
+        ]
+        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
+            args.extend(f"{p}.IndiceA, {p}.IndiceBorC")
+        args.extend([ 
+            f"{self.dtype_comp}({p}.alpha), {self.dtype_comp}({p}.beta)",
+            f"{p}.split_k_slices"
+        ])
+        if self.have_workspace:
+            args.extend(f"{p}.workspace")
+        code.raw(f"""
+        GemmParams params({", ".join(args)});
+        """)
+
+    def nvrtc_kernel_template(self, dynamic_parallism: bool = True):
         """we must use dynamic parallism first to calculate
         some kernel meta data, then launch regular kernel.
 
         """
         code = pccm.code()
-        if not self.is_nvrtc:
-            # kernel in kernel requires device linking, which isn't supported
-            # by pccm currently.
-            return code.make_invalid()
-        # return code.make_invalid()
-
         code.arg("p", "GemmNVRTCParams")
-        code.arg("blocks", "dim3")
-        code.arg("stream", "cudaStream_t")
-        indice_args = ""
-        if self.shuffle_stride != ShuffleStrideType.NoShuffle:
-            indice_args = "p.IndiceA, p.IndiceBorC, "
-        workspace_arg = ""
-        if self.have_workspace:
-            workspace_arg = ", p.workspace"
+        if not dynamic_parallism:
+            code.arg("out", "GemmParams*")
+        else:
+            code.arg("blocks", "dim3")
+            code.arg("stream", "cudaStream_t")
 
-        code.raw(f"""
-        GemmParams params(p.m, p.n, p.k, 
-            reinterpret_cast<const {self.dtype_a}*>(p.ptr_A),
-            reinterpret_cast<const {self.dtype_b}*>(p.ptr_B),
-            reinterpret_cast<{self.dtype_c}*>(p.ptr_C),
-            reinterpret_cast<const {self.dtype_c}*>(p.ptr_D),
-            p.stride_A, p.stride_B, p.stride_C, p.stride_D, {indice_args}
-            {self.dtype_comp}(p.alpha), {self.dtype_comp}(p.beta),
-            p.split_k_slice {workspace_arg});
+        self._nvrtc_params_template(code)
+        if dynamic_parallism:
+            code.raw(f"""
+            gemm_kernel<<<blocks, dim3({self.num_threads}), {self.smem_size}, stream>>>(params);
+            """)
+        else:
+            code.raw(f"""
+            out[0] = params;
+            """)
 
-        gemm_kernel<<<blocks, dim3({self.num_threads}), {self.smem_size}, stream>>>(params);
-        """)
         return code
+
+    @pccm.cuda.cuda_global_function
+    def nvrtc_kernel(self):
+        """we use dynamic parallism first to calculate
+        some kernel meta data, then launch regular kernel.
+        """
+        res = self.nvrtc_kernel_template(True)
+        if self.nvrtc_mode != NVRTCMode.DynamicParallism:
+            return res.make_invalid()
+        return res
+
+    @pccm.cuda.cuda_global_function
+    def nvrtc_kernel_cpu_out(self):
+        """we use a kernel to calculate metadata, then copy to
+        cpu, finally use that parameter to launch gemm kernel.
+        """
+        res = self.nvrtc_kernel_template(False)
+        if self.nvrtc_mode != NVRTCMode.ConstantMemory and self.nvrtc_mode != NVRTCMode.KernelAndCPU:
+            return res.make_invalid()
+        return res
 
     # @lineprof.lineprof_wrapper
     async def gemm_kernel_python(self, params: GemmParams):

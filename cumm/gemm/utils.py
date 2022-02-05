@@ -26,13 +26,13 @@ class GemmUtilsCPU(pccm.Class):
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def get_logical_tile_count(self):
         code = pccm.code()
-        code.arg("m,n,k,tile_m, tile_n, split_k_slice", "int")
+        code.arg("m,n,k,tile_m, tile_n, split_k_slices", "int")
         code.ret("tv::array<int, 3>")
         code.raw(f"""
         tv::array<int, 3> grid_dims;
         grid_dims[0] = tv::div_up(m, tile_m);
         grid_dims[1] = tv::div_up(n, tile_n);
-        grid_dims[2] = split_k_slice;
+        grid_dims[2] = split_k_slices;
         return grid_dims;
         """)
         return code

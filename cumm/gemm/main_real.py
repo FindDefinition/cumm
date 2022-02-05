@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from cumm.gemm.constants import NVRTCConstants
+
 os.environ["CUMM_DEBUG"] = "1"
 # _cudart = ctypes.CDLL('libcudart.so')
 
@@ -37,7 +39,7 @@ from cumm import tensorview as tv
 from cumm.gemm import kernel
 from cumm.gemm.algospec.core import ShuffleStrideType
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
-from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
+from cumm.gemm.main import GemmMainUnitTest, NVRTCMode, gen_gemm_kernels
 
 # def cu_prof_start():
 #     ret = _cudart.cudaProfilerStart()
@@ -62,6 +64,7 @@ def build_gemm_lib(cus: List[pccm.Class]):
                                     pybind_file_suffix=".cc",
                                     verbose=False,
                                     disable_anno=True,
+                                    global_header_only=False,
                                     std="c++17")
 
     return lib
@@ -453,24 +456,34 @@ from cumm.nvrtc import CummNVRTCModule
 
 def _asdv_test_regular_gemm():
     np.random.seed(12315)
+    lib_object = None 
+    use_nvrtc = True 
     with cudasim.enter_debug_context(True, 3):
         main_cu = GemmMainUnitTest()
         main_cu.namespace = "cumm.gemm.main"
+
+    if not use_nvrtc:
         lib = build_gemm_lib([main_cu])
-    lib_object = lib.cumm.gemm.main.GemmMainUnitTest()
-    params_cls = lib.cumm.gemm.main.GemmParams
-    algo_cls = lib.cumm.gemm.main.GemmAlgoDesp
+        lib_object = lib.cumm.gemm.main.GemmMainUnitTest()
+    params_cls = tv.gemm.GemmParams
+    algo_cls = tv.gemm.GemmAlgoDesp
+    nvrtc_mode = NVRTCMode.ConstantMemory
     a = tv.zeros([3], tv.int32, 0)
     for params in main_cu.all_params:
         if params.shuffle_stride != ShuffleStrideType.NoShuffle:
             continue
-        ker = gen_gemm_kernels(params, is_nvrtc=True)
+        ker = gen_gemm_kernels(params, nvrtc_mode=nvrtc_mode)
         ker.namespace = "wtf"
         t = time.time()
+        custom_names = []
+        if nvrtc_mode == NVRTCMode.ConstantMemory:
+            custom_names = [f"&wtf::{NVRTCConstants.CONSTANT_PARAM_KEY}"]
+
         mod = CummNVRTCModule(
             [ker],
             cudadevrt_path="/usr/local/cuda-11.4/lib64/libcudadevrt.a",
-            verbose=False)
+            verbose=False,
+            custom_names=custom_names)
         # print(mod.get_ptx())
 
         mod.load()
@@ -542,29 +555,48 @@ def _asdv_test_regular_gemm():
         params_cpp.b = b_tv
         params_cpp.c = c_tv
 
-        # print("CUDA PREPARED")
-        lib_object.matmul2(params_cpp)
-        c_cpu = c_tv.cpu().numpy()
-        print(c_cpu.reshape(-1)[-16:])
-        print(c.reshape(-1)[-16:])
-        print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
-              np.linalg.norm(c_cpu - c))
+        nvrtc_params = tv.gemm.NVRTCParams()
+        nvrtc_params.cumodule = mod.get_cpp_object()
+        nvrtc_params.mode = nvrtc_mode.value
+        nvrtc_params.num_threads = ker.num_threads
+        nvrtc_params.smem_size = ker.smem_size
+        if nvrtc_mode == NVRTCMode.DynamicParallism:
+            nvrtc_params.kernel_name = mod.get_lowered_name(
+                "wtf::nvrtc_kernel")
 
-        params_cpp = params_cls()
-        params_cpp.algo_desp = algo
-        params_cpp.split_k_slices = ksplit
-        a_tv = tv.from_numpy(a).cuda()
-        b_tv = tv.from_numpy(b).cuda()
+        elif nvrtc_mode == NVRTCMode.KernelAndCPU:
+            nvrtc_params.kernel_name = mod.get_lowered_name("wtf::gemm_kernel")
+            nvrtc_params.init_kernel_name = mod.get_lowered_name(
+                "wtf::nvrtc_kernel_cpu_out")
+            nvrtc_params.param_size = mod.const_values[
+                f"wtf::{NVRTCConstants.SIZEOF_KEY}"]
 
-        c_tv = tv.zeros(c.shape, params.dtype_c.tv_dtype, 0)
+            nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
+                                                  tv.uint8, 0)
+            nvrtc_params.param_storage_cpu = tv.empty(
+                [nvrtc_params.param_size], tv.uint8, -1, pinned=True)
 
-        params_cpp.a = a_tv
-        params_cpp.b = b_tv
-        params_cpp.c = c_tv
-        params_cpp.nvrtc_kernel = mod.get_cpp_object()
-        params_cpp.nvrtc_kernel_name = mod.get_lowered_name(
-            "wtf::nvrtc_kernel")
-        lib_object.matmul2(params_cpp)
+        elif nvrtc_mode == NVRTCMode.Direct:
+            nvrtc_params.kernel_name = mod.get_lowered_name("wtf::gemm_kernel")
+        elif nvrtc_mode == NVRTCMode.ConstantMemory:
+            nvrtc_params.kernel_name = mod.get_lowered_name("wtf::gemm_kernel")
+            nvrtc_params.init_kernel_name = mod.get_lowered_name(
+                "wtf::nvrtc_kernel_cpu_out")
+            nvrtc_params.param_size = mod.const_values[
+                f"wtf::{NVRTCConstants.SIZEOF_KEY}"]
+            nvrtc_params.constant_name = mod.get_lowered_name(
+                f"&wtf::{NVRTCConstants.CONSTANT_PARAM_KEY}")
+            nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
+                                                  tv.uint8, 0)
+        else:
+            raise NotImplementedError
+        
+        if lib_object is not None:
+            lib_object.matmul2(params_cpp)
+        else:
+            params_cpp.nvrtc_params = nvrtc_params
+            with tv.KernelTimer().measure_and_print():
+                tv.gemm.run_nvrtc_gemm_kernel(params_cpp)
         c_cpu = c_tv.cpu().numpy()
         print(c_cpu.reshape(-1)[-16:])
         print(c.reshape(-1)[-16:])

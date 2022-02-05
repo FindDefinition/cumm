@@ -16,15 +16,20 @@
 namespace tv {
 
 namespace gemm {
-namespace constants {
 
-constexpr int kStridedAxis = 0;
-constexpr int kContigAxis = 1;
-constexpr int kWarpSize = 32;
-constexpr int kOptimAccessBit = 128;
-constexpr int kOptimAccess = kOptimAccessBit / 8;
+enum class ConvOpType { kForward = 0, kBackwardInput = 1, kBackwardWeight = 2 };
 
-} // namespace constants
+enum class ConvMode { kConvolution = 0, kCrossCorrelation = 1 };
+enum class ConvIterAlgo { kAnalytic = 0, kOptimized = 1 };
+
+enum class ConvLayoutType {
+  kChannelFirst = 0,
+  kChannelLast = 1,
+  kSpatialFirst = 2
+
+};
+
+enum class ShuffleStrideType { kNoShuffle = 0, kShuffleAC = 1, kShuffleAB = 2 };
 
 } // namespace gemm
 } // namespace tv

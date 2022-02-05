@@ -1,11 +1,11 @@
-# Copyright 2021 Yan Yan
-#
+# Copyright 2022 Yan Yan
+# 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-#
+# 
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
+# 
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -15,7 +15,7 @@
 import contextlib
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from pccm import Argument
@@ -27,6 +27,8 @@ from cumm.core_cc import tensorview_bind
 from cumm.core_cc.tensorview_bind import CUDAKernelTimer
 from cumm.core_cc.tensorview_bind import NVRTCModule as _NVRTCModule
 from cumm.core_cc.tensorview_bind import NVRTCProgram, Tensor
+from . import gemm 
+
 from cumm.dtypes import get_npdtype_from_tvdtype
 
 bool_ = 0
@@ -181,6 +183,9 @@ class NVRTCModule:
         self.stream = stream
         return self
 
+    def get_kernel_attrs(self, name: str):
+        return self._mod.get_kernel_attributes(name)
+
     def run_kernel(self, name: str,
                    *args: Union[Tensor, int, float, List[int], List[float],
                                 Tuple[float, ...], Tuple[int, ...]]):
@@ -282,6 +287,10 @@ class KernelTimer:
         else:
             self._timer = None
 
+    def get_cpp_object(self):
+        assert self._timer is not None 
+        return self._timer
+
     @contextlib.contextmanager
     def _namespace(self, name: str):
         assert self._timer is not None
@@ -292,14 +301,16 @@ class KernelTimer:
             self._timer.pop()
 
     @contextlib.contextmanager
-    def _record(self, name: str, stream: int = 0):
+    def _record(self, name: str, stream: int = 0, exit_handler: Optional[Callable[["CUDAKernelTimer", str], None]] = None):
         assert self._timer is not None
         self._timer.push(name)
         try:
-            self._timer.insert_pair("", "start", "stop")
+            pair_name = self._timer.insert_pair("", "start", "stop")
             self._timer.record("start", stream)
             yield
             self._timer.record("stop", stream)
+            if exit_handler is not None:
+                exit_handler(self._timer, pair_name)
         finally:
             self._timer.pop()
 
@@ -331,6 +342,13 @@ class KernelTimer:
                 filtered_res[k] = v
         return filtered_res
 
+def _print_exit_handler(tim: CUDAKernelTimer, name: str):
+    duration = tim.get_pair_duration(name)
+    print(f"{name}: {duration}")
+
+def measure_and_print(name: str = "CUDATimer", stream: int = 0):
+    tim = KernelTimer()
+    return tim._record(name, stream, _print_exit_handler)
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:
     if not ten.is_contiguous():
@@ -483,3 +501,5 @@ def get_compute_capability(index: int):
 
 def is_cpu_only():
     return tensorview_bind.is_cpu_only()
+
+

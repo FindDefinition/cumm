@@ -121,20 +121,3 @@ class ConvInputIterator(bases.GemmIterator):
     def load_python(self, frag: ArrayPtr):
         raise NotImplementedError
 
-
-class ConvEnum(pccm.Class):
-    def __init__(self):
-        super().__init__()
-        self.add_enum_class("Mode", [("kConvolution", 0),
-                                     ("kCrossCorrelation", 1)])
-        self.add_enum_class(
-            "OpType", [("kForward", ConvOpType.kForward.value),
-                       ("kBackwardInput", ConvOpType.kBackwardInput.value),
-                       ("kBackwardWeight", ConvOpType.kBackwardWeight.value)])
-        self.add_enum_class("IterAlgo",
-                            [("kAnalytic", ConvIterAlgo.Analytic.value),
-                             ("kOptimized", ConvIterAlgo.Optimized.value)])
-        self.add_enum_class(
-            "LayoutType",
-            [("kChannelFirst", ConvLayoutType.ChannelFirst.value),
-             ("kChannelLast", ConvLayoutType.ChannelLast.value)])
