@@ -14,14 +14,14 @@
 
 #pragma once
 
-#include <cuda.h>
 #include <memory>
-#include <nvrtc.h>
 #include <string>
 #include <tensorview/tensor.h>
 #include <unordered_map>
 #include <vector>
 #ifdef TV_CUDA
+#include <cuda.h>
+#include <nvrtc.h>
 #include <tensorview/cuda/driver.h>
 #endif
 

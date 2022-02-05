@@ -37,12 +37,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
         self.add_include("limits")
+        self.add_include("tensorview/cuda/nvrtc.h")
+        self.add_include("tensorview/gemm/core/nvrtc_bases.h")
+        self.add_include("tensorview/gemm/core/params.h")
+        self.add_include("tensorview/gemm/core/nvrtc_params.h")
 
         if not CUMM_CPU_ONLY_BUILD:
-            self.add_include("tensorview/cuda/nvrtc.h")
-            self.add_include("tensorview/gemm/core/nvrtc_bases.h")
-            self.add_include("tensorview/gemm/core/params.h")
-            self.add_include("tensorview/gemm/core/nvrtc_params.h")
             # cufilt (nv_decode.h) is used to demangle
             # c++ names in ptx.
 
