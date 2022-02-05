@@ -63,10 +63,14 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.static_function
     def run_nvrtc_conv_kernel(self):
         code = pccm.code()
-        if CUMM_CPU_ONLY_BUILD:
-            return code 
         code.arg("params", "tv::gemm::ConvParams", pyanno="cumm.tensorview.gemm.ConvParams")
+        if CUMM_CPU_ONLY_BUILD:
+            code.raw(f"""
+            TV_THROW_RT_ERR("cpu-only build don't support this");
+            """)
+            return code 
         nvrtc_conv_template(code)
+
         code.raw(f"""
         TV_THROW_RT_ERR("you must use nvrtc kernel to run conv by this function");
         """)
@@ -76,9 +80,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.static_function
     def run_nvrtc_gemm_kernel(self):
         code = pccm.code()
-        if CUMM_CPU_ONLY_BUILD:
-            return code 
         code.arg("params", "tv::gemm::GemmParams", pyanno="cumm.tensorview.gemm.GemmParams")
+        if CUMM_CPU_ONLY_BUILD:
+            code.raw(f"""
+            TV_THROW_RT_ERR("cpu-only build don't support this");
+            """)
+            return code 
         nvrtc_gemm_template(code)
         code.raw(f"""
         TV_THROW_RT_ERR("you must use nvrtc kernel to run gemm by this function");
