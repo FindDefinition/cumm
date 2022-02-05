@@ -19,9 +19,9 @@ import pccm
 from ccimport import compat
 from pccm.utils import project_is_editable, project_is_installed
 
-from cumm.common import PyBind11, TensorView, TensorViewCPU
+from cumm.common import PyBind11, TensorView, TensorViewCPU, get_cuda_version_by_nvcc
 from cumm.constants import CUMM_CPU_ONLY_BUILD, PACKAGE_ROOT
-from .constants import PACKAGE_NAME
+from .constants import CUMM_CUDA_VERSION, PACKAGE_NAME
 from cumm.conv.nvrtc_code import nvrtc_conv_template
 from cumm.gemm.nvrtc_code import nvrtc_gemm_template
 
@@ -41,19 +41,26 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_include("tensorview/gemm/core/nvrtc_bases.h")
         self.add_include("tensorview/gemm/core/params.h")
         self.add_include("tensorview/gemm/core/nvrtc_params.h")
+        if not compat.InWindows:
+            self.add_include("cxxabi.h")
 
         if not CUMM_CPU_ONLY_BUILD:
             # cufilt (nv_decode.h) is used to demangle
             # c++ names in ptx.
 
             self.add_include("nv_decode.h")
-            self.build_meta.add_libraries("nvrtc", "cufilt")
+            cuda_ver = get_cuda_version_by_nvcc().split(".")
+            cuda_ver_ints = list(map(int, cuda_ver))
+            if cuda_ver_ints >= [11, 4]:
+                self.build_meta.add_libraries("nvrtc", "cufilt")
+            else:
+                self.build_meta.add_libraries("nvrtc")
             if not compat.InWindows:
                 self.build_meta.add_libraries("dl")
             else:
                 # disable min/max macro if include Windows.h
                 self.build_meta.add_cflags("cl", "/DNOMINMAX")
-    
+
     @pccm.pybind.mark
     @pccm.static_function
     def hello(self):
@@ -63,34 +70,37 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.static_function
     def run_nvrtc_conv_kernel(self):
         code = pccm.code()
-        code.arg("params", "tv::gemm::ConvParams", pyanno="cumm.tensorview.gemm.ConvParams")
+        code.arg("params",
+                 "tv::gemm::ConvParams",
+                 pyanno="cumm.tensorview.gemm.ConvParams")
         if CUMM_CPU_ONLY_BUILD:
             code.raw(f"""
             TV_THROW_RT_ERR("cpu-only build don't support this");
             """)
-            return code 
+            return code
         nvrtc_conv_template(code)
 
         code.raw(f"""
         TV_THROW_RT_ERR("you must use nvrtc kernel to run conv by this function");
         """)
-        return code 
-
+        return code
 
     @pccm.static_function
     def run_nvrtc_gemm_kernel(self):
         code = pccm.code()
-        code.arg("params", "tv::gemm::GemmParams", pyanno="cumm.tensorview.gemm.GemmParams")
+        code.arg("params",
+                 "tv::gemm::GemmParams",
+                 pyanno="cumm.tensorview.gemm.GemmParams")
         if CUMM_CPU_ONLY_BUILD:
             code.raw(f"""
             TV_THROW_RT_ERR("cpu-only build don't support this");
             """)
-            return code 
+            return code
         nvrtc_gemm_template(code)
         code.raw(f"""
         TV_THROW_RT_ERR("you must use nvrtc kernel to run gemm by this function");
         """)
-        return code 
+        return code
 
     @pccm.static_function
     def bind_enums(self):
@@ -117,7 +127,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             .value("ShuffleAC", tv::gemm::ShuffleStrideType::kShuffleAC)
             .value("ShuffleAB", tv::gemm::ShuffleStrideType::kShuffleAB);
         """)
-        return code 
+        return code
 
     @pccm.static_function
     def bind_nvrtc_params(self):
@@ -137,7 +147,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
           .def_readwrite("smem_size", &tv::gemm::NVRTCParams::smem_size)
           .def_readwrite("mode", &tv::gemm::NVRTCParams::mode);
         """)
-        return code 
+        return code
 
     @pccm.static_function
     def bind_gemm_algo_desp(self):
@@ -208,7 +218,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                             &tv::gemm::GemmAlgoDesp::access_per_vector);
 
         """)
-        return code 
+        return code
 
     @pccm.static_function
     def bind_conv_algo_desp(self):
@@ -272,7 +282,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                             &tv::gemm::ConvAlgoDesp::increment_k_first);
 
         """)
-        return code 
+        return code
 
     @pccm.static_function
     def bind_conv_params(self):
@@ -308,7 +318,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("stream", &tv::gemm::ConvParams::stream);
         m_cls.def_readwrite("nvrtc_params", &tv::gemm::ConvParams::nvrtc_params);
         """)
-        return code 
+        return code
 
     @pccm.static_function
     def bind_gemm_params(self):
@@ -344,13 +354,19 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("nvrtc_params", &tv::gemm::GemmParams::nvrtc_params);
 
         """)
-        return code 
+        return code
 
     @pccm.pybind.mark_bind_raw(raw_bind_anno=_TENSORVIEW_BIND_CODE_ANNO)
     @pccm.static_function
     def bind_tensorview(self):
         code = pccm.code()
         code.arg("m", "pybind11::module_")
+        if not compat.InWindows:
+            code.code_after_include = f"""
+#if !defined(TV_CUDA) || (CUDA_VERSION < 11400)
+#include <cxxabi.h>
+#endif
+            """
         # we remove fill in below code because it depends on libcuda.so.
         code.raw("""
   py::class_<tv::Context, std::shared_ptr<tv::Context>>(m, "Context")
@@ -602,16 +618,39 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     return true;
 #endif
   }); 
-  m.def("cufilt", [](std::string name){
-    int status;
-#ifdef TV_CUDA
-    std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
-    TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
-    return std::string(realname.get());
-#else
-    return std::string();
-#endif
-  }, py::arg("name")); 
+        """)
+        if compat.InLinux:
+            code.raw("""
+            m.def("cufilt", [](std::string name){
+              int status;
+              #if defined(TV_CUDA) && (CUDA_VERSION >= 11400)
+              std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
+              TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
+              return std::string(realname.get());
+              #else
+              std::shared_ptr<char> realname = std::shared_ptr<char>(abi::__cxa_demangle(name.c_str(), 0, 0, &status), std::free);
+              TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
+              return std::string(realname.get());
+              #endif
+            }, py::arg("name")); 
+            """)
+        elif compat.InWindows:
+            code.raw("""
+            m.def("cufilt", [](std::string name){
+              int status;
+              #if defined(TV_CUDA) && (CUDA_VERSION >= 11400)
+              std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
+              TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
+              return std::string(realname.get());
+              #else
+              return "";
+              #endif
+            }, py::arg("name")); 
+            """)
+        else:
+            raise NotImplementedError
+        code.raw("""
+
   bind_gemm_algo_desp(m);
   bind_conv_algo_desp(m);
   bind_conv_params(m);

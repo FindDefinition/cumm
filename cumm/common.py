@@ -198,6 +198,13 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
 
     return sorted(list(set(flags))), nums
 
+def get_cuda_version_by_nvcc():
+    nvcc_version = subprocess.check_output(["nvcc", "--version"
+                                            ]).decode("utf-8").strip()
+    nvcc_version_str = nvcc_version.split("\n")[3]
+    version_str: str = re.findall(r"release (\d+.\d+)",
+                                    nvcc_version_str)[0]
+    return version_str
 
 def _get_cuda_include_lib():
     if compat.InWindows:

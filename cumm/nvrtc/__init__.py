@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Union
+from build import subprocess
 
 import pccm
 from ccimport import compat
@@ -28,6 +29,15 @@ def get_cudadevrt_path():
             return c
     return None
 
+def cufilt(name: str):
+    res = tv.cufilt(name)
+    if res:
+        return res 
+    if compat.InWindows:
+        res = subprocess.check_output(["cu++filt", name]).decode("utf-8").strip()
+        print(res)
+        return res 
+    raise NotImplementedError
 
 class CummNVRTCModule(tv.NVRTCModule):
     def __init__(self,
@@ -98,7 +108,7 @@ class CummNVRTCModule(tv.NVRTCModule):
                 parts = line.split(" ")
                 name = parts[4]
                 if len(parts) == 7:
-                    name = tv.cufilt(name)
+                    name = cufilt(name)
                     name = "::".join(name.split("::")[1:])
                     const_values[name] = int(parts[-1].replace(";", " "))
         # print(const_values)
