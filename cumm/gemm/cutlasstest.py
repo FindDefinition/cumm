@@ -10,8 +10,9 @@ from codeai.distributed.example.file import upload_file
 from cumm import dtypes
 from cumm import tensorview as tv
 from cumm.common import CUDALibs, GemmBasic, TensorView
-from cumm.gemm.algospec.core import GemmAlgo, TensorOpParams
+from cumm.gemm.algospec.core import GemmAlgo, TensorOp
 from cumm.gemm.main import GemmAlgoParams, GemmMainUnitTest
+from cumm import cudasim 
 
 CUTLASS_ROOT = Path("/home/yy/Projects/cutlass")
 import numpy as np
@@ -26,6 +27,8 @@ class CutlassLib(pccm.Class):
         self.add_include("random")
         self.build_meta.includes.append(CUTLASS_ROOT / "include")
         self.build_meta.includes.append(CUTLASS_ROOT / "tools/util/include")
+        if cudasim.enable_debug():
+            self.build_meta.add_cflags("nvcc", f"-DCUMM_DEBUG_TX={cudasim.debug_tx()}")
 
 
 class CutlassGemm(pccm.ParameterizedClass):
@@ -143,8 +146,8 @@ class CutlassGemm(pccm.ParameterizedClass):
         if (workspace_size > 0){{
             workspace = tv::Tensor({{int(workspace_size)}}, tv::uint8, 0);
         }}
-        Gemm gemm_op;
-        // Check the problem size is supported or not 
+        Gemm gemm_op ;
+        // Check the problem size is supported or  not 
         cutlass::Status status = gemm_op.can_implement(args);
         TV_ASSERT_INVALID_ARG(status == cutlass::Status::kSuccess, "error");
         if (workspace_size > 0){{
@@ -210,14 +213,15 @@ def cutlass_profile_win(cu: CutlassGemm):
 def cutlass_test_gemm(cu: CutlassGemm, spk: int = 1):
     params = cu.params
     cu.namespace = "CuTlassTest"
-    lib = pccm.builder.build_pybind([cu],
-                                    Path(__file__).parent / "cutlassgemm_test",
-                                    build_dir=Path(__file__).parent / "build" /
-                                    "build_cutlass",
-                                    pybind_file_suffix=".cc",
-                                    verbose=False,
-                                    disable_anno=True,
-                                    std="c++17")
+    with tv.measure_and_print():
+        lib = pccm.builder.build_pybind([cu],
+                                        Path(__file__).parent / "cutlassgemm_test",
+                                        build_dir=Path(__file__).parent / "build" /
+                                        "build_cutlass",
+                                        pybind_file_suffix=".cc",
+                                        verbose=False,
+                                        disable_anno=True,
+                                        std="c++17")
     np.random.seed(12315)
     m = 256 + 32
     n = 256 + 40
@@ -225,9 +229,9 @@ def cutlass_test_gemm(cu: CutlassGemm, spk: int = 1):
     m *= 2
     n *= 2
     k *= 2
-    m = 64
-    n = 64
-    k = 32
+    m = 128
+    n = 128
+    k = 8
     m = max(params.ts[0], m)
     n = max(params.ts[1], n)
     k = max(params.ts[2], k)
@@ -258,14 +262,14 @@ def cutlass_test_gemm(cu: CutlassGemm, spk: int = 1):
     for i in range(1):
         c_tv = lib.CuTlassTest.CutlassGemm.matmul(a_tv, b_tv, 1)
         c_cpu = c_tv.cpu().numpy()
-        print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
+        print(m, n, k, a.mean(), b.mean(), c.mean(),
               np.linalg.norm(c_cpu - c))
 
 
 def cutlass_test_simt():
     params = GemmAlgoParams((32, 512, 8), (32, 64, 8), 2,
                             "f32,f32,f32,f32,f32", False, False, False,
-                            GemmAlgo.Simt, TensorOpParams((1, 1, 1)))
+                            GemmAlgo.Simt, TensorOp((1, 1, 1)))
     main_cu = CutlassGemm(params, 32, "Sm61")
     cutlass_test_gemm(main_cu)
 
@@ -273,7 +277,7 @@ def cutlass_test_simt():
 def cutlass_test_simt_dp4a():
     params = GemmAlgoParams((128, 64, 32), (64, 32, 32), 2,
                             "s8,s8,s32,s32,s32", False, True, False,
-                            GemmAlgo.SimtDP4A, TensorOpParams((1, 1, 4)))
+                            GemmAlgo.SimtDP4A, TensorOp((1, 1, 4)))
     main_cu = CutlassGemm(params, 32, "Sm61")
     cutlass_test_gemm(main_cu)
 
@@ -281,13 +285,19 @@ def cutlass_test_simt_dp4a():
 def cutlass_test_turing():
     params = GemmAlgoParams((64, 128, 64), (32, 64, 32), 2,
                             "f16,f16,f16,f32,f32", False, True, False,
-                            GemmAlgo.Turing, TensorOpParams((16, 8, 8)))
+                            GemmAlgo.Turing, TensorOp((16, 8, 8)))
     main_cu = CutlassGemm(params, 128, "Sm75")
     cutlass_test_gemm(main_cu)
 
+def cutlass_test_tf32():
+    params = GemmAlgoParams((128, 128, 16), (64, 64, 16), 2,
+                            "f32,f32,f32,f32,f32", False, True, False,
+                            GemmAlgo.Ampere, TensorOp((16, 8, 8)))
+    main_cu = CutlassGemm(params, 128, "Sm80")
+    cutlass_test_gemm(main_cu)
 
 if __name__ == "__main__":
-    cutlass_test_turing()
+    cutlass_test_tf32()
     # cutlass_profile_win_simt()
 
     # cutlass_profile_win_simt_f32()

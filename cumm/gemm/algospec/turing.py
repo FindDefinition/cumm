@@ -33,7 +33,7 @@ from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
 from cumm.gemm.core import MetaArray, metaseq, seq
 from cumm.gemm.wmma.simt import WarpMmaSimt
 
-from .core import GemmAlgo, ShuffleStrideType, TensorOpParams
+from .core import GemmAlgo, ShuffleStrideType, TensorOp
 
 
 class InputTuring(bases.Input):
@@ -151,7 +151,7 @@ class MmaTuring(bases.Mma):
                  dtype_acc: dtypes.DType,
                  trans_a: bool,
                  trans_b: bool,
-                 tensorop: TensorOpParams,
+                 tensorop: TensorOp,
                  algo: GemmAlgo = GemmAlgo.Turing):
         self._input_spec = input_spec
         self.warp_count_shape = tile_shape // warp_tile_shape
@@ -277,7 +277,8 @@ class MmaTuring(bases.Mma):
         # turing only support tnt mma.sync layout
         self._warp_mma = wmma.turing.WarpMmaTuring(
             (warp_tile_shape[0], warp_tile_shape[1], tensorop.shape[2]),
-            tensorop.shape, dtype_a, dtype_b, dtype_acc, False, True, False)
+            tensorop.shape, dtype_a, dtype_b, dtype_acc, False, True, False,
+            tensorop.dtype_a, tensorop.dtype_b, tensorop.dtype_c)
 
     @property
     def input_spec(self) -> bases.Input:
@@ -331,7 +332,7 @@ class OutputTuring(bases.Output):
             dtype_acc: dtypes.DType,
             dtype_comp: dtypes.DType,
             trans_c: bool,
-            tensorop: Optional[TensorOpParams] = None,
+            tensorop: Optional[TensorOp] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
             access_per_vector: int = 1):
@@ -524,7 +525,7 @@ class AlgoSpecificTuring(object):
             trans_a: bool,
             trans_b: bool,
             trans_c: bool,
-            tensorop: TensorOpParams,
+            tensorop: TensorOp,
             algo: GemmAlgo = GemmAlgo.Turing,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         assert algo == GemmAlgo.Turing

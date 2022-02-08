@@ -363,7 +363,7 @@ class Out5DLinear(pccm.ParameterizedClass):
         self.iterations = metaseq(1, iterations[0], iterations[1], iters2d[0],
                                   iters2d[1])
         if cudasim.enable_debug():
-            print(self.remain, warp_count, self.warp_parts, part_shape,
+            print("OUT TMAP", self.remain, warp_count, self.warp_parts, part_shape,
                   iterations, self.iterations, iters2d, acc_shape)
 
         self.delta = metaseq(1, delta[0], delta[1], delta2d[0], delta2d[1])

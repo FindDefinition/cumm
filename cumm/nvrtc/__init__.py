@@ -33,9 +33,10 @@ def cufilt(name: str):
     res = tv.cufilt(name)
     if res:
         return res 
+    # in windows, gcc-style demangle isn't available.
+    # so we can only use subprocess before cuda 11.4.
     if compat.InWindows:
         res = subprocess.check_output(["cu++filt", name]).decode("utf-8").strip()
-        print(res)
         return res 
     raise NotImplementedError
 
@@ -57,6 +58,9 @@ class CummNVRTCModule(tv.NVRTCModule):
                 meta = decl.meta
                 assert meta.name is not None
                 if isinstance(meta, CudaGlobalFunctionMeta):
+                    if decl.code.is_template():
+                        # don't support template kernel
+                        continue
                     # is global functino. firstly check types
                     meta = tv.NVRTCKernelMeta(meta.name, cu_ns,
                                               decl.code.arguments)

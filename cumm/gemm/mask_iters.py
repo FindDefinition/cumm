@@ -731,7 +731,7 @@ class MaskTileIterator(bases.GemmInputIterator):
             self.access_per_vector, 1)
         element_count = self.thread_access_shape[0] * self.thread_access_shape[
             1] * sub_tile_shape.prod()
-        # print(tmap.iterations, tmap.delta)
+        print("INPUT TAMP", tmap.iterations, tmap.delta)
         # raise NotImplementedError
         super().__init__(dtype, tmap, sub_tile_shape, element_count,
                          num_sub_access,

@@ -48,10 +48,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             # cufilt (nv_decode.h) is used to demangle
             # c++ names in ptx.
 
-            self.add_include("nv_decode.h")
             cuda_ver = get_cuda_version_by_nvcc().split(".")
             cuda_ver_ints = list(map(int, cuda_ver))
             if cuda_ver_ints >= [11, 4]:
+                self.add_include("nv_decode.h")
                 self.build_meta.add_libraries("nvrtc", "cufilt")
             else:
                 self.build_meta.add_libraries("nvrtc")

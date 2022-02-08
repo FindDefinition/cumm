@@ -817,6 +817,16 @@ class Mma(pccm.ParameterizedClass):
         input_iter_B.load(input_frag_B);
         ++input_iter_A;
         ++input_iter_B;
+        """)
+        if cudasim.enable_debug():
+            code.raw(f"""
+            tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_A, "FirstInputA");
+            tv::print_fragment_once<float, 0, 16, {cudasim.debug_tx()}>(input_frag_A);
+
+            tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_B, "FirstInputB");
+            """)
+
+        code.raw(f"""
         // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_A, "FirstInputA", blockIdx.z, gemm_k_iterations);
         // tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(input_frag_B, "FirstInputB", blockIdx.z);
         smem_iter_A.store(input_frag_A);

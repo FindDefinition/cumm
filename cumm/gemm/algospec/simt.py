@@ -33,7 +33,7 @@ from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
 from cumm.gemm.core import MetaArray, metaseq, seq
 from cumm.gemm.wmma.simt import WarpMmaSimt
 
-from .core import GemmAlgo, ShuffleStrideType, TensorOpParams
+from .core import GemmAlgo, ShuffleStrideType, TensorOp
 
 
 def simt_transpose_padding(threads: int, crosswise: int, size_in_bits: int):
@@ -160,7 +160,7 @@ class MmaSimt(bases.Mma):
                  dtype_acc: dtypes.DType,
                  trans_a: bool,
                  trans_b: bool,
-                 tensorop: Optional[TensorOpParams] = None,
+                 tensorop: Optional[TensorOp] = None,
                  algo: GemmAlgo = GemmAlgo.Simt):
         self._input_spec = input_spec
         is_dp4a = algo == GemmAlgo.SimtDP4A
@@ -330,7 +330,7 @@ class OutputSimt(bases.Output):
             dtype_acc: dtypes.DType,
             dtype_comp: dtypes.DType,
             trans_c: bool,
-            tensorop: Optional[TensorOpParams] = None,
+            tensorop: Optional[TensorOp] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
             access_per_vector: int = 1):
@@ -476,7 +476,7 @@ class AlgoSpecificSimt(object):
             trans_a: bool,
             trans_b: bool,
             trans_c: bool,
-            tensorop: Optional[TensorOpParams] = None,
+            tensorop: Optional[TensorOp] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A

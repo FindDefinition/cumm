@@ -33,7 +33,7 @@ from cumm.common import (CummNVRTCLib, GemmBasic, GemmBasicHost, PyBind11, Tenso
 from cumm.constants import CUTLASS_MODE
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import codeops, kernel
-from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
+from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOp
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.core.metaarray import MetaArray
 from cumm.gemm.utils import GemmUtilsCPU
@@ -51,7 +51,7 @@ class GemmAlgoParams(object):
             trans_b: bool,
             trans_c: bool,
             algo: kernel.GemmAlgo,
-            tensorop: Optional[kernel.TensorOpParams] = None,
+            tensorop: Optional[kernel.TensorOp] = None,
             splitk_serial: bool = False,
             splitk_parallel: bool = False,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
@@ -97,7 +97,7 @@ def gen_gemm_params(
         stage: int,
         dtypes_string: str,
         algo: kernel.GemmAlgo,
-        tensorop: Optional[kernel.TensorOpParams],
+        tensorop: Optional[kernel.TensorOp],
         splitk_serial: bool = False,
         splitk_parallel: bool = False,
         shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
@@ -122,7 +122,7 @@ def gen_gemm_params(
 
 def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
                        algo: kernel.GemmAlgo,
-                       tensorop: Optional[kernel.TensorOpParams]):
+                       tensorop: Optional[kernel.TensorOp]):
     res = []
     for ds in dss:
         for tb in [False, True]:
@@ -140,7 +140,7 @@ def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
 
 def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: str, stage: int,
                           algo: kernel.GemmAlgo,
-                          tensorop: Optional[kernel.TensorOpParams]):
+                          tensorop: Optional[kernel.TensorOp]):
     res = []
     for ds in dss:
         for tb in [False, True]:
@@ -163,7 +163,7 @@ def gen_gemm_params_rowmajor_c(ts,
                                stage: int,
                                dtypes_string: str,
                                algo: kernel.GemmAlgo,
-                               tensorop: Optional[kernel.TensorOpParams],
+                               tensorop: Optional[kernel.TensorOp],
                                splitk_serial: bool = False,
                                splitk_parallel: bool = False):
     res = []
@@ -326,91 +326,91 @@ SHUFFLE_VOLTA_PARAMS: List[GemmAlgoParams] = [
     *gen_shuffle_params(
         (64, 64, 32),
         (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+        kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
     *gen_shuffle_params(
         (128, 128, 32),
         (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+        kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
     *gen_shuffle_params(
         (128, 256, 32),
         (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+        kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
     *gen_shuffle_params(
         (256, 128, 32),
         (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+        kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
     *gen_shuffle_params(
         (128, 64, 32),
         (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+        kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
     *gen_shuffle_params(
         (64, 128, 32),
         (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+        kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
 ]
 # SHUFFLE_VOLTA_PARAMS = []
 SHUFFLE_TURING_PARAMS: List[GemmAlgoParams] = [
     *gen_shuffle_params(
         (64, 64, 32),
         (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (128, 128, 32),
         (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (128, 128, 32),
         (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (64, 64, 64),
         (32, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (64, 128, 64),
         (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (128, 256, 32),
         (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (256, 128, 32),
         (64, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (128, 64, 32),
         (64, 32, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (64, 128, 32),
         (32, 64, 32), ["f16,f16,f16,f16,f16", "f16,f16,f16,f32,f32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8))),
+        kernel.GemmAlgo.Turing, TensorOp((16, 8, 8))),
     *gen_shuffle_params(
         (64, 64, 32), (32, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
-        2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+        2, kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
     *gen_shuffle_params(
         (128, 128, 32),
         (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+        kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
     *gen_shuffle_params(
         (128, 128, 32),
         (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+        kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
     *gen_shuffle_params(
         (128, 256, 32),
         (64, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+        kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
     *gen_shuffle_params(
         (256, 128, 32),
         (64, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"], 2,
-        kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+        kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
     *gen_shuffle_params(
         (128, 64, 32), (64, 32, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
-        2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+        2, kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
     *gen_shuffle_params(
         (64, 128, 32), (32, 64, 32), ["s8,s8,s8,s32,s32", "s8,s8,s32,s32,s32"],
-        2, kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
+        2, kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
 ]
 # SHUFFLE_TURING_PARAMS = []
 
@@ -478,45 +478,45 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params_rowmajor_c((128, 128, 16), (32, 64, 16), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Simt, None),
                 ]  # type: List[GemmAlgoParams]
                 volta_params = [
-                    # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
                     # *gen_gemm_params((64, 64, 32),
                     #                  (32, 32, 32), 2, "f16,f16,f32,f32,f32",
-                    #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    #                  kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
                 ]
                 turing_params = [
                     # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32),
                     #                             2,
                     #                             "f16,f16,f16,f32,f32",
                     #                             kernel.GemmAlgo.Turing,
-                    #                             TensorOpParams((16, 8, 8)),
+                    #                             TensorOp((16, 8, 8)),
                     #                             splitk_serial=True),
                     # *gen_gemm_params(
                     #     (64, 64, 32),
                     #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
-                    #     TensorOpParams((16, 8, 8))),
+                    #     TensorOp((16, 8, 8))),
                     # interleave = 4:
-                    # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
+                    # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOp((16, 8, 16))),
 
-                    # *gen_gemm_params((64, 64, 16), (32, 32, 16), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params((64, 64, 16), (32, 32, 16), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
 
-                    # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
                 ]
                 # self.turing_s8_params = [
-                #     *gen_gemm_params((128, 128, 64), (64, 64, 64), 2, "s8,s8,s8,s32,f32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                #     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                #     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                #     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                #     *gen_gemm_params((128, 128, 64), (64, 64, 64), 2, "s8,s8,s8,s32,f32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                 #     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
                 # ]
                 # print(self.simt_params[0].dtype_b)
@@ -531,36 +531,36 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 volta_params = [
                     *SHUFFLE_VOLTA_PARAMS,
 
-                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 64), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
                     # *gen_gemm_params((128, 256, 32),
                     #                  (64, 64, 32), 2, "f16,f16,f16,f16,f16",
-                    #                  kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOpParams((8, 8, 4))),
+                    #                  kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Volta, TensorOp((8, 8, 4))),
                 ]
                 turing_params = [
                     *SHUFFLE_TURING_PARAMS,
-                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((8, 8, 16))),
-                    # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 8)), splitk_serial=True),
+                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOp((8, 8, 16))),
+                    # *gen_gemm_params_rowmajor_c((128, 64, 32), (64, 32, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOp((16, 8, 8)), splitk_serial=True),
 
                     # *gen_gemm_params(
                     #     (64, 64, 32),
                     #     (64, 64, 16), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing,
-                    #     TensorOpParams((16, 8, 8))),
+                    #     TensorOp((16, 8, 8))),
                     # interleave = 4:
-                    # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOpParams((16, 8, 16))),
+                    # *gen_gemm_params((128, 64, 32), (64, 32, 32), 2, "s8,s8,s8,s32,s32", kernel.GemmAlgo.Turing, TensorOp((16, 8, 16))),
 
-                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 16])),
+                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 16])),
 
-                    # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
-                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOpParams([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((64, 64, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Volta, None),
                 ]
 

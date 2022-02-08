@@ -29,7 +29,7 @@ from cumm.constants import (CUTLASS_DEBUG, CUTLASS_INPUT_ITER, CUTLASS_MODE,
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import (constants, layout, mask_iters, out_iters, thread_map,
                        volta_iters, volta_out_iters, wmma)
-from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases, get_algo_spec
+from cumm.gemm.algospec import GemmAlgo, TensorOp, bases, get_algo_spec
 from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
@@ -359,7 +359,7 @@ class GemmKernel(pccm.ParameterizedClass):
             trans_a: bool,
             trans_b: bool,
             trans_c: bool,
-            tensorop: Optional[TensorOpParams] = None,
+            tensorop: Optional[TensorOp] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
             splitk_serial: bool = False,
             splitk_parallel: bool = False,
@@ -512,6 +512,9 @@ class GemmKernel(pccm.ParameterizedClass):
         if self.tensorop is not None:
             tes = self.tensorop.shape
             res += f"T{tes[0]}{tes[1]}{tes[2]}"
+            if self.tensorop.top_dtypes is not None:
+                t = self.tensorop
+                res += f"{t.dtype_a.shortcut()}{t.dtype_b.shortcut()}{t.dtype_c.shortcut()}"
         res += f"_{self.num_stage}"
         if self.splitk_serial:
             res += "1"

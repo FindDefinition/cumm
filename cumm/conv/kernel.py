@@ -36,7 +36,7 @@ from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import (codeops, constants, gemmmath, layout, mask_iters,
                        out_iters, output_op, thread_map, volta_iters,
                        volta_out_iters)
-from cumm.gemm.algospec import GemmAlgo, TensorOpParams, bases
+from cumm.gemm.algospec import GemmAlgo, TensorOp, bases
 from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
 from cumm.gemm.blockmma import BlockMmaStorage, Mma
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
@@ -428,7 +428,7 @@ class ConvKernel(pccm.ParameterizedClass):
                  layout_desp_input: ConvLayout,
                  layout_desp_weight: ConvLayout,
                  layout_desp_output: ConvLayout,
-                 tensorop: Optional[TensorOpParams] = None,
+                 tensorop: Optional[TensorOp] = None,
                  algo: GemmAlgo = GemmAlgo.Simt,
                  splitk_serial: bool = False,
                  splitk_parallel: bool = False,

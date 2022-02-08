@@ -13,10 +13,10 @@
 # limitations under the License.
 
 import enum
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from cumm.gemm.core import MetaArray, metaseq, seq
-
+from cumm import dtypes
 
 class GemmAlgo(enum.Enum):
     Simt = "Simt"
@@ -67,12 +67,31 @@ class ShuffleStrideType(enum.Enum):
     ShuffleAB = 2
 
 
-class TensorOpParams(object):
-    def __init__(self, shape: Tuple[int, int, int]):
+class TensorOp(object):
+    def __init__(self, shape: Tuple[int, int, int], top_dtypes: Optional[str] = None):
         self.shape = seq(*shape)
+        self.top_dtypes = top_dtypes
+        if top_dtypes is not None:
+            dtype_abc = [
+                dtypes.get_dtype_by_shortcut(s.strip())
+                for s in top_dtypes.split(",")
+            ]
+            assert len(dtype_abc) == 3
+            self.dtype_a = dtype_abc[0]
+            self.dtype_b = dtype_abc[1]
+            self.dtype_c = dtype_abc[2]
+
+        else:
+            self.dtype_a = None 
+            self.dtype_b = None 
+            self.dtype_c = None 
 
     def to_string(self):
-        return f"{self.shape[0]}{self.shape[1]}{self.shape[2]}"
+        res= f"{self.shape[0]}{self.shape[1]}{self.shape[2]}"
+        if self.top_dtypes is not None:
+            res += self.top_dtypes
+
+        return res 
 
     def __getitem__(self, val: int):
         return self.shape[val]

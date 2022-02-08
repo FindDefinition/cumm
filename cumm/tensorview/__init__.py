@@ -227,7 +227,7 @@ class NVRTCModule:
                         # TODO prevent floats assigned to ints
                         ten = empty(meta.shape, meta.simple_type, -1)
                         ten.numpy_view()[:] = arg_array
-                        kernel_args.append((ten, _NVRTCModule.kScalar))
+                        kernel_args.append((ten, _NVRTCModule.kArray))
                         continue
             # meta isn't valid, use regular dtypes.
             if isinstance(arg, (int, float)):
@@ -236,7 +236,7 @@ class NVRTCModule:
                     dtype = int64
                 ten = empty([1], dtype, -1)
                 ten.numpy_view()[0] = arg
-                kernel_args.append((ten, _NVRTCModule.kScalar))
+                kernel_args.append((ten, _NVRTCModule.kArray))
             elif isinstance(arg, (list, tuple)):
                 dtype = np.float32
                 if isinstance(arg[0], int):

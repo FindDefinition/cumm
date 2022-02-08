@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pccm
@@ -38,6 +38,9 @@ class WarpMmaTuring(bases.WarpMma):
                  trans_a: bool,
                  trans_b: bool,
                  trans_c: bool,
+                 top_dtype_a: Optional[dtypes.DType] = None,
+                 top_dtype_b: Optional[dtypes.DType] = None,
+                 top_dtype_c: Optional[dtypes.DType] = None,
                  acc_is_rowmajor: bool = False):
         super().__init__()
         self.add_dependency(TensorViewNVRTC)
@@ -51,6 +54,10 @@ class WarpMmaTuring(bases.WarpMma):
         self.trans_a = trans_a
         self.trans_b = trans_b
         self.trans_c = trans_c
+        self.top_dtype_a = top_dtype_a or self.dtype_a
+        self.top_dtype_b = top_dtype_b or self.dtype_b
+        self.top_dtype_c = top_dtype_c or self.dtype_c
+
         self.mn = warp_tile_shape[0] * warp_tile_shape[1]
         self.km = warp_tile_shape[2] * warp_tile_shape[0]
         self.kn = warp_tile_shape[2] * warp_tile_shape[1]
@@ -60,7 +67,8 @@ class WarpMmaTuring(bases.WarpMma):
             str(dtype_b), self.inst_shape[2] * warp_tile_shape[1] // 32)
         self.fragment_c_t = self.array_type(
             str(dtype_c), warp_tile_shape[0] * warp_tile_shape[1] // 32)
-        self.mma = tensorop.MmaSync(inst_shape, 32, dtype_a, dtype_b, dtype_c,
+
+        self.mma = tensorop.MmaSync(inst_shape, 32, self.top_dtype_a, self.top_dtype_b, self.top_dtype_c,
                                     trans_a, trans_b, trans_c)
         self.add_param_class("tensorop", self.mma, "InstMma")
         self.acc_is_rowmajor = acc_is_rowmajor

@@ -22,7 +22,7 @@ from cumm.conv.bases import (LAYOUT_TYPES, ConvInputIterator, ConvIterAlgo,
 from cumm.conv.params import ConvProblem
 from cumm.gemm import constants, layout, mask_iters, thread_map
 from cumm.gemm.algospec import bases
-from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOpParams
+from cumm.gemm.algospec.core import GemmAlgo, ShuffleStrideType, TensorOp
 from cumm.gemm.algospec.volta import MmaVolta, OutputVolta
 from cumm.gemm.core import MetaArray, metaseq, seq
 
@@ -212,7 +212,7 @@ class AlgoSpecificVolta(object):
                  dtype_acc: dtypes.DType,
                  dtype_comp: dtypes.DType,
                  iter_algo: ConvIterAlgo,
-                 tensorop: Optional[TensorOpParams] = None,
+                 tensorop: Optional[TensorOp] = None,
                  algo: GemmAlgo = GemmAlgo.Volta,
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,

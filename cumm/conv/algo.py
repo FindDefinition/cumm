@@ -22,7 +22,7 @@ import pccm
 
 from cumm import dtypes
 from cumm import tensorview as tv
-from cumm.gemm.algospec.core import GemmAlgo, TensorOpParams
+from cumm.gemm.algospec.core import GemmAlgo, TensorOp
 from cumm.gemm.core import MetaArray, metaseq, seq
 
 
@@ -36,7 +36,7 @@ class ConvAlgoParams(object):
                  trans_b: bool,
                  trans_c: bool,
                  gemm_algo: GemmAlgo,
-                 tensorop: Optional[TensorOpParams] = None,
+                 tensorop: Optional[TensorOp] = None,
                  splitk_serial: bool = False,
                  splitk_parallel: bool = False):
         self.ts = MetaArray(*ts)
