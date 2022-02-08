@@ -172,6 +172,9 @@ class NVRTCModule:
     def get_ptx(self):
         return self._mod.program.ptx()
 
+    def to_string(self):
+        return self._mod.program.to_string()
+
     def prepare_launch(self,
                        blocks: List[int],
                        threads: List[int],

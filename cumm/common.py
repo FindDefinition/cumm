@@ -311,6 +311,10 @@ class CummNVRTCLib(pccm.Class):
         self.add_include("tensorview/cuda/nvrtc.h")
         self.add_include("tensorview/gemm/core/nvrtc_bases.h")
 
+class CummNVRTCLink(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.build_meta.add_libraries("nvrtc")
 
 class CompileInfo(pccm.Class):
     def __init__(self):

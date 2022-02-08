@@ -68,6 +68,12 @@ class NVRTCProgram:
     def get_lowered_name(self, name: str) -> str:
         ...
 
+    def to_string(self) -> str:
+        ...
+
+    @staticmethod
+    def from_string(json_string: str) -> "NVRTCProgram":
+        ...
 
 class NVRTCModule:
     kTensor = 0
@@ -215,6 +221,9 @@ class Tensor:
                    start: Optional[int],
                    stop: Optional[int],
                    step: Optional[int] = None) -> "Tensor":
+        ...
+
+    def transpose(self, dim0: int, dim1: int) -> "Tensor":
         ...
 
     def select(self, dim: int, index: int) -> "Tensor":

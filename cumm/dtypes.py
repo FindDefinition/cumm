@@ -85,6 +85,7 @@ class DType(object):
             return f"{bsize} / 8"
 
 
+float16_origin = DType("__half", 2 * 8, "f16", 1, RegDType.F16, "cutlass::half_t")
 float16 = DType("tv::half_t", 2 * 8, "f16", 1, RegDType.F16, "cutlass::half_t")
 float32 = DType("float", 4 * 8, "f32", 2, RegDType.F32)
 float64 = DType("double", 8 * 8, "f64", 3, RegDType.F64)

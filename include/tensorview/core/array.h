@@ -452,14 +452,14 @@ public:
   TV_HOST_DEVICE_INLINE constexpr vecarray(size_t count, T init = T())
       : array<T, N>(), size_(count) {
     for (size_t i = 0; i < count; ++i) {
-      array_[i] = init;
+      this->array_[i] = init;
     }
   };
   constexpr TV_HOST_DEVICE vecarray(std::initializer_list<T> arr)
       : array<T, N>(), size_(std::min(N, arr.size())) {
     for (auto p = detail::make_init_pair(0, arr.begin());
          p.first < N && p.second != arr.end(); ++p.first, ++p.second) {
-      array_[p.first] = *(p.second);
+      this->array_[p.first] = *(p.second);
     }
   }
 #ifndef __CUDACC_RTC__
@@ -470,14 +470,14 @@ public:
       if (size_ >= N) {
         continue;
       }
-      array_[size_++] = *first;
+      this->array_[size_++] = *first;
     }
   };
 
   vecarray(const std::vector<T> &arr) {
     TV_ASSERT(arr.size() <= N);
     for (size_t i = 0; i < arr.size(); ++i) {
-      array_[i] = arr[i];
+      this->array_[i] = arr[i];
     }
     size_ = arr.size();
   }
@@ -485,16 +485,16 @@ public:
 #ifdef TV_DEBUG
   TV_HOST_DEVICE_INLINE T &operator[](int idx) {
     TV_ASSERT(idx >= 0 && idx < size_);
-    return array_[idx];
+    return this->array_[idx];
   }
   TV_HOST_DEVICE_INLINE const T &operator[](int idx) const {
     TV_ASSERT(idx >= 0 && idx < size_);
-    return array_[idx];
+    return this->array_[idx];
   }
 #else
-  TV_HOST_DEVICE_INLINE constexpr T &operator[](int idx) { return array_[idx]; }
+  TV_HOST_DEVICE_INLINE constexpr T &operator[](int idx) { return this->array_[idx]; }
   TV_HOST_DEVICE_INLINE constexpr const T &operator[](int idx) const {
-    return array_[idx];
+    return this->array_[idx];
   }
 #endif
 
@@ -502,7 +502,7 @@ public:
 #ifdef TV_DEBUG
     TV_ASSERT(size_ < N);
 #endif
-    array_[size_++] = s;
+    this->array_[size_++] = s;
   }
   TV_HOST_DEVICE_INLINE void pop_back() {
 #ifdef TV_DEBUG
@@ -514,25 +514,25 @@ public:
   TV_HOST_DEVICE_INLINE size_t size() const { return size_; }
   TV_HOST_DEVICE_INLINE constexpr size_t max_size() const { return N; }
 
-  TV_HOST_DEVICE_INLINE const T *data() const { return array_; }
-  TV_HOST_DEVICE_INLINE T *data() { return array_; }
+  TV_HOST_DEVICE_INLINE const T *data() const { return this->array_; }
+  TV_HOST_DEVICE_INLINE T *data() { return this->array_; }
   TV_HOST_DEVICE_INLINE size_t empty() const { return size_ == 0; }
 
-  TV_HOST_DEVICE_INLINE iterator begin() { return iterator(array_); }
-  TV_HOST_DEVICE_INLINE iterator end() { return iterator(array_ + size_); }
+  TV_HOST_DEVICE_INLINE iterator begin() { return iterator(this->array_); }
+  TV_HOST_DEVICE_INLINE iterator end() { return iterator(this->array_ + size_); }
   TV_HOST_DEVICE_INLINE constexpr const_iterator begin() const {
-    return const_iterator(array_);
+    return const_iterator(this->array_);
   }
 
   TV_HOST_DEVICE_INLINE constexpr const_iterator end() const {
-    return const_iterator(array_ + size_);
+    return const_iterator(this->array_ + size_);
   }
   TV_HOST_DEVICE_INLINE constexpr const_iterator cbegin() const {
-    return const_iterator(array_);
+    return const_iterator(this->array_);
   }
 
   TV_HOST_DEVICE_INLINE constexpr const_iterator cend() const {
-    return const_iterator(array_ + size_);
+    return const_iterator(this->array_ + size_);
   }
 #ifndef __CUDACC_RTC__
   constexpr const_reverse_iterator crbegin() const noexcept {
@@ -580,7 +580,7 @@ public:
   }
 
   TV_HOST_DEVICE_INLINE constexpr const_reference front() const noexcept {
-    return array_[0];
+    return this->array_[0];
   }
 
   TV_HOST_DEVICE_INLINE reference back() noexcept {
@@ -588,11 +588,10 @@ public:
   }
 
   TV_HOST_DEVICE_INLINE const_reference back() const noexcept {
-    return size_ ? array_[size_ - 1] : array_[0];
+    return size_ ? this->array_[size_ - 1] : this->array_[0];
   }
 
 protected:
-  T array_[N];
   size_t size_ = 0;
 };
 

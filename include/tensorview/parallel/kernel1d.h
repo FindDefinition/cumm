@@ -59,9 +59,9 @@ void kernel_1d_impl(Context ctx, int device, size_t size, F &&f,
   static_assert(is_nv_host_device_func,
                 "only support extend lambda with __host__ __device__");
 #endif
-  static_assert(argument_size_v<F> == sizeof...(args) + (MapMode ? 1 : 3),
-                "your lambda must have N + 1(3 if not MapMode) arg (begin, "
-                "[end, step])");
+  // static_assert(argument_size_v<F> == sizeof...(args) + (MapMode ? 1 : 3),
+  //               "your lambda must have N + 1(3 if not MapMode) arg (begin, "
+  //               "[end, step])");
   if (device == -1) {
 #ifdef _OPENMP
     int64_t begin = 0;
@@ -154,9 +154,9 @@ void kernel_1d_impl_cuda(Context ctx, int device, size_t size, F &&f,
   static_assert(is_nv_host_device_func,
                 "only support extend lambda with __host__ __device__");
 #endif
-  static_assert(argument_size_v<F> == sizeof...(args) + (MapMode ? 1 : 3),
-                "your lambda must have N + 1(3 if not MapMode) arg (begin, "
-                "[end, step])");
+  // static_assert(argument_size_v<F> == sizeof...(args) + (MapMode ? 1 : 3),
+  //               "your lambda must have N + 1(3 if not MapMode) arg (begin, "
+  //               "[end, step])");
   if (device == -1) {
     TV_THROW_INVALID_ARG("this function only support cuda tensors.")
   } else {

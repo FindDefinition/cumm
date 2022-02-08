@@ -83,6 +83,16 @@ template <size_t NumThreads = 1024> struct LaunchEx {
                          args_vec, 0));     // arguments
   }
 
+  template <class... Args>
+  void run_launch_driver_api(CUfunction kernel, Args &&...args) {
+    void *args_vec[] = {&args...};
+    TV_CUDA_RESULT_CHECK(
+        cuLaunchKernel(kernel, blocks.x, blocks.y, blocks.z, // grid dim
+                       threads.x, threads.y, threads.z,      // block dim
+                       smem_size, stream, // shared mem and stream
+                       args_vec, 0));     // arguments
+  }
+
   dim3 blocks;
   dim3 threads;
   int64_t smem_size;

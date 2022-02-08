@@ -359,3 +359,15 @@ constexpr const char *type_s =
                            tv::dtype_str(TYPE), "'");                          \
     }                                                                          \
   }()
+
+
+#define TV_DISPATCH_I32_I64(TYPE, NAME, ...)                                   \
+  [&] {                                                                        \
+    switch (TYPE) {                                                            \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::int32, int32_t, __VA_ARGS__)              \
+      TV_PRIVATE_CASE_TYPE(NAME, tv::int64, int64_t, __VA_ARGS__)              \
+    default:                                                                   \
+      TV_THROW_INVALID_ARG(#NAME, " not implemented for '",                    \
+                           tv::dtype_str(TYPE), "'");                          \
+    }                                                                          \
+  }()

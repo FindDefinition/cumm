@@ -955,6 +955,17 @@ public:
     return res;
   }
 
+  Tensor transpose(int64_t dim0, int64_t dim1) {
+    if (dim0 == dim1) {
+      return *this;
+    }
+    auto new_shape = this->shape();
+    auto new_stride = this->stride();
+    std::swap(new_stride[dim0],new_stride[dim1]);
+    std::swap(new_shape[dim0], new_shape[dim1]);
+    return as_strided(new_shape, new_stride, offset_);
+  }
+
   Tensor slice(int dim, TV_GLOBAL_INDEX start, TV_GLOBAL_INDEX end,
                TV_GLOBAL_INDEX step, bool start_is_none,
                bool end_is_none) const {
@@ -1058,7 +1069,10 @@ public:
     storage_->zero_(byte_offset(), raw_size(), ctx);
     return *this;
   }
-
+  bool is_col_major_matrix() const {
+    TV_ASSERT_INVALID_ARG(ndim() == 2, "tensor must be 2d");
+    return stride(0) == 1 && stride(1) == dim(0);
+  }
   uint8_t *raw_data() {
     if (empty()) {
       return nullptr;
@@ -1084,6 +1098,17 @@ public:
 #endif
     }
     return *this;
+  }
+  Tensor to(int device, Context ctx = Context()) const {
+    if (device == -1){
+      return cpu(ctx);
+    }else{
+      #ifdef TV_CUDA
+      return cuda(ctx);
+      #else 
+      TV_THROW_INVALID_ARG("don't compiled with cuda");
+      #endif
+    }
   }
   template <typename T> Tensor &fill_template_(T val) {
     return fill_template_<T>(val, Context());
@@ -1522,6 +1547,8 @@ private:
   bool writeable_ = true;
   bool contiguous_ = true;
 };
+
+
 
 template <typename Os> Os &operator<<(Os &os, const Tensor &tensor) {
   TV_ASSERT_INVALID_ARG(tensor.device() == -1 ||

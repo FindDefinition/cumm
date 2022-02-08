@@ -56,7 +56,7 @@
 #endif
 
 #ifndef TV_MAX_DIM
-#define TV_MAX_DIM 10
+#define TV_MAX_DIM 6
 #endif
 #ifndef TV_GLOBAL_INDEX
 #define TV_GLOBAL_INDEX int64_t

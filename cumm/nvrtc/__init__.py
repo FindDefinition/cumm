@@ -79,6 +79,7 @@ class CummNVRTCModule(tv.NVRTCModule):
         extern_build_meta = BuildMeta()
         for cu in user_cus:
             extern_build_meta += cu.build_meta
+        # this function will call driver init
         arch = tv.get_compute_capability(0)
         opts = ["-std=c++14", f"--gpu-architecture=sm_{arch[0]}{arch[1]}"]
         if Path(cudadevrt_path).exists():
@@ -96,7 +97,8 @@ class CummNVRTCModule(tv.NVRTCModule):
         name_exprs = list(name_to_meta.keys())
         if custom_names is not None:
             name_exprs.extend(custom_names)
-        print("name_exprs", name_exprs)
+        # print(opts)
+        # breakpoint()
         super().__init__(final_code,
                          header_code_dict,
                          opts,

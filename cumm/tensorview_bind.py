@@ -393,6 +393,9 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
          py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
          py::arg("name_exprs") = std::vector<std::string>{})
     .def("ptx", &tv::NVRTCProgram::ptx)
+    .def("to_string", &tv::NVRTCProgram::to_string)
+    .def_static("from_string", &tv::NVRTCProgram::from_string, py::arg("json_string"))
+
     .def("compile_log", &tv::NVRTCProgram::compile_log)
     .def("get_lowered_name", &tv::NVRTCProgram::get_lowered_name);
   
@@ -403,9 +406,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
          py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
          py::arg("name_exprs") = std::vector<std::string>{},
          py::arg("cudadevrt_path") = std::string(""))
-    .def(py::init([](std::shared_ptr<tv::NVRTCProgram> p, std::string path) {
-        return std::make_shared<tv::NVRTCModule>(p, path);
-    }), py::arg("prog"), py::arg("cudadevrt_path") = std::string())
+    .def(py::init(&tv::NVRTCModule::from_program), py::arg("prog"), py::arg("cudadevrt_path") = std::string())
     .def("load", &tv::NVRTCModule::load)
     .def_property_readonly("program", &tv::NVRTCModule::get_program)
     .def("get_lowered_name", &tv::NVRTCModule::get_lowered_name)
@@ -497,6 +498,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
       return ten.as_strided(shape, stride, storage_byte_offset);
     }, py::arg("shape"), py::arg("stride"), py::arg("storage_byte_offset") = 0)
     .def("slice_first_axis", &tv::Tensor::slice_first_axis)
+    .def("transpose", &tv::Tensor::transpose)
     .def("slice_axis", [](const tv::Tensor& ten, int dim, py::object start, py::object stop, py::object step){
       bool start_is_none = start.is_none();
       bool stop_is_none = stop.is_none();

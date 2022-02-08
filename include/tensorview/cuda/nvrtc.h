@@ -24,6 +24,7 @@
 #include <nvrtc.h>
 #include <tensorview/cuda/driver.h>
 #endif
+#include <tensorview/thirdparty/nlohmann/json.hpp>
 
 #define TV_NVRTC_SAFE_CALL(x)                                                  \
   do {                                                                         \
@@ -44,7 +45,7 @@ public:
                std::string program_name = "kernel",
                std::vector<std::string> name_exprs = {})
       : code_(code), headers_(headers), program_name_(program_name + ".cu"),
-        name_exprs_(name_exprs) {
+        name_exprs_(name_exprs), opts_(opts) {
     std::vector<const char *> header_buffers;
     std::vector<const char *> header_names;
     std::vector<const char *> opts_ptrs;
@@ -96,6 +97,7 @@ public:
     TV_THROW_RT_ERR("you must compile with CUDA first to use nvrtc program");
 #endif
   }
+
   static std::shared_ptr<NVRTCProgram>
   create(std::string code,
          std::unordered_map<std::string, std::string> headers = {},
@@ -105,6 +107,35 @@ public:
     return std::make_shared<NVRTCProgram>(code, headers, opts, program_name,
                                           name_exprs);
   }
+
+  static std::shared_ptr<NVRTCProgram> from_string(std::string json_string) {
+    nlohmann::json j = nlohmann::json::parse(json_string);
+    return std::make_shared<NVRTCProgram>(
+        j["code"].get<std::string>(),
+        j["headers"].get<std::unordered_map<std::string, std::string>>(),
+        j["opts"].get<std::vector<std::string>>(),
+        j["program_name"].get<std::string>(),
+        j["name_exprs"].get<std::vector<std::string>>());
+  }
+
+  std::string to_string() const {
+    nlohmann::json j;
+    j["code"] = code_;
+    j["headers"] = headers_;
+    j["opts"] = opts_;
+    j["program_name"] = program_name_;
+    j["name_exprs"] = name_exprs_;
+    return j.dump();
+  }
+
+  std::unordered_map<std::string, std::string> get_predefined_lowered_name_map() const {
+    std::unordered_map<std::string, std::string> res;
+    for (size_t i = 0; i < name_exprs_.size(); ++i) {
+      res[name_exprs_[i]] = get_lowered_name(name_exprs_[i]);
+    }
+    return res;
+  }
+
   ~NVRTCProgram() {
 #ifdef TV_CUDA
     if (prog_) {
@@ -156,6 +187,7 @@ private:
   std::unordered_map<std::string, std::string> headers_;
   std::string program_name_;
   std::vector<std::string> name_exprs_;
+  std::vector<std::string> opts_;
 };
 
 class NVRTCModule {
@@ -181,6 +213,11 @@ public:
     return std::make_shared<NVRTCModule>(
         NVRTCProgram::create(code, headers, opts, program_name, name_exprs),
         cudadevrt_path);
+  }
+  static std::shared_ptr<NVRTCModule>
+  from_program(std::shared_ptr<NVRTCProgram> prog,
+               std::string cudadevrt_path = "") {
+    return std::make_shared<NVRTCModule>(prog, cudadevrt_path);
   }
 
   NVRTCModule &load() {
@@ -226,25 +263,34 @@ public:
 #ifdef TV_CUDA
     auto k = kernel(name);
     int pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k));
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
+        &pi, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, k));
     res["max_threads_per_block"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, k));
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
+        &pi, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, k));
     res["shared_size_bytes"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, k));
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
+        &pi, CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, k));
     res["const_size_bytes"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, k));
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
+        &pi, CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES, k));
     res["local_size_bytes"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_NUM_REGS, k));
+    TV_CUDA_RESULT_CHECK(
+        wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_NUM_REGS, k));
     res["num_regs"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_PTX_VERSION, k));
+    TV_CUDA_RESULT_CHECK(
+        wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_PTX_VERSION, k));
     res["ptx_version"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_BINARY_VERSION, k));
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
+        &pi, CU_FUNC_ATTRIBUTE_BINARY_VERSION, k));
     res["binary_version"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, k));
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
+        &pi, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, k));
     res["max_dynamic_shared_size_bytes"] = pi;
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(&pi, CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT, k));
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
+        &pi, CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT, k));
     res["preferred_shared_memory_carveout"] = pi;
-#endif 
+#endif
     return res;
   }
 
