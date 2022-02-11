@@ -35,8 +35,8 @@ def test_nvrtc():
 
     mod = tv.NVRTCModule(prog)
     mod.load()
-    mod.prepare_launch([1, 1, 1], [128, 1, 1], 0, 0)
-    mod.run_kernel("add", a, a.dim(0))
+    launch = mod.get_launch_param([1, 1, 1], [128, 1, 1], 0, 0)
+    mod.run_kernel("add", launch, a, a.dim(0))
 
     print(a.cpu().numpy())
 

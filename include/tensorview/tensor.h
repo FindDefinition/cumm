@@ -1064,6 +1064,8 @@ public:
 
   size_t itemsize() const { return detail::sizeof_dtype(dtype_); }
   size_t byte_offset() const { return offset_; }
+  bool is_cpu() const { return storage_->is_cpu(); }
+
   Tensor &zero_(Context ctx = Context()) {
     writable_check();
     storage_->zero_(byte_offset(), raw_size(), ctx);
@@ -1085,7 +1087,7 @@ public:
     if (this->device() == -1) {
       std::fill(this->data_ptr<T>(), this->data_ptr<T>() + this->size(), val);
     } else {
-#ifdef TV_CUDA
+#if defined(TV_CUDA) && (TV_USE_CUDA_DRIVER)
       auto tview = this->tview<T, -1, tv::DefaultPtrTraits, int64_t>();
       if (ctx.has_cuda_stream()) {
         tv::FillDev<T, -1, tv::DefaultPtrTraits, int64_t>::run_async(
@@ -1094,7 +1096,7 @@ public:
         tv::FillDev<T, -1, tv::DefaultPtrTraits, int64_t>::run(tview, val);
       }
 #else
-      TV_THROW_INVALID_ARG("don't compiled with cuda");
+      TV_THROW_INVALID_ARG("don't compiled with cuda and cuda driver");
 #endif
     }
     return *this;

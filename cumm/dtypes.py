@@ -119,7 +119,6 @@ DTYPE_TO_NPDTYPE = {
     uint16: np.dtype(np.uint16),
     uint32: np.dtype(np.uint32),
     uint64: np.dtype(np.uint64),
-    tf32: np.dtype(np.float32),
 }  # type: Dict[DType, np.dtype]
 
 TVDTYPE_TO_NPDTYPE = {
@@ -134,13 +133,11 @@ TVDTYPE_TO_NPDTYPE = {
     uint16.tv_dtype: np.dtype(np.uint16),
     uint32.tv_dtype: np.dtype(np.uint32),
     uint64.tv_dtype: np.dtype(np.uint64),
-    tf32.tv_dtype: np.dtype(np.float32),
 }  # type: Dict[int, np.dtype]
 
 NPDTYPE_TO_DTYPE = {v: k
                     for k, v in DTYPE_TO_NPDTYPE.items()
                     }  # type: Dict[np.dtype, DType]
-
 
 def get_dtype_by_shortcut(shortcut: str):
     return SHORTCUT_TO_DTYPE[shortcut]
@@ -157,6 +154,10 @@ def get_npdtype_from_tvdtype(tv_dtype: int):
 def get_dtype_from_npdtype(npdtype: np.dtype):
     return NPDTYPE_TO_DTYPE[npdtype]
 
+def get_dtype_from_tvdtype(tv_dtype: int, use_cuda_half: bool = False):
+    if use_cuda_half and tv_dtype == float16_origin.tv_dtype:
+        return float16_origin
+    return NPDTYPE_TO_DTYPE[TVDTYPE_TO_NPDTYPE[tv_dtype]]
 
 if __name__ == "__main__":
     a = np.zeros((1, 2))

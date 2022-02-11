@@ -123,7 +123,6 @@ protected:
 public:
   Context() : context_ptr_(std::make_shared<detail::ContextCore>()) {}
 
-#ifdef TV_CUDA
   bool has_cuda_stream() {
     check_ptr_valid();
     return context_ptr_->has_item(ContextType::kCudaStream);
@@ -134,17 +133,30 @@ public:
     context_ptr_->create_item(ContextType::kCudaStream);
     return *this;
   }
+
+#ifdef TV_CUDA
   Context &set_cuda_stream(cudaStream_t stream) {
     check_ptr_valid();
     context_ptr_->create_raw_item(ContextType::kCudaStream,
                                   reinterpret_cast<std::uintptr_t>(stream));
     return *this;
   }
+
   cudaStream_t cuda_stream() {
     check_ptr_valid();
     return reinterpret_cast<cudaStream_t>(
         context_ptr_->get_item(ContextType::kCudaStream));
   }
 #endif
+  std::uintptr_t cuda_stream_int() {
+    check_ptr_valid();
+#ifdef TV_CUDA
+    return reinterpret_cast<std::uintptr_t>(cuda_stream());
+#else 
+    return 0;
+#endif 
+  }
+
+
 };
 } // namespace tv

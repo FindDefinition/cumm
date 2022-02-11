@@ -117,6 +117,10 @@ class CummNVRTCModule(tv.NVRTCModule):
                     name = cufilt(name)
                     name = "::".join(name.split("::")[1:])
                     const_values[name] = int(parts[-1].replace(";", " "))
+                elif len(parts) == 5:
+                    name = cufilt(name[:-1])
+                    name = "::".join(name.split("::")[1:])
+                    const_values[name] = 0
         # print(const_values)
         # breakpoint()
         self.const_values = const_values

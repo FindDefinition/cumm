@@ -43,6 +43,10 @@ public:
     checkCudaErrors(cudaEventRecord(event_, stream));
   }
 
+  void stream_wait_me(cudaStream_t stream, int flag = 0) {
+    checkCudaErrors(cudaStreamWaitEvent(stream, event_, flag));
+  }
+
   void sync() {
     checkCudaErrors(cudaEventSynchronize(event_));
   }
@@ -57,12 +61,18 @@ private:
 public:
   std::string name;
 
-  CUDAEvent(std::string name)
+  CUDAEvent(std::string name = "")
       : event_(std::make_shared<CUDAEventCore>()), name(name) {}
 
   CUDAEvent& record(std::uintptr_t stream = 0) {
     TV_ASSERT_RT_ERR(event_, "event is empty");
     event_->record(reinterpret_cast<cudaStream_t>(stream));
+    return *this;
+  }
+
+  CUDAEvent& stream_wait_me(std::uintptr_t stream, int flag = 0) {
+    TV_ASSERT_RT_ERR(event_, "event is empty");
+    event_->stream_wait_me(reinterpret_cast<cudaStream_t>(stream), flag);
     return *this;
   }
 
@@ -95,10 +105,14 @@ private:
 public:
   std::string name;
 
-  CUDAEvent(std::string name) : name(name) {}
+  CUDAEvent(std::string name = "") : name(name) {}
 
   CUDAEvent& record(std::uintptr_t stream = 0) {
     cur_time_ = std::chrono::steady_clock::now();
+    return *this;
+  }
+
+  CUDAEvent& stream_wait_me(std::uintptr_t stream, int flag = 0) {
     return *this;
   }
 

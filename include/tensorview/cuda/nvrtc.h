@@ -164,7 +164,7 @@ public:
 
   std::vector<std::string> name_exprs() const { return name_exprs_; }
 
-  std::string get_lowered_name(std::string name) {
+  std::string get_lowered_name(std::string name) const {
 #ifdef TV_CUDA
     const char *lowered_name;
     TV_NVRTC_SAFE_CALL(nvrtcGetLoweredName(prog_,
@@ -294,9 +294,17 @@ public:
     return res;
   }
 
+  void set_max_dynamic_shared_size_bytes(std::string name, int size){
+#ifdef TV_CUDA
+    auto k = kernel(name);
+    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncSetAttribute(
+        k, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size));
+#endif
+  }
+
   std::shared_ptr<NVRTCProgram> get_program() { return program_; }
 
-  std::string get_lowered_name(std::string name) {
+  std::string get_lowered_name(std::string name) const {
     TV_ASSERT_RT_ERR(program_ != nullptr, "program_ must not empty");
     return program_->get_lowered_name(name);
   }
@@ -311,16 +319,21 @@ public:
     }
     CUstream stream = reinterpret_cast<CUstream>(stream_int);
     std::vector<void *> params;
-    std::vector<void *> tensor_ptrs;
-
+    std::vector<void *> tensor_ptrs(args.size());
+    int cnt = 0;
     for (auto &arg : args) {
       auto &ten = std::get<0>(arg);
       auto arg_type = std::get<1>(arg);
       switch (arg_type) {
       case ArgType::kTensor: {
-        TV_ASSERT_INVALID_ARG(ten.device() == 0, "tensor must be GPU");
-        tensor_ptrs.push_back(ten.raw_data());
-        params.push_back(tensor_ptrs.data() + tensor_ptrs.size() - 1);
+        if (ten.empty()){
+          tensor_ptrs[cnt] = nullptr;
+        }else{
+          TV_ASSERT_INVALID_ARG(ten.device() == 0, "tensor must be GPU");
+          tensor_ptrs[cnt] = ten.raw_data();
+        }
+        params.push_back(&tensor_ptrs[cnt]);
+        cnt += 1;
         break;
       }
       case ArgType::kArray: {

@@ -19,9 +19,40 @@ class TensorViewBind:
 
 import builtins
 from typing import Dict, List, Optional, Tuple, Type, Union, overload
-from enum import Enum 
+from enum import Enum
 
 import numpy as np
+
+class Context:
+    def create_cuda_stream(self) -> None:
+        ... 
+
+    def has_cuda_stream(self) -> bool:
+        ...
+
+    def cuda_stream_int(self) -> int:
+        ... 
+    
+class CUDAEvent:
+    def __init__(self, name: str = "") -> None:
+        ...
+
+    def record(self, stream: int = 0) -> None:
+        ...
+
+    def stream_wait_me(self, stream: int, flag: int = 0) -> None:
+        ...
+
+    def sync(self) -> None:
+        ...
+
+    @staticmethod
+    def duration(start: "CUDAEvent", stop: "CUDAEvent") -> str:
+        ...
+
+    @staticmethod
+    def sync_and_duration(start: "CUDAEvent", stop: "CUDAEvent") -> str:
+        ...
 
 class CUDAKernelTimer:
     def __init__(self, enable: bool) -> None:
@@ -80,6 +111,7 @@ class NVRTCProgram:
     def from_string(json_string: str) -> "NVRTCProgram":
         ...
 
+
 class NVRTCModule:
     kTensor = 0
     kArray = 1
@@ -107,8 +139,7 @@ class NVRTCModule:
                                                                  int]]):
         ...
 
-
-    @property 
+    @property
     def program(self) -> NVRTCProgram:
         ...
 
@@ -117,6 +148,7 @@ class NVRTCModule:
 
     def get_kernel_attributes(self, name: str) -> Dict[str, int]:
         ...
+
 
 class Tensor:
     @overload
@@ -164,6 +196,9 @@ class Tensor:
         ...
 
     def is_contiguous(self) -> bool:
+        ...
+
+    def is_col_major_matrix(self) -> bool:
         ...
 
     def byte_offset(self) -> int:
@@ -295,7 +330,7 @@ class Tensor:
 
 
 def zeros(shape: List[int],
-          dtype: Union[np.dtype, int] = np.float32,
+          dtype: int,
           device: int = -1,
           pinned: bool = False,
           managed: bool = False) -> Tensor:
@@ -306,7 +341,7 @@ def zeros(shape: List[int],
 def from_blob(ptr: int,
               shape: List[int],
               stride: List[int],
-              dtype: Union[np.dtype, int] = np.float32,
+              dtype: int,
               device: int = -1) -> Tensor:
     ...
 
@@ -315,7 +350,7 @@ def from_blob(ptr: int,
 def from_const_blob(ptr: int,
                     shape: List[int],
                     stride: List[int],
-                    dtype: Union[np.dtype, int] = np.float32,
+                    dtype: int,
                     device: int = -1) -> Tensor:
     ...
 
@@ -323,7 +358,7 @@ def from_const_blob(ptr: int,
 @overload
 def from_blob(ptr: int,
               shape: List[int],
-              dtype: Union[np.dtype, int] = np.float32,
+              dtype: int,
               device: int = -1) -> Tensor:
     ...
 
@@ -331,53 +366,67 @@ def from_blob(ptr: int,
 @overload
 def from_const_blob(ptr: int,
                     shape: List[int],
-                    dtype: Union[np.dtype, int] = np.float32,
+                    dtype: int,
                     device: int = -1) -> Tensor:
     ...
 
 
 def empty(shape: List[int],
-          dtype: Union[np.dtype, int] = np.float32,
+          dtype: int,
           device: int = -1,
           pinned: bool = False,
           managed: bool = False) -> Tensor:
     ...
 
 
-def full(shape: List[int],
-         val: Union[int, float],
-         dtype: Union[np.dtype, int] = np.float32,
-         device: int = -1,
-         pinned: bool = False,
-         managed: bool = False) -> Tensor:
+def full_float(shape: List[int],
+               val: float,
+               dtype: int,
+               device: int = -1,
+               pinned: bool = False,
+               managed: bool = False) -> Tensor:
     ...
 
 
-def zeros_managed(shape: List[int],
-                  dtype: Union[np.dtype, int] = np.float32) -> Tensor:
+def full_int(shape: List[int],
+             val: int,
+             dtype: int,
+             device: int = -1,
+             pinned: bool = False,
+             managed: bool = False) -> Tensor:
+    ...
+
+
+def zeros_managed(shape: List[int], dtype: int) -> Tensor:
     ...
 
 
 def from_numpy(arr: np.ndarray) -> Tensor:
     ...
 
+
 def get_compute_capability(index: int) -> Tuple[int, int]:
     ...
-    
+
+
 def is_cpu_only() -> bool:
     ...
 
+
 def cufilt(name: str) -> str:
     ...
+
 
 class ConvOpType(Enum):
     Forward = 0
     BackwardInput = 1
     BackwardWeight = 2
 
+
 class ConvIterAlgo(Enum):
     Analytic = 0
     Optimized = 1
+
 
 class ConvMode(Enum):
     Convolution = 0
@@ -389,22 +438,25 @@ class ConvLayoutType(Enum):
     ChannelLast = 1
     SpatialFirst = 2
 
+
 class ShuffleStrideType(Enum):
     NoShuffle = 0
     ShuffleAC = 1
     ShuffleAB = 2
 
+
 class NVRTCParams:
     cumodule: NVRTCModule
-    kernel_name: str 
-    init_kernel_name: str 
-    constant_name: str 
-    param_size: int 
-    param_storage: Tensor 
-    param_storage_cpu: Tensor 
-    num_threads: int 
-    smem_size: int 
+    kernel_name: str
+    init_kernel_name: str
+    constant_name: str
+    param_size: int
+    param_storage: Tensor
+    param_storage_cpu: Tensor
+    num_threads: int
+    smem_size: int
     mode: int
+
 
 class GemmAlgoDesp:
     dtype_a: int
@@ -424,55 +476,78 @@ class GemmAlgoDesp:
     element_per_access_b: int
     element_per_access_c: int
     access_per_vector: int
-    def __init__(self) -> None: ...
-    def __repr__(self) -> str: ...
+
+    def __init__(self) -> None:
+        ...
+
+    def __repr__(self) -> str:
+        ...
+
     @property
-    def split_k_serial(self) -> bool: ...
+    def split_k_serial(self) -> bool:
+        ...
+
     @split_k_serial.setter
-    def split_k_serial(self, val: bool) -> None: 
+    def split_k_serial(self, val: bool) -> None:
         """
         Args:
             val: 
         """
         ...
+
     @property
-    def split_k_parallel(self) -> bool: ...
+    def split_k_parallel(self) -> bool:
+        ...
+
     @split_k_parallel.setter
-    def split_k_parallel(self, val: bool) -> None: 
+    def split_k_parallel(self, val: bool) -> None:
         """
         Args:
             val: 
         """
         ...
-    def check_valid(self) -> None: ...
+
+    def check_valid(self) -> None:
+        ...
+
     @property
-    def trans_a(self) -> bool: ...
+    def trans_a(self) -> bool:
+        ...
+
     @trans_a.setter
-    def trans_a(self, val: bool) -> None: 
+    def trans_a(self, val: bool) -> None:
         """
         Args:
             val: 
         """
         ...
+
     @property
-    def trans_b(self) -> bool: ...
+    def trans_b(self) -> bool:
+        ...
+
     @trans_b.setter
-    def trans_b(self, val: bool) -> None: 
+    def trans_b(self, val: bool) -> None:
         """
         Args:
             val: 
         """
         ...
+
     @property
-    def trans_c(self) -> bool: ...
+    def trans_c(self) -> bool:
+        ...
+
     @trans_c.setter
-    def trans_c(self, val: bool) -> None: 
+    def trans_c(self, val: bool) -> None:
         """
         Args:
             val: 
         """
         ...
-    def query_workspace_size(self, m: int, n: int, k: int, split_k_slices: int) -> int: 
+
+    def query_workspace_size(self, m: int, n: int, k: int,
+                             split_k_slices: int) -> int:
         """
         Args:
             m: 
@@ -481,7 +556,8 @@ class GemmAlgoDesp:
             split_k_slices: 
         """
         ...
-    def supported(self, m: int, n: int, k: int) -> bool: 
+
+    def supported(self, m: int, n: int, k: int) -> bool:
         """
         Args:
             m: 
@@ -489,7 +565,8 @@ class GemmAlgoDesp:
             k: 
         """
         ...
-    def supported_ldx(self, lda: int, ldb: int, ldc: int) -> bool: 
+
+    def supported_ldx(self, lda: int, ldb: int, ldc: int) -> bool:
         """
         Args:
             lda: 
@@ -497,6 +574,7 @@ class GemmAlgoDesp:
             ldc: 
         """
         ...
+
 
 class ConvAlgoDesp(GemmAlgoDesp):
     ndim: int
@@ -510,35 +588,48 @@ class ConvAlgoDesp(GemmAlgoDesp):
     interleave_o: int
     mask_sparse: bool
     increment_k_first: bool
-    def __init__(self, ndim: int, op_type: ConvOpType) -> None: 
+
+    def __init__(self, ndim: int, op_type: ConvOpType) -> None:
         """
         Args:
             ndim: 
             op_type: 
         """
         ...
-    def __repr__(self) -> str: ...
+
+    def __repr__(self) -> str:
+        ...
+
     @staticmethod
-    def conv_iwo_012_to_abc(op_type: ConvOpType) -> List[int]: 
+    def conv_iwo_012_to_abc(op_type: ConvOpType) -> List[int]:
         """
         Args:
             op_type: 
         """
         ...
+
     @staticmethod
-    def gemm_abc_012_to_iwo(op_type: ConvOpType) -> List[int]: 
+    def gemm_abc_012_to_iwo(op_type: ConvOpType) -> List[int]:
         """
         Args:
             op_type: 
         """
         ...
+
     @property
-    def dtype_input(self) -> int: ...
+    def dtype_input(self) -> int:
+        ...
+
     @property
-    def dtype_weight(self) -> int: ...
+    def dtype_weight(self) -> int:
+        ...
+
     @property
-    def dtype_output(self) -> int: ...
-    def supported(self, m: int, n: int, k: int, C: int, K: int, mask_width: int) -> bool: 
+    def dtype_output(self) -> int:
+        ...
+
+    def supported(self, m: int, n: int, k: int, C: int, K: int,
+                  mask_width: int) -> bool:
         """
         Args:
             m: 
@@ -549,7 +640,9 @@ class ConvAlgoDesp(GemmAlgoDesp):
             mask_width: 
         """
         ...
-    def query_conv_workspace_size(self, m: int, n: int, k: int, split_k_slices: int, kv: int) -> int: 
+
+    def query_conv_workspace_size(self, m: int, n: int, k: int,
+                                  split_k_slices: int, kv: int) -> int:
         """
         Args:
             m: 
@@ -559,7 +652,8 @@ class ConvAlgoDesp(GemmAlgoDesp):
             kv: 
         """
         ...
-    def supported_ldx_conv(self, ldi: int, ldw: int, ldo: int) -> bool: 
+
+    def supported_ldx_conv(self, ldi: int, ldw: int, ldo: int) -> bool:
         """
         Args:
             ldi: 
@@ -568,52 +662,67 @@ class ConvAlgoDesp(GemmAlgoDesp):
         """
         ...
 
+
 class GemmParams:
     algo_desp: GemmAlgoDesp
     split_k_slices: int
-    workspace: Tensor =  Tensor()
-    a_inds: Tensor =  Tensor()
-    b_inds: Tensor =  Tensor()
-    c_inds: Tensor =  Tensor()
+    workspace: Tensor = Tensor()
+    a_inds: Tensor = Tensor()
+    b_inds: Tensor = Tensor()
+    c_inds: Tensor = Tensor()
     alpha: float
     beta: float
     stream: int
     timer: CUDAKernelTimer
     nvrtc_params: NVRTCParams
-    def __init__(self, timer: CUDAKernelTimer =  CUDAKernelTimer(False)) -> None: 
+
+    def __init__(
+        self, timer: CUDAKernelTimer = CUDAKernelTimer(False)) -> None:
         """
         Args:
             timer: 
         """
         ...
-    def check_valid(self) -> None: ...
+
+    def check_valid(self) -> None:
+        ...
+
     @property
-    def a(self) -> Tensor: ...
+    def a(self) -> Tensor:
+        ...
+
     @a.setter
-    def a(self, val: Tensor) -> None: 
+    def a(self, val: Tensor) -> None:
         """
         Args:
             val: 
         """
         ...
+
     @property
-    def b(self) -> Tensor: ...
+    def b(self) -> Tensor:
+        ...
+
     @b.setter
-    def b(self, val: Tensor) -> None: 
+    def b(self, val: Tensor) -> None:
         """
         Args:
             val: 
         """
         ...
+
     @property
-    def c(self) -> Tensor: ...
+    def c(self) -> Tensor:
+        ...
+
     @c.setter
-    def c(self, val: Tensor) -> None: 
+    def c(self, val: Tensor) -> None:
         """
         Args:
             val: 
         """
         ...
+
 
 class ConvParams:
     conv_algo_desp: ConvAlgoDesp
@@ -631,14 +740,20 @@ class ConvParams:
     reverse_mask: bool
     verbose: bool
     timer: CUDAKernelTimer
-    workspace: Tensor =  Tensor()
-    mask: Tensor =  Tensor()
-    mask_argsort: Tensor =  Tensor()
-    indices: Tensor =  Tensor()
-    mask_output: Tensor =  Tensor()
+    workspace: Tensor = Tensor()
+    mask: Tensor = Tensor()
+    mask_argsort: Tensor = Tensor()
+    indices: Tensor = Tensor()
+    mask_output: Tensor = Tensor()
     stream: int
     nvrtc_params: NVRTCParams
-    def __init__(self, ndim: int, op_type: ConvOpType, timer: CUDAKernelTimer =  CUDAKernelTimer(False)) -> None: 
+
+    def __init__(
+        self,
+        ndim: int,
+        op_type: ConvOpType,
+        timer: CUDAKernelTimer = CUDAKernelTimer(False)
+    ) -> None:
         """
         Args:
             ndim: 
@@ -647,6 +762,10 @@ class ConvParams:
         """
         ...
 
-def run_nvrtc_gemm_kernel(params: GemmParams) -> None: ...
 
-def run_nvrtc_conv_kernel(params: ConvParams) -> None: ...
+def run_nvrtc_gemm_kernel(params: GemmParams) -> None:
+    ...
+
+
+def run_nvrtc_conv_kernel(params: ConvParams) -> None:
+    ...

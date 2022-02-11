@@ -31,6 +31,7 @@ template <typename Tarr> bool is_c_style(const Tarr &arr) {
   return bool(arr.flags() & py::array::c_style);
 }
 
+
 template <typename T, int Rank = -1>
 TensorView<T, Rank> arrayt2tv(py::array_t<T> arr) {
   TV_ASSERT_INVALID_ARG(is_c_style(arr), "array must be c-contiguous array");
@@ -111,7 +112,11 @@ template <typename Tarr> Tensor array2tensor(Tarr &arr) {
   for (int i = 0; i < arr.ndim(); ++i) {
     shape.push_back(arr.shape(i));
   }
-  return tv::from_blob(arr.mutable_data(), shape, get_array_tv_dtype(arr), -1);
+  if (arr.writeable()){
+    return tv::from_blob(arr.mutable_data(), shape, get_array_tv_dtype(arr), -1);
+  }else{
+    return tv::from_blob(arr.data(), shape, get_array_tv_dtype(arr), -1);
+  }
 }
 
 template <typename T> Tensor arrayt2tensor(py::array_t<T> &arr) {

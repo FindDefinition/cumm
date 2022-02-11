@@ -21,10 +21,9 @@ import numpy as np
 from pccm import Argument
 from pccm.middlewares.pybind import (TemplateTypeStmt,
                                      _simple_template_type_parser)
-from torch import tensor
 
 from cumm.core_cc import tensorview_bind
-from cumm.core_cc.tensorview_bind import CUDAKernelTimer
+from cumm.core_cc.tensorview_bind import CUDAKernelTimer, CUDAEvent, Context
 from cumm.core_cc.tensorview_bind import NVRTCModule as _NVRTCModule
 from cumm.core_cc.tensorview_bind import NVRTCProgram, Tensor
 from . import gemm 
@@ -43,6 +42,7 @@ uint8 = 8
 uint16 = 9
 uint32 = 10
 uint64 = 11
+bfloat16 = 12
 tf32 = 13
 
 custom16 = 100
@@ -76,11 +76,14 @@ _SIMPLE_TYPES_TO_TV_DTYPE = {
     "unsigned int": uint32,
     "__half": float16,
     "tv::half_t": float16,
+    "tv::bfloat16_t": bfloat16,
     "at::Half": float16,
 }  # type: Dict[str, int]
 
 _VALID_CONTAINER_TYPES = {"tv::array", "std::array"}
 
+def div_up(a, b):
+    return (a + b - 1) // b 
 
 @dataclass
 class NVRTCArgMeta:
@@ -135,6 +138,18 @@ class NVRTCKernelMeta:
     def __repr__(self) -> str:
         return f"NVRTCKernelMeta[name={self.name},ns={self.ns},args={self.arg_metas}]"
 
+class LaunchParam:
+    def __init__(self,
+                 blocks: Union[Tuple[int, ...], List[int]],
+                 threads: Union[Tuple[int, ...], List[int]],
+                 smem: int = 0,
+                 stream: int = 0) -> None:
+        self.blocks = list(blocks)
+        self.threads = list(threads)
+        assert len(blocks) == 3
+        assert len(threads) == 3
+        self.smem = smem
+        self.stream = stream
 
 class NVRTCModule:
     def __init__(self,
@@ -156,10 +171,6 @@ class NVRTCModule:
                                      name_exprs, cudadevrt_path)
         else:
             self._mod = _NVRTCModule(code, cudadevrt_path)
-        self.blocks = [0, 0, 0]
-        self.threads = [0, 0, 0]
-        self.smem_size = 0
-        self.stream = 0
         self._name_exprs = name_exprs
         self.name_to_meta = name_to_meta
 
@@ -175,25 +186,33 @@ class NVRTCModule:
     def to_string(self):
         return self._mod.program.to_string()
 
-    def prepare_launch(self,
-                       blocks: List[int],
-                       threads: List[int],
-                       smem_size: int = 0,
-                       stream: int = 0):
-        self.blocks = blocks
-        self.threads = threads
-        self.smem_size = smem_size
-        self.stream = stream
-        return self
+    def get_1d_launch_param(self, num: int, smem: int = 0, stream: int = 0):
+        if num > 1024:
+            threads = 1024
+        else:
+            threads = div_up(num, 32) * 32
+        blocks = div_up(num, threads)
+        return LaunchParam((blocks, 1, 1), (threads, 1, 1), smem, stream)
+
+    def get_launch_param(self, blocks: Union[Tuple[int, ...], List[int]],
+        threads: Union[Tuple[int, ...], List[int]], smem_size: int = 0, stream: int = 0):
+        return LaunchParam(blocks, threads, smem_size, stream)
 
     def get_kernel_attrs(self, name: str):
         return self._mod.get_kernel_attributes(name)
 
-    def run_kernel(self, name: str,
+    def run_kernel_unchecked(self, name: str, launch: LaunchParam, *args: Tuple[Tensor, int]):
+        if self.name_to_meta:
+            assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
+            assert len(args) == len(self.name_to_meta[name].args)
+        if self._name_exprs:
+            name = self.get_lowered_name(name)
+        return self._mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.stream, list(args))
+
+    def run_kernel(self, name: str, launch: LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],
                                 Tuple[float, ...], Tuple[int, ...]]):
-        assert np.prod(self.blocks) > 0
-        assert np.prod(self.threads) > 0
         metas: List[NVRTCArgMeta] = [NVRTCArgMeta(False, -1, [])] * len(args)
         if self.name_to_meta:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
@@ -201,7 +220,6 @@ class NVRTCModule:
             metas = self.name_to_meta[name].arg_metas
         if self._name_exprs:
             name = self.get_lowered_name(name)
-
         kernel_args: List[Tuple[Tensor, int]] = []
         for arg, meta in zip(args, metas):
             if meta.valid:
@@ -237,8 +255,7 @@ class NVRTCModule:
                 dtype = float32
                 if isinstance(arg, int):
                     dtype = int64
-                ten = empty([1], dtype, -1)
-                ten.numpy_view()[0] = arg
+                ten = full([1], arg, dtype)
                 kernel_args.append((ten, _NVRTCModule.kArray))
             elif isinstance(arg, (list, tuple)):
                 dtype = np.float32
@@ -251,8 +268,8 @@ class NVRTCModule:
                 assert isinstance(arg, Tensor)
                 kernel_args.append((arg, _NVRTCModule.kTensor))
 
-        return self._mod.run_kernel(name, self.blocks, self.threads,
-                                    self.smem_size, self.stream, kernel_args)
+        return self._mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.stream, kernel_args)
 
     @property
     def program(self):
@@ -261,6 +278,20 @@ class NVRTCModule:
     def get_lowered_name(self, name: str) -> str:
         return self._mod.get_lowered_name(name)
 
+    def tensor_scalar(self, val, dtype: int):
+        return full([1], val, dtype)
+
+    def arg_scalar(self, val, dtype: int):
+        return (full([1], val, dtype), _NVRTCModule.kArray)
+
+    def arg_tensor(self, ten: Tensor):
+        return (ten, _NVRTCModule.kTensor)
+
+    def arg_array(self, arr, dtype: int):
+        arg_array = np.array(arr)
+        ten = empty(list(arg_array.shape), dtype, -1)
+        ten.numpy_view()[:] = arg_array
+        return (ten, _NVRTCModule.kArray)
 
 class nullcontext(contextlib.AbstractContextManager):
     """Context manager that does no additional processing.
@@ -310,7 +341,7 @@ class KernelTimer:
         try:
             pair_name = self._timer.insert_pair("", "start", "stop")
             self._timer.record("start", stream)
-            yield
+            yield self._timer
             self._timer.record("stop", stream)
             if exit_handler is not None:
                 exit_handler(self._timer, pair_name)

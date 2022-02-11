@@ -303,6 +303,12 @@ class TensorView(pccm.Class):
         else:
             self.add_dependency(TensorViewCPU)
 
+class TensorViewParallel(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorView)
+        self.add_include("tensorview/parallel/all.h")
+        self.build_meta.add_cflags("nvcc", "--extended-lambda")
 
 class CummNVRTCLib(pccm.Class):
     def __init__(self):
@@ -357,6 +363,7 @@ class TensorViewNVRTC(pccm.Class):
         self.build_meta.add_includes(include, TENSORVIEW_INCLUDE_PATH)
         self.build_meta.compiler_to_cflags["nvcc"] = ["-DTV_CUDA"]
         self.add_include("tensorview/core/all.h")
+        self.add_include("tensorview/cuda/kernel_utils.h")
 
 
 class TensorViewNVRTCKernel(pccm.Class):

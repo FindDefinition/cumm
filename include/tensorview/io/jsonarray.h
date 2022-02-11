@@ -38,16 +38,48 @@ we can access single tensor without read all data of a json array.
 #include <tensorview/tensor.h>
 #include <tensorview/thirdparty/nlohmann/json.hpp>
 #include <unordered_map>
+#include <fstream>
 
 namespace tv {
 namespace io {
 using json = nlohmann::json;
-constexpr const char *kJsonArrayKey = "__tensorview_io_json_index";
+constexpr const char *kJsonArrayKey = "__cumm_io_json_index";
+
+inline json json_idx(size_t i) {
+  json res;
+  res[kJsonArrayKey] = i;
+  return res;
+}
 
 struct JsonArray {
   json data;
   std::vector<tv::Tensor> tensors;
+
+  void assign(std::string name, tv::Tensor ten){
+    data[name] = json_idx(tensors.size());
+    tensors.push_back(ten);
+  }
+
+  void assign(std::string name, std::vector<tv::Tensor> tens){
+    std::vector<json> is_idxes;
+    for (auto& t : tens){
+      is_idxes.push_back(json_idx(tensors.size()));
+      tensors.push_back(t);
+    }
+    data[name] = is_idxes;
+  }
+
+  void assign(std::string name, std::unordered_map<std::string, tv::Tensor> ten_map){
+    std::unordered_map<std::string, json> is_idxes;
+    for (auto& p : ten_map){
+      is_idxes[p.first] = json_idx(tensors.size());
+      tensors.push_back(p.second);
+    }
+    data[name] = is_idxes;
+  }
+
 };
+
 
 namespace detail {
 template <typename K, typename V, typename Hash>
@@ -60,7 +92,7 @@ inverse_map(const std::unordered_map<K, V, Hash> &dict) {
   return res;
 }
 
-int64_t align_offset(int64_t offset, int64_t n) {
+inline int64_t align_offset(int64_t offset, int64_t n) {
   if (n <= 0) {
     return offset;
   }
@@ -92,10 +124,7 @@ template <typename Tbuffer> JsonArray decode(const Tbuffer &buffer) {
     auto dtype = array_meta["dtype"].template get<int64_t>();
     auto offset = array_meta["offset"].template get<int64_t>();
     TV_ASSERT_RT_ERR(shape.size() <= tv::TensorShape::kMaxDim, "error");
-    if (kJsonArrayTypeToTv.find(dtype) == kJsonArrayTypeToTv.end()) {
-      TV_THROW_RT_ERR("dtype not found", dtype);
-    }
-    auto tv_dtype = kJsonArrayTypeToTv.at(dtype);
+    auto tv_dtype = tv::DType(dtype);
     tv::TensorShape shape_tensor;
     for (auto &c : shape) {
       shape_tensor.push_back(c);
@@ -107,8 +136,8 @@ template <typename Tbuffer> JsonArray decode(const Tbuffer &buffer) {
   return {data_skeleton, res_tensors};
 }
 
-inline std::string encode(const std::vector<tv::Tensor> tensors,
-                          json &data_json) {
+inline std::vector<uint8_t> encode(const std::vector<tv::Tensor> tensors,
+                          const json &data_json) {
   json res_json;
   int64_t start = 16;
   constexpr int64_t align_size = 128;
@@ -123,6 +152,7 @@ inline std::string encode(const std::vector<tv::Tensor> tensors,
     array_meta["shape"] = std::vector<int64_t>(shape.begin(), shape.end());
     array_meta["dtype"] = int(tensor.dtype());
     array_meta["offset"] = start_aligned;
+    array_meta["is_np"] = false;
     start = start_aligned + tensor.nbytes();
     res_json["array"].push_back(array_meta);
     offsets.push_back(start_aligned);
@@ -130,7 +160,7 @@ inline std::string encode(const std::vector<tv::Tensor> tensors,
   res_json["data"] = data_json;
   std::string meta_json = res_json.dump();
   size_t total_length = start + meta_json.size();
-  std::string res;
+  std::vector<uint8_t> res;
   res.resize(total_length);
 
   auto res_data = &res[0];
@@ -140,21 +170,36 @@ inline std::string encode(const std::vector<tv::Tensor> tensors,
   for (size_t i = 0; i < tensors.size(); ++i) {
     auto &tensor = tensors[i];
     auto offset = offsets[i];
-    tv::Dispatch<tv::detail::all_tensor_types_t>()(tensor.dtype(), [&](auto I) {
-      using T = TV_DECLTYPE(I);
-      std::copy(tensor.data<T>(), tensor.data<T>() + tensor.size(),
-                reinterpret_cast<T *>(res_data + offset));
-    });
+    if (!tensor.is_cpu()){
+      auto ten_cpu = tensor.cpu();
+      std::copy(ten_cpu.raw_data(), ten_cpu.raw_data() + ten_cpu.nbytes(),
+                reinterpret_cast<uint8_t *>(res_data + offset));
+    }else{
+      std::copy(tensor.raw_data(), tensor.raw_data() + tensor.nbytes(),
+                reinterpret_cast<uint8_t *>(res_data + offset));
+    }
   }
   std::copy(meta_json.begin(), meta_json.end(), res_data + start);
   return res;
 }
 
-inline json json_idx(size_t i) {
-  json res;
-  res[kJsonArrayKey] = i;
-  return res;
+inline std::vector<uint8_t> encode(const JsonArray& jarr) {
+  return encode(jarr.tensors, jarr.data);
 }
+
+inline void dump_to_file(std::string path, const JsonArray& jarr){
+  std::ofstream file;
+  file.open(path, std::ios::out | std::ios::binary);
+  auto buffer = encode(jarr);
+  file.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
+}
+
+inline JsonArray load_from_file(std::string path){
+  std::ifstream input( path, std::ios::binary );
+  std::vector<uint8_t> buffer(std::istreambuf_iterator<char>(input), {});
+  return decode(buffer);
+}
+
 
 inline json access_idx(json j) {
   return j[kJsonArrayKey].template get<int64_t>();

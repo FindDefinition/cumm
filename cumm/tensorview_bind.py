@@ -325,7 +325,6 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         code = pccm.code()
         code.arg("module_", "pybind11::module_")
         code.raw("""
-
         pybind11::class_<tv::gemm::GemmParams> m_cls(module_, "GemmParams");
         m_cls.def(pybind11::init<tv::CUDAKernelTimer>(),
                   pybind11::arg("timer") = tv::CUDAKernelTimer(false));
@@ -371,11 +370,19 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         code.raw("""
   py::class_<tv::Context, std::shared_ptr<tv::Context>>(m, "Context")
     .def(py::init<>())
-#ifdef TV_CUDA
     .def("create_cuda_stream", &tv::Context::create_cuda_stream)
     .def("has_cuda_stream", &tv::Context::has_cuda_stream)
-#endif
-    ;
+    .def("cuda_stream_int", &tv::Context::cuda_stream_int);
+  
+  py::class_<tv::CUDAEvent, std::shared_ptr<tv::CUDAEvent>>(m, "CUDAEvent")
+    .def(py::init<std::string>(), py::arg("name") = std::string())
+    .def("record", &tv::CUDAEvent::record, py::arg("stream"))
+    .def("stream_wait_me", &tv::CUDAEvent::stream_wait_me, py::arg("stream"), py::arg("flag") = 0)
+    .def("sync", &tv::CUDAEvent::sync)
+    .def_static("duration", &tv::CUDAEvent::duration, py::arg("start"), py::arg("stop"))
+    .def_static("sync_and_duration", &tv::CUDAEvent::sync_and_duration, py::arg("start"), py::arg("stop"));
+
+
   py::class_<tv::CUDAKernelTimer, std::shared_ptr<tv::CUDAKernelTimer>>(m, "CUDAKernelTimer")
     .def(py::init<bool>(), py::arg("enable"))
     .def("push", &tv::CUDAKernelTimer::push, py::arg("name"))
@@ -411,6 +418,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def_property_readonly("program", &tv::NVRTCModule::get_program)
     .def("get_lowered_name", &tv::NVRTCModule::get_lowered_name)
     .def("get_kernel_attributes", &tv::NVRTCModule::get_kernel_attributes, py::arg("name"))
+    .def("set_max_dynamic_shared_size_bytes", &tv::NVRTCModule::set_max_dynamic_shared_size_bytes)
     .def("run_kernel", &tv::NVRTCModule::run_kernel);
 
   py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")
@@ -515,8 +523,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("squeeze", py::overload_cast<>(&tv::Tensor::squeeze, py::const_))
     .def("squeeze", py::overload_cast<int>(&tv::Tensor::squeeze, py::const_))
     .def("zero_", &tv::Tensor::zero_, py::arg("ctx") = tv::Context())
-    // .def("fill_int_", py::overload_cast<int, tv::Context>(&tv::Tensor::fill_), py::arg("val"), py::arg("ctx") = tv::Context())
-    // .def("fill_float_", py::overload_cast<float, tv::Context>(&tv::Tensor::fill_), py::arg("val"), py::arg("ctx") = tv::Context())
+    .def("fill_int_", py::overload_cast<int, tv::Context>(&tv::Tensor::fill_), py::arg("val"), py::arg("ctx") = tv::Context())
+    .def("fill_float_", py::overload_cast<float, tv::Context>(&tv::Tensor::fill_), py::arg("val"), py::arg("ctx") = tv::Context())
     .def("copy_", [](tv::Tensor& t, const tv::Tensor& other, tv::Context ctx) -> void{
       t.copy_(other, ctx);
     }, py::arg("other"), py::arg("ctx") = tv::Context())
@@ -532,6 +540,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
 
     .def("pinned", &tv::Tensor::pinned)
     .def("is_contiguous", &tv::Tensor::is_contiguous)
+    .def("is_col_major_matrix", &tv::Tensor::is_col_major_matrix)
+
     .def("byte_offset", &tv::Tensor::byte_offset)
 
     .def("unsqueeze", &tv::Tensor::unsqueeze)
@@ -582,12 +592,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   m.def("empty", [](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed){
     return tv::empty(shape, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
-  // m.def("full_int", [](std::vector<int64_t> shape, int val, int dtype, int device, bool pinned, bool managed){
-  //   return tv::full(shape, val, tv::DType(dtype), device, pinned, managed);
-  // }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
-  // m.def("full_float", [](std::vector<int64_t> shape, float val, int dtype, int device, bool pinned, bool managed){
-  //   return tv::full(shape, val, tv::DType(dtype), device, pinned, managed);
-  // }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
+  m.def("full_int", [](std::vector<int64_t> shape, int val, int dtype, int device, bool pinned, bool managed){
+    return tv::full(shape, val, tv::DType(dtype), device, pinned, managed);
+  }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
+  m.def("full_float", [](std::vector<int64_t> shape, float val, int dtype, int device, bool pinned, bool managed){
+    return tv::full(shape, val, tv::DType(dtype), device, pinned, managed);
+  }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
 #ifdef TV_CUDA
   m.def("zeros_managed", [](std::vector<int64_t> shape, int dtype){
     return tv::zeros(shape, tv::DType(dtype), 0, false, true);

@@ -129,6 +129,7 @@ protected:
 
 template <size_t MaxDim = TV_MAX_DIM, typename Tindex = TV_GLOBAL_INDEX>
 struct ShapeBase : public vecarray<Tindex, MaxDim> {
+  static constexpr int kMaxDim = MaxDim;
   TV_HOST_DEVICE_INLINE ShapeBase() : vecarray<Tindex, MaxDim>(){};
   TV_HOST_DEVICE_INLINE ShapeBase(std::initializer_list<Tindex> shape)
       : vecarray<Tindex, MaxDim>(shape) {}
