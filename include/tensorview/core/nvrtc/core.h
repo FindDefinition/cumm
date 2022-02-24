@@ -21,6 +21,47 @@
 // <http://www.gnu.org/licenses/>.
 
 #pragma once
-#include "nvrtc/core.h"
-#include "nvrtc/type_traits.h"
-#include "nvrtc/limits.h"
+
+#ifdef __CUDACC_RTC__
+
+#include <cuda/std/cassert>
+
+typedef signed char int8_t;
+typedef signed short int16_t;
+typedef signed int int32_t;
+typedef signed long long int64_t;
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+typedef unsigned int uint32_t;
+typedef unsigned long long uint64_t;
+
+namespace std {
+typedef unsigned long size_t;
+typedef long ptrdiff_t;
+
+template<class T> 
+TV_HOST_DEVICE_INLINE constexpr const T& max(const T& a, const T& b)
+{
+    return (a < b) ? b : a;
+}
+
+template<class T> 
+TV_HOST_DEVICE_INLINE constexpr const T& min(const T& a, const T& b)
+{
+    return (b < a) ? b : a;
+}
+
+template<class T> 
+TV_HOST_DEVICE_INLINE constexpr T abs(const T& a)
+{
+    return a >= T(0) ? a : -a;
+}
+
+template <typename T1, typename T2>
+struct pair {
+    T1 first;
+    T2 second;
+};
+
+} // namespace std
+#endif

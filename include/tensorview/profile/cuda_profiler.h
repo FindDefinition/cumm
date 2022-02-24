@@ -317,27 +317,34 @@ public:
 
 };
 
-#ifdef TV_CUDA
 class CUDAKernelTimerGuard {
 private:
   std::string name_;
   CUDAKernelTimer timer_;
-  cudaStream_t stream_ = nullptr;
+  std::uintptr_t stream_ = 0;
+  bool print_exit_;
+
+  std::string pair_name_;
 
 public:
   CUDAKernelTimerGuard(std::string name, CUDAKernelTimer timer,
-                       cudaStream_t stream = nullptr)
-      : name_(name), timer_(timer), stream_(stream) {
+                       std::uintptr_t stream = 0, bool print_exit = false)
+      : name_(name), timer_(timer), stream_(stream), print_exit_(print_exit) {
     if (timer_.enable()) {
       {
         if (!name_.empty()) {
           timer_.push(name_);
         }
-        timer_.insert_pair("", "start", "stop");
+        pair_name_ = timer_.insert_pair("", "start", "stop");
         timer_.record("start", reinterpret_cast<std::uintptr_t>(stream_));
       }
     }
   }
+
+#ifdef TV_CUDA
+  CUDAKernelTimerGuard(std::string name, CUDAKernelTimer timer,
+                       cudaStream_t stream = nullptr, bool print_exit = false): CUDAKernelTimerGuard(name, timer, reinterpret_cast<std::uintptr_t>(stream), print_exit){}
+#endif
 
   ~CUDAKernelTimerGuard() {
     if (timer_.enable()) {
@@ -346,10 +353,21 @@ public:
         if (!name_.empty()) {
           timer_.pop();
         }
+        if (print_exit_){
+          tv::ssprint(pair_name_, ":", timer_.get_pair_duration(pair_name_));
+        }
       }
     }
   }
 };
+
+#ifdef TV_CUDA
+inline auto get_measure_and_print_guard(std::string name, cudaStream_t stream = nullptr){
+  return std::make_shared<CUDAKernelTimerGuard>(name, CUDAKernelTimer(true), stream, true);
+};
 #endif
+inline auto get_measure_and_print_guard(std::string name, std::uintptr_t stream = 0){
+  return std::make_shared<CUDAKernelTimerGuard>(name, CUDAKernelTimer(true), stream, true);
+};
 
 } // namespace tv

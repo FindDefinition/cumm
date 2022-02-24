@@ -192,7 +192,7 @@ private:
 
 class NVRTCModule {
 public:
-  enum ArgType { kTensor = 0, kArray = 1, kScalar = 2, kTensorView = 3 };
+  enum ArgType { kTensor = 0, kArray = 1, kTensorView = 2 };
 
   NVRTCModule(std::shared_ptr<NVRTCProgram> program,
               std::string cudadevrt_path = "")
@@ -319,7 +319,7 @@ public:
     }
     CUstream stream = reinterpret_cast<CUstream>(stream_int);
     std::vector<void *> params;
-    std::vector<void *> tensor_ptrs(args.size());
+    std::vector<const void *> tensor_ptrs(args.size());
     int cnt = 0;
     for (auto &arg : args) {
       auto &ten = std::get<0>(arg);
@@ -330,7 +330,7 @@ public:
           tensor_ptrs[cnt] = nullptr;
         }else{
           TV_ASSERT_INVALID_ARG(ten.device() == 0, "tensor must be GPU");
-          tensor_ptrs[cnt] = ten.raw_data();
+          tensor_ptrs[cnt] = ten.const_raw_data();
         }
         params.push_back(&tensor_ptrs[cnt]);
         cnt += 1;
@@ -338,12 +338,7 @@ public:
       }
       case ArgType::kArray: {
         TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
-        params.push_back(ten.raw_data());
-        break;
-      }
-      case ArgType::kScalar: {
-        TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
-        params.push_back(ten.raw_data());
+        params.push_back(const_cast<void*>(reinterpret_cast<const void*>(ten.const_raw_data())));
         break;
       }
       default:
@@ -353,6 +348,7 @@ public:
     TV_CUDA_RESULT_CHECK(wrapper_.cuDrvLaunchKernel(
         kernel(name), blocks[0], blocks[1], blocks[2], threads[0], threads[1],
         threads[2], smem_size, stream, params.data(), 0));
+    TV_CHECK_CUDA_ERR_V2("nvrtc kernel", name, "launch failed.");
 #endif
   }
 #ifdef TV_CUDA

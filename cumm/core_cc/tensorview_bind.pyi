@@ -32,7 +32,13 @@ class Context:
 
     def cuda_stream_int(self) -> int:
         ... 
-    
+
+    def synchronize_stream(self) -> None:
+        ... 
+
+    def set_cuda_stream(self, stream: int) -> "Context":
+        ... 
+
 class CUDAEvent:
     def __init__(self, name: str = "") -> None:
         ...
@@ -201,6 +207,12 @@ class Tensor:
     def is_col_major_matrix(self) -> bool:
         ...
 
+    def is_readonly(self) -> bool:
+        ...
+
+    def get_readonly(self) -> "Tensor":
+        ...
+
     def byte_offset(self) -> int:
         ...
 
@@ -266,6 +278,12 @@ class Tensor:
     def transpose(self, dim0: int, dim1: int) -> "Tensor":
         ...
 
+    @property 
+    def T(self) -> "Tensor":
+        """get transposed matrix. tensor must be 2d.
+        """
+        ...
+
     def select(self, dim: int, index: int) -> "Tensor":
         ...
 
@@ -280,7 +298,7 @@ class Tensor:
         ...
 
     @overload
-    def cpu(self, stream_handle: int) -> "Tensor":
+    def cpu(self, ctx: Context) -> "Tensor":
         ...
 
     @overload
@@ -288,7 +306,7 @@ class Tensor:
         ...
 
     @overload
-    def copy_(self, other: "Tensor", stream_handle: int) -> None:
+    def copy_(self, other: "Tensor", ctx: Context) -> None:
         ...
 
     @overload
@@ -296,7 +314,7 @@ class Tensor:
         ...
 
     @overload
-    def zero_(self, stream_handle: int) -> "Tensor":
+    def zero_(self, ctx: Context) -> "Tensor":
         ...
 
     @overload
@@ -304,7 +322,7 @@ class Tensor:
         ...
 
     @overload
-    def cuda(self, stream_handle: int) -> "Tensor":
+    def cuda(self, ctx: Context) -> "Tensor":
         ...
 
     @overload
@@ -313,7 +331,7 @@ class Tensor:
 
     @overload
     def fill_int_(self, val: Union[int, float],
-                  stream_handle: int) -> "Tensor":
+                  ctx: Context) -> "Tensor":
         ...
 
     @overload
@@ -322,7 +340,7 @@ class Tensor:
 
     @overload
     def fill_float_(self, val: Union[int, float],
-                    stream_handle: int) -> "Tensor":
+                    ctx: Context) -> "Tensor":
         ...
 
     def byte_pointer(self) -> int:
@@ -416,6 +434,12 @@ def is_cpu_only() -> bool:
 def cufilt(name: str) -> str:
     ...
 
+
+def tvdtype_bitsize(dtype: int) -> int:
+    ...
+
+def tvdtype_itemsize(dtype: int) -> int:
+    ...
 
 class ConvOpType(Enum):
     Forward = 0

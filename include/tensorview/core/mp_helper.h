@@ -139,7 +139,39 @@ struct mp_append_impl<L<Ts...>, T> {
   using type = mp_list<Ts..., T>;
 };
 
+template <template <class> class F, class L> struct mp_transform_impl;
+
+template <template <class> class F, template <class...> class L, class... T>
+struct mp_transform_impl<F, L<T...>> {
+  using type = L<F<T>...>;
+};
+
+template <template <class, class> class Op, class Init, class T, class... Ts>
+struct mp_reduce_impl1 {
+  using type = typename Op<T, typename mp_reduce_impl1<Op, Init, Ts...>::type>::type;
+};
+
+template <template <class, class> class Op, class Init, class T> struct mp_reduce_impl1<Op, Init, T> {
+  using type = typename Op<T, Init>::type;
+};
+
+template <template <class, class> class Op, class L, class Init>
+struct mp_reduce_impl;
+
+template <template <class, class> class Op, class Init, template <class...> class L, class... T>
+struct mp_reduce_impl<Op, L<T...>, Init> {
+  using type = typename mp_reduce_impl1<Op, Init, T...>::type;
+};
+
+
+
 } // namespace detail
+
+template <template <class, class> class Op, class L, class Init>
+using mp_reduce = typename detail::mp_reduce_impl<Op, L, Init>::type;
+
+template <template <class> class F, class L>
+using mp_transform = typename detail::mp_transform_impl<F, L>::type;
 
 template <class L, class T>
 using mp_append = typename detail::mp_append_impl<L, T>::type;
@@ -151,6 +183,7 @@ template <class A, template <class...> class B>
 constexpr auto mp_rename_v = detail::mp_rename_v_impl<A, B>::value;
 
 template <class L> using mp_size = mp_rename<L, mp_length>;
+
 #ifndef __CUDACC_RTC__
 template <class L, class F> constexpr F mp_for_each(F &&f) {
   return detail::mp_for_each_impl(mp_rename<L, mp_list>(), std::forward<F>(f));
@@ -163,6 +196,29 @@ template <unsigned N, unsigned... Ns> struct mp_prod_int {
 template <unsigned N> struct mp_prod_int<N> {
   static constexpr unsigned value = N;
 };
+
+
+namespace detail {
+template <typename TA, typename TB> struct mp_max_op_impl {
+  using type =
+      std::integral_constant<typename TA::value_type,
+                             (TA::value > TB::value ? TA::value : TB::value)>;
+};
+template <typename TA, typename TB> struct mp_min_op_impl {
+  using type =
+      std::integral_constant<typename TA::value_type,
+                             (TA::value < TB::value ? TA::value : TB::value)>;
+};
+
+} // namespace detail
+
+template <class L, class Init>
+using mp_reduce_max = mp_reduce<detail::mp_max_op_impl, L, Init>;
+
+template <class L, class Init>
+using mp_reduce_min = mp_reduce<detail::mp_min_op_impl, L, Init>;
+
+
 namespace detail {
 
 template <typename T, typename L> struct mp_append_impl;
@@ -225,49 +281,49 @@ using mp_make_list_c_sequence_reverse =
     decltype(detail::mp_make_list_c_sequence_reverse_impl(
         mp_make_list_c_sequence<int, N>{}));
 
-#ifndef __CUDACC_RTC__
+// #ifndef __CUDACC_RTC__
 
 namespace detail {
 
 template <typename Ret, typename... Args>
-std::integral_constant<size_t, sizeof...(Args)>
-    func_argument_size_helper(Ret (*)(Args...));
+TV_HOST_DEVICE_INLINE std::integral_constant<size_t, sizeof...(Args)>
+     func_argument_size_helper(Ret (*)(Args...));
 
 template <typename Ret, typename F, typename... Args>
-std::integral_constant<size_t, sizeof...(Args)>
-    func_argument_size_helper(Ret (F::*)(Args...));
+TV_HOST_DEVICE_INLINE std::integral_constant<size_t, sizeof...(Args)>
+     func_argument_size_helper(Ret (F::*)(Args...));
 
 template <typename Ret, typename F, typename... Args>
-std::integral_constant<size_t, sizeof...(Args)>
-func_argument_size_helper(Ret (F::*)(Args...) const);
+TV_HOST_DEVICE_INLINE std::integral_constant<size_t, sizeof...(Args)>
+ func_argument_size_helper(Ret (F::*)(Args...) const);
 
 template <typename F>
-decltype(func_argument_size_helper(&F::operator()))
-    func_argument_size_helper(F);
+TV_HOST_DEVICE_INLINE decltype(func_argument_size_helper(&F::operator()))
+     func_argument_size_helper(F);
 
 template <typename Ret, typename Arg, typename... Rest>
-Arg first_argument_helper(Ret (*)(Arg, Rest...));
+TV_HOST_DEVICE_INLINE Arg first_argument_helper(Ret (*)(Arg, Rest...));
 
 template <typename Ret, typename F, typename Arg, typename... Rest>
-Arg first_argument_helper(Ret (F::*)(Arg, Rest...));
+TV_HOST_DEVICE_INLINE Arg first_argument_helper(Ret (F::*)(Arg, Rest...));
 
 template <typename Ret, typename F, typename Arg, typename... Rest>
-Arg first_argument_helper(Ret (F::*)(Arg, Rest...) const);
+TV_HOST_DEVICE_INLINE Arg first_argument_helper(Ret (F::*)(Arg, Rest...) const);
 
 template <typename Ret, typename Arg, typename... Rest>
-Ret result_type_helper(Ret (*)(Arg, Rest...));
+TV_HOST_DEVICE_INLINE Ret result_type_helper(Ret (*)(Arg, Rest...));
 
 template <typename Ret, typename F, typename Arg, typename... Rest>
-Ret result_type_helper(Ret (F::*)(Arg, Rest...));
+TV_HOST_DEVICE_INLINE Ret result_type_helper(Ret (F::*)(Arg, Rest...));
 
 template <typename Ret, typename F, typename Arg, typename... Rest>
-Ret result_type_helper(Ret (F::*)(Arg, Rest...) const);
+TV_HOST_DEVICE_INLINE Ret result_type_helper(Ret (F::*)(Arg, Rest...) const);
 
 template <typename F>
-decltype(first_argument_helper(&F::operator())) first_argument_helper(F);
+TV_HOST_DEVICE_INLINE decltype(first_argument_helper(&F::operator())) first_argument_helper(F);
 
 template <typename F>
-decltype(result_type_helper(&F::operator())) result_type_helper(F);
+TV_HOST_DEVICE_INLINE decltype(result_type_helper(&F::operator())) result_type_helper(F);
 
 } // namespace detail
 
@@ -281,7 +337,7 @@ template <typename T>
 constexpr size_t argument_size_v =
     decltype(detail::func_argument_size_helper(std::declval<T>()))::value;
 
-#endif
+// #endif
 
 } // namespace tv
 

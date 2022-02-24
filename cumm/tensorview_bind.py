@@ -372,6 +372,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def(py::init<>())
     .def("create_cuda_stream", &tv::Context::create_cuda_stream)
     .def("has_cuda_stream", &tv::Context::has_cuda_stream)
+    .def("set_cuda_stream", &tv::Context::set_cuda_stream_int)
+    .def("synchronize_stream", &tv::Context::synchronize_stream)
     .def("cuda_stream_int", &tv::Context::cuda_stream_int);
   
   py::class_<tv::CUDAEvent, std::shared_ptr<tv::CUDAEvent>>(m, "CUDAEvent")
@@ -424,7 +426,6 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")
       .value("kTensor", tv::NVRTCModule::ArgType::kTensor)
       .value("kArray", tv::NVRTCModule::ArgType::kArray)
-      .value("kScalar", tv::NVRTCModule::ArgType::kScalar)
       .export_values();
 
   py::class_<tv::Tensor, std::shared_ptr<tv::Tensor>>(m, "Tensor")
@@ -507,6 +508,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     }, py::arg("shape"), py::arg("stride"), py::arg("storage_byte_offset") = 0)
     .def("slice_first_axis", &tv::Tensor::slice_first_axis)
     .def("transpose", &tv::Tensor::transpose)
+    .def_property_readonly("T", [](const tv::Tensor& ten){
+      TV_ASSERT_INVALID_ARG(ten.ndim() == 2, "you can only use .T with 2d tensor.");
+      return ten.transpose(0, 1);
+    })
     .def("slice_axis", [](const tv::Tensor& ten, int dim, py::object start, py::object stop, py::object step){
       bool start_is_none = start.is_none();
       bool stop_is_none = stop.is_none();
@@ -541,7 +546,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("pinned", &tv::Tensor::pinned)
     .def("is_contiguous", &tv::Tensor::is_contiguous)
     .def("is_col_major_matrix", &tv::Tensor::is_col_major_matrix)
-
+    .def("is_readonly", &tv::Tensor::is_readonly)
+    .def("get_readonly", &tv::Tensor::get_readonly)
     .def("byte_offset", &tv::Tensor::byte_offset)
 
     .def("unsqueeze", &tv::Tensor::unsqueeze)
@@ -622,6 +628,13 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   m.def("from_numpy", [](py::array arr){
     return tv::array2tensor(arr);
   }); 
+  m.def("tvdtype_bitsize", [](int dtype){
+    return tv::bit_size(tv::DType(dtype));
+  }); 
+  m.def("tvdtype_itemsize", [](int dtype){
+    return tv::bit_size(tv::DType(dtype)) / 8;
+  }); 
+
   m.def("cat_first_axis", &tv::cat_first_axis);
   m.def("is_cpu_only", [](){
 #ifdef TV_CUDA
@@ -671,6 +684,5 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   bind_gemm_params(m);
   m.def("run_nvrtc_conv_kernel", &run_nvrtc_conv_kernel, py::arg("params"));
   m.def("run_nvrtc_gemm_kernel", &run_nvrtc_gemm_kernel, py::arg("params"));
-
         """)
         return code

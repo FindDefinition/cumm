@@ -239,7 +239,7 @@ public:
       return new_storage_ptr;
     }
     if (device_ == -1) {
-      
+
       if (pinned_) {
 #ifdef TV_CUDA
         if (ctx.has_cuda_stream()) {
@@ -955,13 +955,13 @@ public:
     return res;
   }
 
-  Tensor transpose(int64_t dim0, int64_t dim1) {
+  Tensor transpose(int64_t dim0, int64_t dim1) const {
     if (dim0 == dim1) {
       return *this;
     }
     auto new_shape = this->shape();
     auto new_stride = this->stride();
-    std::swap(new_stride[dim0],new_stride[dim1]);
+    std::swap(new_stride[dim0], new_stride[dim1]);
     std::swap(new_shape[dim0], new_shape[dim1]);
     return as_strided(new_shape, new_stride, offset_);
   }
@@ -1065,7 +1065,14 @@ public:
   size_t itemsize() const { return detail::sizeof_dtype(dtype_); }
   size_t byte_offset() const { return offset_; }
   bool is_cpu() const { return storage_->is_cpu(); }
-
+  bool is_readonly() const { return !writeable_; }
+  Tensor get_readonly() const {
+    // used for cumm inliner, we can capture const tensor
+    // as const ptr
+    auto res = *this;
+    res.writeable_ = false;
+    return res;
+  }
   Tensor &zero_(Context ctx = Context()) {
     writable_check();
     storage_->zero_(byte_offset(), raw_size(), ctx);
@@ -1080,6 +1087,12 @@ public:
       return nullptr;
     }
     writable_check();
+    return storage_->data() + byte_offset();
+  }
+  const uint8_t *const_raw_data() const {
+    if (empty()) {
+      return nullptr;
+    }
     return storage_->data() + byte_offset();
   }
   template <typename T> Tensor &fill_template_(T val, Context ctx) {
@@ -1102,14 +1115,14 @@ public:
     return *this;
   }
   Tensor to(int device, Context ctx = Context()) const {
-    if (device == -1){
+    if (device == -1) {
       return cpu(ctx);
-    }else{
-      #ifdef TV_CUDA
+    } else {
+#ifdef TV_CUDA
       return cuda(ctx);
-      #else 
+#else
       TV_THROW_INVALID_ARG("don't compiled with cuda");
-      #endif
+#endif
     }
   }
   template <typename T> Tensor &fill_template_(T val) {
@@ -1119,10 +1132,19 @@ public:
   Tensor &fill_(int val, Context ctx = Context()) {
     using int_types_t =
         std::tuple<int32_t, int16_t, int8_t, uint32_t, uint16_t, uint8_t>;
-    Dispatch<int_types_t>()(dtype_, [&](auto I) -> void {
-      using T = TV_DECLTYPE(I);
-      fill_template_<T>(val, ctx);
-    });
+    using int_types_cpu_t = std::tuple<uint64_t, int64_t, int32_t, int16_t,
+                                       int8_t, uint32_t, uint16_t, uint8_t>;
+    if (device() == -1) {
+      Dispatch<int_types_cpu_t>()(dtype_, [&](auto I) -> void {
+        using T = TV_DECLTYPE(I);
+        fill_template_<T>(val, ctx);
+      });
+    } else {
+      Dispatch<int_types_t>()(dtype_, [&](auto I) -> void {
+        using T = TV_DECLTYPE(I);
+        fill_template_<T>(val, ctx);
+      });
+    }
     return *this;
   }
 
@@ -1549,8 +1571,6 @@ private:
   bool writeable_ = true;
   bool contiguous_ = true;
 };
-
-
 
 template <typename Os> Os &operator<<(Os &os, const Tensor &tensor) {
   TV_ASSERT_INVALID_ARG(tensor.device() == -1 ||

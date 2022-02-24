@@ -38,6 +38,10 @@ def group_by(key_func: Callable[[_T], _T2],
 def div_up(a: int, b: int) -> int:
     return (a + b - 1) // b
 
+def align_up(a: int, b: int) -> int:
+    return div_up(a, b) * b
+
+
 
 def unpack(arr_name: str,
            indices: Iterable[int],

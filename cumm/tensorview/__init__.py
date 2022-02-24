@@ -52,6 +52,7 @@ custom64 = 103
 custom80 = 104
 custom96 = 105
 custom128 = 106
+unknown = -1
 
 _SIMPLE_TYPES_TO_TV_DTYPE = {
     "int": int32,
@@ -240,7 +241,8 @@ class NVRTCModule:
                     # we can't ensure arg isn't tv::Tensor.
                     if not isinstance(arg, Tensor):
                         assert not isinstance(arg, Tensor)
-                        arg_array = np.array(arg)
+                        dtype = get_npdtype_from_tvdtype(meta.simple_type)
+                        arg_array = np.array(arg, dtype=dtype)
                         if not arg_array.shape:
                             arg_array = arg_array.reshape(1)
                         assert list(arg_array.shape) == meta.shape
@@ -423,7 +425,8 @@ ALL_TV_TENSOR_DTYPES = set([
 TENSOR_TO_NPDTYPE_MAP = {v: k for k, v in NPDTYPE_TO_TENSOR_MAP.items()}
 TENSOR_TO_NPDTYPE_MAP[tf32] = np.dtype(np.float32)
 
-_SUPPORTED_FILL_INT = {int32, int16, int8, uint32, uint16, uint8}
+_SUPPORTED_FILL_INT = {int32, int16, int8, uint32, uint16, uint8, uint64, int64}
+_SUPPORTED_FILL_INT_CUDA = {int32, int16, int8, uint32, uint16, uint8}
 
 
 def zeros(shape: List[int],
@@ -508,7 +511,10 @@ def full(shape: List[int],
     if tv_dtype == float32:
         return tensorview_bind.full_float(shape, val, tv_dtype, device, pinned,
                                           managed)
-    elif tv_dtype in _SUPPORTED_FILL_INT:
+    elif device == -1 and tv_dtype in _SUPPORTED_FILL_INT:
+        return tensorview_bind.full_int(shape, val, tv_dtype, device, pinned,
+                                        managed)
+    elif device != -1 and tv_dtype in _SUPPORTED_FILL_INT_CUDA:
         return tensorview_bind.full_int(shape, val, tv_dtype, device, pinned,
                                         managed)
     else:
@@ -539,3 +545,9 @@ def is_cpu_only():
 
 def cufilt(name: str):
     return tensorview_bind.cufilt(name)
+
+def tvdtype_bitsize(dtype: int) -> int:
+    return tensorview_bind.tvdtype_bitsize(dtype)
+
+def tvdtype_itemsize(dtype: int) -> int:
+    return tensorview_bind.tvdtype_itemsize(dtype)

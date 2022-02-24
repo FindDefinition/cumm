@@ -18,7 +18,8 @@
 #include "dtypes.h"
 #include "mp_helper.h"
 
-#include "core/array.h"
+#include "core/vecarray.h"
+
 #include "core/defs.h"
 
 #include "prettyprint.h"

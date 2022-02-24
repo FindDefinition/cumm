@@ -364,7 +364,13 @@ class TensorViewNVRTC(pccm.Class):
         self.build_meta.compiler_to_cflags["nvcc"] = ["-DTV_CUDA"]
         self.add_include("tensorview/core/all.h")
         self.add_include("tensorview/cuda/kernel_utils.h")
+        self.add_include("tensorview/core/arrayops/simple.h")
 
+class TensorViewCore(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/core/all.h")
+        self.add_include("tensorview/core/arrayops/simple.h")
 
 class TensorViewNVRTCKernel(pccm.Class):
     def __init__(self):

@@ -128,6 +128,36 @@ inline decltype(torch::kFloat32) tv_type_to_torch(tv::DType t){
   }
 }
 
+inline decltype(torch::kFloat32) tv_type_to_torch_uint_to_int(tv::DType t){
+  switch (t) {
+  case tv::int32:
+    return torch::kInt32;
+  case tv::int16:
+    return torch::kInt16;
+  case tv::int8:
+    return torch::kInt8;
+  case tv::int64:
+    return torch::kInt64;
+  case tv::uint32:
+    return torch::kInt32;
+  case tv::uint16:
+    return torch::kInt16;
+  case tv::uint64:
+    return torch::kInt64;
+  case tv::uint8:
+    return torch::kUInt8;
+  case tv::bool_:
+    return torch::kBool;
+  case tv::float32:
+    return torch::kFloat32;
+  case tv::float64:
+    return torch::kFloat64;
+  case tv::float16:
+    return torch::kHalf;
+  default:
+    TV_THROW_INVALID_ARG("unknown dtype", t);
+  }
+}
 
 template <class... Ts, typename F>
 void dispatch_torch(at::ScalarType t, F &&f) {
@@ -189,27 +219,40 @@ TensorView<T, Rank, PtrTraits, Tindex> torch2tv(const torch::Tensor &tensor) {
 
 inline tv::Tensor torch2tensor(const torch::Tensor &tensor) {
   tv::TensorShape shape;
+  tv::TensorShape stride;
+
   for (auto i : tensor.sizes()) {
     shape.push_back(i);
+  }
+  for (auto i : tensor.strides()) {
+    stride.push_back(i);
   }
   int device = -1;
   if (tensor.device().type() == torch::kCUDA){
     device = 0;
   }
-  return tv::from_blob(tensor.data_ptr(), shape, torch_type_to_tv(tensor.scalar_type()), device);
+  return tv::from_blob(tensor.data_ptr(), shape, stride, torch_type_to_tv(tensor.scalar_type()), device);
 }
 
-inline torch::Tensor tensor2torch(tv::Tensor tensor) {
+inline torch::Tensor tensor2torch(tv::Tensor tensor, bool cast_uint_to_int = false) {
 
   tv::TensorShape shape_tv = tensor.shape();
+  tv::TensorShape stride_tv = tensor.stride();
+
   std::vector<int64_t> shape(shape_tv.begin(), shape_tv.end());
-  torch::TensorOptions opt = torch::TensorOptions().dtype(tv_type_to_torch(tensor.dtype()));
+  std::vector<int64_t> stride(stride_tv.begin(), stride_tv.end());
+
+  auto torch_dtype = tv_type_to_torch_uint_to_int(tensor.dtype());
+  if (!cast_uint_to_int){
+    torch_dtype = tv_type_to_torch(tensor.dtype());
+  }
+  torch::TensorOptions opt = torch::TensorOptions().dtype(torch_dtype);
   if (tensor.device() == -1){
     opt = opt.device(torch::kCPU);
   }else{
     opt = opt.device(torch::kCUDA);
   }
-  return torch::from_blob(tensor.raw_data(), torch::IntArrayRef(shape), opt).clone();
+  return torch::from_blob(tensor.raw_data(), torch::IntArrayRef(shape), torch::IntArrayRef(stride), opt);
 }
 
 

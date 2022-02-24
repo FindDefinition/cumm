@@ -150,7 +150,7 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
     auto __macro_err = cudaGetLastError();                                     \
     if (__macro_err != cudaSuccess) {                                          \
       std::stringstream __macro_s;                                             \
-      __macro_s << __FILE__ << " " << __LINE__ << "\n";                        \
+      __macro_s << __FILE__ << ":" << __LINE__ << "\n";                        \
       __macro_s << "cuda execution failed with error " << __macro_err;         \
       TV_BACKTRACE_PRINT(__macro_s);                                           \
       throw std::runtime_error(__macro_s.str());                               \
@@ -162,7 +162,7 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
     auto __macro_err = cudaGetLastError();                                     \
     if (__macro_err != cudaSuccess) {                                          \
       std::stringstream __macro_s;                                             \
-      __macro_s << __FILE__ << " " << __LINE__ << "\n";                        \
+      __macro_s << __FILE__ << ":" << __LINE__ << "\n";                        \
       __macro_s << "cuda execution failed with error " << __macro_err;         \
       __macro_s << " " << cudaGetErrorString(__macro_err) << "\n";             \
       tv::sstream_print(__macro_s, __VA_ARGS__);                               \
@@ -177,7 +177,7 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
     if (__macro_err != cudaSuccess) {                                          \
       auto error_unused = cudaGetLastError();                                  \
       std::stringstream __macro_s;                                             \
-      __macro_s << __func__ << " " << __FILE__ << " " << __LINE__ << "\n";     \
+      __macro_s << __func__ << " " << __FILE__ << ":" << __LINE__ << "\n";     \
       __macro_s << "cuda failed with error " << __macro_err;                   \
       __macro_s << " " << cudaGetErrorString(__macro_err);                     \
       __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.\n"; \
@@ -193,7 +193,7 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
       const char *errstr;                                                      \
       cuGetErrorString(__macro_err, &errstr);                                  \
       std::stringstream __macro_s;                                             \
-      __macro_s << __func__ << " " << __FILE__ << " " << __LINE__ << "\n";     \
+      __macro_s << __func__ << " " << __FILE__ << ":" << __LINE__ << "\n";     \
       __macro_s << "cuda failed with error " << __macro_err;                   \
       __macro_s << " " << errstr << "\n";                                      \
       __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.";   \

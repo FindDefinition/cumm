@@ -46,7 +46,8 @@ class CummNVRTCModule(tv.NVRTCModule):
                  namespace_root: Optional[Union[str, Path]] = None,
                  verbose: bool = False,
                  cudadevrt_path: str = "",
-                 custom_names: Optional[List[str]] = None) -> None:
+                 custom_names: Optional[List[str]] = None,
+                 verbose_path: str = "") -> None:
         cg = CodeGenerator([], verbose=verbose)
         user_cus = cg.build_graph(cus, namespace_root)
         # iterate cus and get all kernels
@@ -90,9 +91,17 @@ class CummNVRTCModule(tv.NVRTCModule):
             opts.append("-I")
             opts.append(str(inc))
         if verbose:
-            for k, v in header_code_dict.items():
-                print(k)
-                print(v)
+            if verbose_path:
+                verbose_path_p = Path(verbose_path)
+                for k, v in header_code_dict.items():
+                    code_path = verbose_path_p / k
+                    code_path.parent.mkdir(exist_ok=True, parents=True)
+                    with code_path.open("w") as f:
+                        f.write(v)
+            else:
+                for k, v in header_code_dict.items():
+                    print(k)
+                    print(v)
         # print(header_code_dict)
         name_exprs = list(name_to_meta.keys())
         if custom_names is not None:
