@@ -21,7 +21,7 @@ namespace tv {
 
 namespace hash {
 
-template <typename K, typename V, typename Hash, K EmptyKey = empty_key_v<K>,
+template <typename K, typename V, typename Hash = tv::hash::Murmur3Hash<K>, K EmptyKey = default_empty_key_v<K>,
           bool Power2 = false>
 struct LinearHashTable {
 public:
@@ -30,27 +30,30 @@ public:
   using value_type = pair<K, V, EmptyKey>;
   using mapped_type = V;
   using size_type = int32_t;
+  using hash_type = Hash;
   // TODO no way to get constexpr uint repr of key for now.
   // static constexpr auto empty_key_uint = value_type::empty_key_uint;
-  static constexpr auto empty_key = value_type::empty_key;
+  static constexpr auto empty_key = EmptyKey;
 
 private:
   value_type *table_ = nullptr;
   size_type hash_size_;
   key_type_uint empty_key_uint;
-  Hash hash_ftor_ = Hash();
+  static constexpr auto kNumHashArgs = argument_size_v<decltype(hash_type::hash)>;
 
 public:
-  TV_HOST_DEVICE explicit LinearHashTable(value_type *table,
-                                          size_type hash_size)
+  TV_HOST_DEVICE_INLINE explicit LinearHashTable(value_type *table,
+                                                 size_type hash_size)
       : table_(table), hash_size_(hash_size) {
     auto eky = empty_key;
     empty_key_uint = *(reinterpret_cast<const key_type_uint *>(&eky));
   }
 
-  TV_DEVICE_INLINE key_type_uint hash(K key) const {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
-    return hash_ftor_(key_u);
+  template <class... Args>
+  TV_DEVICE_INLINE key_type_uint hash(Args &&...keys) const {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    return hash_type::hash(key_u);
   }
 
   TV_HOST_DEVICE_INLINE size_type size() const { return hash_size_; }
@@ -59,13 +62,17 @@ public:
 
   TV_HOST_DEVICE_INLINE const value_type *data() const { return table_; }
 
-  TV_DEVICE_INLINE void insert(const K &key, const V &value) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+private:
+  template <class... Args>
+  TV_DEVICE_INLINE void insert_raw(const V &value, Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
     while (true) {
       key_type_uint prev =
@@ -82,43 +89,35 @@ public:
       }
     }
   }
-
-  TV_DEVICE_INLINE void insert_add(const K &key, const V &value) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
-    key_type_uint slot;
-    if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
-    } else {
-      slot = hash_ftor_(key_u) % hash_size_;
-    }
-    while (true) {
-      key_type_uint prev =
-          atomicCAS(reinterpret_cast<key_type_uint *>(&table_[slot].first),
-                    empty_key_uint, key_u);
-      if (prev == empty_key_uint || prev == key_u) {
-        atomicAdd(&table_[slot].second, value);
-        break;
-      }
-      if (Power2) {
-        slot = (slot + 1) & (hash_size_ - 1);
-      } else {
-        slot = (slot + 1) % hash_size_;
-      }
-    }
+  template <int... Inds>
+  TV_DEVICE_INLINE void insert_raw(const array<K, kNumHashArgs>& key_arr, const V &value, mp_list_int<Inds...>) {
+    return insert_raw(value, key_arr[Inds]...);
   }
 
-  TV_DEVICE_INLINE value_type lookup(K key) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+public:
+  TV_DEVICE_INLINE void insert(const K& key, const V &value) {
+    static_assert(kNumHashArgs == 1, "you must use tv::array if hash multiple values.");
+    return insert_raw(value, key);
+  }
+
+  TV_DEVICE_INLINE void insert(const array<K, kNumHashArgs>& key_arr, const V &value) {
+    return insert_raw(key_arr, k, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
+  }
+
+  template <class... Args> TV_DEVICE_INLINE value_type lookup(Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
     const value_type *table_ptr = table_;
     while (true) {
       auto val = table_ptr[slot];
-      if (val.first == key) {
+      if (reinterpret_cast<key_type_uint &>(val.first) == key_u) {
         return val;
       }
       if (val.first == empty_key) {
@@ -133,22 +132,25 @@ public:
     return {empty_key, V()};
   }
 
-  TV_DEVICE_INLINE value_type *lookup_ptr(K key) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+  template <class... Args>
+  TV_DEVICE_INLINE size_type lookup_offset(Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
     value_type val;
     while (true) {
       val = table_[slot];
-      if (val.first == key) {
-        return table_ + slot;
+      if (reinterpret_cast<key_type_uint &>(val.first) == key_u) {
+        return slot;
       }
       if (val.first == empty_key) {
-        return nullptr;
+        return -1;
       }
       if (Power2) {
         slot = (slot + 1) & (hash_size_ - 1);
@@ -156,79 +158,11 @@ public:
         slot = (slot + 1) % hash_size_;
       }
     }
-    return nullptr;
-  }
-
-  TV_DEVICE_INLINE void delete_item(K key, V empty_value) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
-    key_type_uint slot;
-    if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
-    } else {
-      slot = hash_ftor_(key_u) % hash_size_;
-    }
-    while (true) {
-      if (table_[slot].first == key) {
-        table_[slot].second = empty_value;
-        return;
-      }
-      if (table_[slot].first == empty_key) {
-        return;
-      }
-      if (Power2) {
-        slot = (slot + 1) & (hash_size_ - 1);
-      } else {
-        slot = (slot + 1) % hash_size_;
-      }
-    }
-    return;
-  }
-
-  void clear(cudaStream_t stream = 0) {
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    launcher(clear_table<LinearHashTable>, *this);
-  }
-
-  tv::Tensor items(mapped_type empty_value, tv::Tensor out = tv::Tensor(),
-                   cudaStream_t stream = nullptr) const {
-    auto count = tv::zeros({1}, tv::int32, 0);
-    if (out.empty()) {
-      out = tv::Tensor({hash_size_}, tv::type_v<value_type>, 0);
-    } else {
-      TV_ASSERT_INVALID_ARG(out.device() == 0 && out.ndim() == 1 &&
-                                out.dtype() == tv::type_v<value_type>,
-                            "error");
-    }
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    auto out_tv = out.tview<value_type, 1>();
-    launcher(iterate_table<LinearHashTable>, *this, out_tv,
-             count.data_ptr<int32_t>(), empty_value);
-    auto count_cpu = count.cpu();
-    auto count_val = count_cpu.item<int32_t>();
-    return out.slice_first_axis(0, count_val);
-  }
-
-  tv::Tensor items(tv::Tensor out = tv::Tensor(),
-                   cudaStream_t stream = nullptr) const {
-    auto count = tv::zeros({1}, tv::int32, 0);
-    if (out.empty()) {
-      out = tv::Tensor({hash_size_}, tv::type_v<value_type>, 0);
-    } else {
-      TV_ASSERT_INVALID_ARG(out.device() == 0 && out.ndim() == 1 &&
-                                out.dtype() == tv::type_v<value_type>,
-                            "error");
-    }
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    auto out_tv = out.tview<value_type, 1>();
-    launcher(iterate_table_oneshot<LinearHashTable>, *this, out_tv,
-             count.data_ptr<int32_t>());
-    auto count_cpu = count.cpu();
-    auto count_val = count_cpu.item<int32_t>();
-    return out.slice_first_axis(0, count_val);
+    return -1;
   }
 };
 
-template <typename K, typename Hash, K EmptyKey = empty_key_v<K>,
+template <typename K, typename Hash = tv::hash::Murmur3Hash<K>, K EmptyKey = default_empty_key_v<K>,
           bool Power2 = false>
 struct LinearHashSet {
 public:
@@ -236,23 +170,27 @@ public:
   using value_type = K;
   using size_type = int32_t;
   static constexpr auto empty_key = EmptyKey;
+  using hash_type = Hash;
 
 private:
   value_type *table_ = nullptr;
   size_type hash_size_;
-  Hash hash_ftor_ = Hash();
   key_type_uint empty_key_uint;
+  static constexpr auto kNumHashArgs = argument_size_v<decltype(hash_type::hash)>;
 
 public:
-  TV_HOST_DEVICE explicit LinearHashSet(value_type *table, size_type hash_size)
+  TV_HOST_DEVICE_INLINE explicit LinearHashSet(value_type *table,
+                                               size_type hash_size)
       : table_(table), hash_size_(hash_size) {
     auto eky = empty_key;
     empty_key_uint = *(reinterpret_cast<const key_type_uint *>(&eky));
   }
 
-  TV_DEVICE_INLINE K hash(K key) const {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
-    return hash_ftor_(key_u);
+  template <class... Args>
+  TV_DEVICE_INLINE key_type_uint hash(Args &&...keys) const {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    return hash_type::hash(key_u);
   }
 
   TV_HOST_DEVICE_INLINE size_type size() const { return hash_size_; }
@@ -261,13 +199,15 @@ public:
 
   TV_HOST_DEVICE_INLINE const value_type *data() const { return table_; }
 
-  TV_DEVICE void insert(const K &key) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+  template <class... Args> TV_DEVICE_INLINE void insert(Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
     while (true) {
       key_type_uint prev =
@@ -284,23 +224,26 @@ public:
     }
   }
 
-  TV_DEVICE value_type *lookup_ptr(K key) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+  template <class... Args>
+  TV_DEVICE_INLINE size_type lookup_offset(Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
-    key_type_uint val;
+    value_type val;
     while (true) {
       val = table_[slot];
-      if (val == key) {
-        return table_ + slot;
+      if (reinterpret_cast<key_type_uint &>(val) == key_u) {
+        return slot;
       }
       // TODO
       if (val == empty_key) {
-        return nullptr;
+        return -1;
       }
       if (Power2) {
         slot = (slot + 1) & (hash_size_ - 1);
@@ -308,51 +251,11 @@ public:
         slot = (slot + 1) % hash_size_;
       }
     }
-    return nullptr;
-  }
-
-  void clear(cudaStream_t stream = 0) {
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    launcher(clear_set<LinearHashSet>, *this);
-  }
-  void clear2(cudaStream_t stream = 0) {
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    launcher(clear_set2<LinearHashSet>, *this);
-  }
-
-  tv::Tensor keys(tv::Tensor out = tv::Tensor(),
-                  cudaStream_t stream = nullptr) const {
-    auto count = tv::zeros({1}, tv::int32, 0);
-    if (out.empty()) {
-      out = tv::Tensor({hash_size_}, tv::type_v<value_type>, 0);
-    } else {
-      TV_ASSERT_INVALID_ARG(out.device() == 0 && out.ndim() == 1 &&
-                                out.dtype() == tv::type_v<value_type>,
-                            "error");
-    }
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    auto out_tv = out.tview<value_type, 1>();
-    launcher(iterate_set<LinearHashSet>, *this, out_tv,
-             count.data_ptr<int32_t>());
-    auto count_cpu = count.cpu();
-    auto count_val = count_cpu.item<int32_t>();
-    return out.slice_first_axis(0, count_val);
-  }
-
-  tv::Tensor probe_lengths() const {
-    auto count = tv::zeros({1}, tv::int32, 0);
-    auto out = tv::Tensor({hash_size_}, tv::int64, 0);
-    auto launcher = tv::cuda::Launch(hash_size_);
-    auto out_tv = out.tview<int64_t, 1>();
-    launcher(set_probe_length<LinearHashSet>, *this, out_tv,
-             count.data_ptr<int32_t>());
-    auto count_cpu = count.cpu();
-    auto count_val = count_cpu.item<int32_t>();
-    return out.slice_first_axis(0, count_val);
+    return -1;
   }
 };
 
-template <typename K, typename V, typename Hash, K EmptyKey = empty_key_v<K>,
+template <typename K, typename V, typename Hash = tv::hash::Murmur3Hash<K>, K EmptyKey = default_empty_key_v<K>,
           bool Power2 = false>
 struct LinearHashTableSplit {
 public:
@@ -364,6 +267,7 @@ public:
   // TODO no way to get constexpr uint repr of key for now.
   // static constexpr auto empty_key_uint = value_type::empty_key_uint;
   static constexpr auto empty_key = EmptyKey;
+  using hash_type = Hash;
 
 private:
   key_type *key_ptr_ = nullptr;
@@ -371,7 +275,8 @@ private:
 
   size_type hash_size_;
   key_type_uint empty_key_uint;
-  Hash hash_ftor_ = Hash();
+
+  static constexpr auto kNumHashArgs = argument_size_v<decltype(hash_type::hash)>;
 
 public:
   TV_HOST_DEVICE explicit LinearHashTableSplit(key_type *key,
@@ -382,9 +287,11 @@ public:
     empty_key_uint = *(reinterpret_cast<const key_type_uint *>(&eky));
   }
 
-  TV_DEVICE_INLINE key_type_uint hash(K key) const {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
-    return hash_ftor_(key_u);
+  template <class... Args>
+  TV_DEVICE_INLINE key_type_uint hash(Args &&...keys) const {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    return hash_type::hash(key_u);
   }
 
   TV_HOST_DEVICE_INLINE size_type size() const { return hash_size_; }
@@ -395,14 +302,17 @@ public:
   TV_HOST_DEVICE_INLINE const mapped_type *value_ptr() const {
     return value_ptr_;
   }
-
-  TV_DEVICE_INLINE void insert(const K &key, const V &value) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+private:
+  template <class... Args>
+  TV_DEVICE_INLINE void insert_raw(const V &value, Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
     while (true) {
       key_type_uint prev =
@@ -420,13 +330,31 @@ public:
     }
   }
 
-  TV_DEVICE_INLINE void insert_key_only(const K &key) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+  template <int... Inds>
+  TV_DEVICE_INLINE void insert_raw(const array<K, kNumHashArgs>& key_arr, const V &value, mp_list_int<Inds...>) {
+    return insert_raw(value, key_arr[Inds]...);
+  }
+
+public:
+  TV_DEVICE_INLINE void insert(const K& key, const V &value) {
+    static_assert(kNumHashArgs == 1, "you must use tv::array if hash multiple values.");
+    return insert_raw(value, key);
+  }
+
+  TV_DEVICE_INLINE void insert(const array<K, kNumHashArgs>& key_arr, const V &value) {
+    return insert_raw(key_arr, k, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
+  }
+
+  template <class... Args>
+  TV_DEVICE_INLINE void insert_key_only(Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
     while (true) {
       key_type_uint prev =
@@ -443,17 +371,20 @@ public:
     }
   }
 
-  TV_DEVICE_INLINE int64_t lookup_offset(K key) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
+  template <class... Args>
+  TV_DEVICE_INLINE size_type lookup_offset(Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(key_u);
     key_type_uint slot;
     if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
+      slot = hash_val & (hash_size_ - 1);
     } else {
-      slot = hash_ftor_(key_u) % hash_size_;
+      slot = hash_val % hash_size_;
     }
     while (true) {
       auto key_target = key_ptr_[slot];
-      if (key_target == key) {
+      if (reinterpret_cast<key_type_uint &>(key_target) == key_u) {
         return slot;
       }
       if (key_target == empty_key) {
@@ -466,74 +397,6 @@ public:
       }
     }
     return -1;
-  }
-
-  TV_DEVICE_INLINE void delete_item(K key, V empty_value) {
-    key_type_uint key_u = *(reinterpret_cast<const key_type_uint *>(&key));
-    key_type_uint slot;
-    if (Power2) {
-      slot = hash_ftor_(key_u) & (hash_size_ - 1);
-    } else {
-      slot = hash_ftor_(key_u) % hash_size_;
-    }
-    while (true) {
-      if (key_ptr_[slot] == key) {
-        value_ptr_[slot] = empty_value;
-        return;
-      }
-      if (key_ptr_[slot] == empty_key) {
-        return;
-      }
-      if (Power2) {
-        slot = (slot + 1) & (hash_size_ - 1);
-      } else {
-        slot = (slot + 1) % hash_size_;
-      }
-    }
-    return;
-  }
-
-  void clear(cudaStream_t stream = 0) {
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    launcher(clear_table<LinearHashTable>, *this);
-  }
-
-  std::tuple<tv::Tensor, tv::Tensor>
-  items(tv::Tensor out_k = tv::Tensor(), tv::Tensor out_v = tv::Tensor(),
-        tv::Tensor count = tv::Tensor(), cudaStream_t stream = nullptr) const {
-    if (count.empty()) {
-      count = tv::empty({1}, tv::type_v<size_type>, 0);
-    }
-    auto ctx = tv::Context();
-    ctx.set_cuda_stream(stream);
-    count.zero_(ctx);
-    if (out_k.empty()) {
-      out_k = tv::Tensor({hash_size_}, tv::type_v<key_type>, 0);
-    } else {
-      TV_ASSERT_INVALID_ARG(out_k.device() == 0 && out_k.ndim() == 1 &&
-                                out_k.itemsize() ==
-                                    sizeof(tv::type_v<key_type>),
-                            "error");
-    }
-    if (out_v.empty()) {
-      out_v = tv::Tensor({hash_size_}, tv::type_v<mapped_type>, 0);
-    } else {
-      TV_ASSERT_INVALID_ARG(out_v.device() == 0 && out_v.ndim() == 1 &&
-                                out_v.itemsize() ==
-                                    sizeof(tv::type_v<mapped_type>),
-                            "error");
-    }
-    TV_ASSERT_INVALID_ARG(out_k.dim(0) == out_v.dim(0), "error");
-
-    auto launcher = tv::cuda::Launch(hash_size_, stream);
-    launcher(iterate_table_split<LinearHashTableSplit, size_type>, *this,
-             reinterpret_cast<key_type *>(out_k.raw_data()),
-             reinterpret_cast<mapped_type *>(out_v.raw_data()), out_k.dim(0),
-             count.data_ptr<size_type>());
-    auto count_cpu = count.cpu(ctx);
-    auto count_val = count_cpu.item<size_type>();
-    return std::make_tuple(out_k.slice_first_axis(0, count_val),
-                           out_v.slice_first_axis(0, count_val));
   }
 };
 

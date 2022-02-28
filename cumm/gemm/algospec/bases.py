@@ -25,7 +25,7 @@ from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
                              GemmOutWarpIterator, GemmSmemIterator,
                              GemmWarpIterator, WarpMma)
 from cumm.gemm.core import MetaArray, metaseq, seq
-
+from .core import CacheOp
 
 class Input(abc.ABC):
     """
@@ -128,6 +128,13 @@ class Mma(abc.ABC):
     def partk(self) -> int:
         raise NotImplementedError
 
+    # @abc.abstractproperty
+    # def cache_op_a(self) -> CacheOp:
+    #     raise NotImplementedError
+
+    # @abc.abstractproperty
+    # def cache_op_b(self) -> CacheOp:
+    #     raise NotImplementedError
 
 class Output(abc.ABC):
     @abc.abstractproperty

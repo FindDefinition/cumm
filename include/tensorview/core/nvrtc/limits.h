@@ -687,7 +687,7 @@ template <> struct numeric_limits<int> {
     return -INT_MIN - 1;
   }
 
-  static _GLIBCXX_CONSTEXPR int max() _GLIBCXX_USE_NOEXCEPT { return INT_MIN; }
+  static _GLIBCXX_CONSTEXPR int max() _GLIBCXX_USE_NOEXCEPT { return INT_MAX; }
 
 #if __cplusplus >= 201103L
   TV_HOST_DEVICE_INLINE static constexpr int lowest() noexcept { return min(); }

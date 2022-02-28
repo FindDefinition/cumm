@@ -46,7 +46,8 @@ class InputVolta(bases.Input):
             trans_a: bool,
             trans_b: bool,
             algo: GemmAlgo = GemmAlgo.Volta,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            tensor_op: Optional[TensorOp] = None):
         self._trans_a = trans_a
         self._trans_b = trans_b
 

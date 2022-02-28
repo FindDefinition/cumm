@@ -67,6 +67,15 @@ class ShuffleStrideType(enum.Enum):
     ShuffleAB = 2
 
 
+class CacheOp(enum.Enum):
+    Always = 0 # cache at all levels - accessed again
+    Global = 1 # Cache at global level
+    Streaming = 2 # Streaming - likely to be accessed once
+    LastUse = 3 # Indicates the line will not be used again
+    Volatile = 4 # Don't cache, and fetch again
+    WriteBack = 5 # Write back at all coherent levels
+    WriteThrough = 6 # Write through to system memory
+
 class TensorOp(object):
     def __init__(self, shape: Tuple[int, int, int], top_dtypes: Optional[str] = None):
         self.shape = seq(*shape)

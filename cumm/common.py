@@ -24,7 +24,7 @@ import pccm
 from ccimport import compat
 
 from cumm.constants import CUMM_CPU_ONLY_BUILD, TENSORVIEW_INCLUDE_PATH
-
+from cumm.constants import PACKAGE_ROOT
 
 def get_executable_path(executable: str) -> str:
     if compat.InWindows:
@@ -271,24 +271,35 @@ class ThrustLib(pccm.Class):
             self.build_meta.includes.append(thrust_include)
 
 
+
 class PyTorchLib(pccm.Class):
     def __init__(self):
         super().__init__()
         spec = importlib.util.find_spec("torch")
-        if spec is None or spec.origin is None:
-            raise ValueError("you need to install torch python first.")
+        if spec is None:
+            raise ValueError(
+                "you need to install torch python")
         origin = Path(spec.origin)
         libtorch = origin.parent
-        self.add_dependency(CUDALibs)
+        self.add_dependency(CUDALibs, TensorView)
 
         self.build_meta.includes.append(str(libtorch / "include"))
-        self.build_meta.includes.append(
-            str(libtorch / "include/torch/csrc/api/include"))
+        self.build_meta.includes.append(str(libtorch / "include/torch/csrc/api/include"))
         torch_lib_paths = [str(libtorch / "lib")]
-        torch_libs = ["c10", "torch", 'torch_cpu']
+        torch_libs = ["c10", "torch", 'torch_cpu', 'torch_python']
         torch_cuda_libs = ["c10_cuda", "torch_cuda"]
         self.build_meta.libraries.extend(torch_libs + torch_cuda_libs)
         self.build_meta.libpaths.extend(torch_lib_paths)
+        self.build_meta.compiler_to_cflags["g++"] = ["-D_GLIBCXX_USE_CXX11_ABI=0"]
+        self.build_meta.compiler_to_cflags["clang++"] = ["-D_GLIBCXX_USE_CXX11_ABI=0"]
+        self.build_meta.compiler_to_cflags["nvcc"] = ["-D_GLIBCXX_USE_CXX11_ABI=0"]
+
+        self.add_include("torch/script.h")
+        self.add_include("torch/extension.h") # include this to add pybind for torch.Tensor
+
+        self.add_include("ATen/cuda/CUDAContext.h")
+        self.add_include("ATen/ATen.h")
+        self.add_include("tensorview/torch_utils.h")
 
 
 class TensorView(pccm.Class):
@@ -365,6 +376,10 @@ class TensorViewNVRTC(pccm.Class):
         self.add_include("tensorview/core/all.h")
         self.add_include("tensorview/cuda/kernel_utils.h")
         self.add_include("tensorview/core/arrayops/simple.h")
+        if compat.InLinux:
+            nvrtc_include = PACKAGE_ROOT / "nvrtc_include"
+            self.build_meta.add_includes(nvrtc_include)
+
 
 class TensorViewCore(pccm.Class):
     def __init__(self):
@@ -386,6 +401,11 @@ class TensorViewHashKernel(pccm.Class):
         self.add_dependency(TensorViewKernel)
         self.add_include("tensorview/hash/all.cu.h")
 
+class TensorViewNVRTCHashKernel(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorViewNVRTC)
+        self.add_include("tensorview/hash/linear.cu.h")
 
 class TensorViewMath(pccm.Class):
     def __init__(self):

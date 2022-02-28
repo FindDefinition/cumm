@@ -366,7 +366,8 @@ class GemmKernel(pccm.ParameterizedClass):
             need_source: bool = True,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
             access_per_vector: int = 1,
-            nvrtc_mode: NVRTCMode = NVRTCMode.Disabled):
+            nvrtc_mode: NVRTCMode = NVRTCMode.Disabled,
+            async_kernel: bool = False):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -388,7 +389,7 @@ class GemmKernel(pccm.ParameterizedClass):
         self.access_per_vector = access_per_vector
         self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
         self.nvrtc_mode = nvrtc_mode
-
+        self.async_kernel = async_kernel
         transpose_gemm = trans_c
         if transpose_gemm:
             self.dtype_a = dtype_b

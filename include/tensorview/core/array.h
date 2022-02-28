@@ -36,7 +36,13 @@
 
 namespace tv {
 
-template <typename T> constexpr int sizeof_bits_v = sizeof(T) * 8;
+template <class T> struct sizeof_bits {
+  static constexpr auto value = sizeof(T) * 8;
+};
+template <> struct sizeof_bits<bool> { static int const value = 1; };
+
+template <class T>
+constexpr size_t sizeof_bits_v = sizeof_bits<std::decay_t<T>>::value;
 
 namespace detail {
 

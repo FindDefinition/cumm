@@ -33,20 +33,18 @@ Cuckoo: if cycle detected during insert, we must rehash whole table.
 
 #pragma once
 #include "hash_core.h"
-#include <tensorview/cuda_utils.h>
 #include <tensorview/device_ops.h>
 #include <tensorview/kernel_utils.h>
-#include <tensorview/tensor.h>
 
 namespace tv {
 namespace hash {
 
 template <typename THashTable>
 __global__ void insert(THashTable table,
-                       tv::TensorView<typename THashTable::value_type, 1> items,
+                       const typename THashTable::value_type* items,
                        size_t size) {
   for (auto i : tv::KernelLoopX<int>(size)) {
-    auto &item = items(i);
+    auto item = items[i];
     table.insert(item.first, item.second);
   }
 }
@@ -68,20 +66,9 @@ __global__ void insert_split(
   }
 }
 
-template <typename THashTable>
-__global__ void
-insert_add_value(THashTable table,
-                 tv::TensorView<typename THashTable::value_type, 1> items,
-                 size_t size) {
-  for (auto i : tv::KernelLoopX<int>(size)) {
-    auto &item = items(i);
-    table.insert_add(item.first, item.second);
-  }
-}
-
 template <typename THashSet>
 __global__ void
-insert_set(THashSet set, tv::TensorView<typename THashSet::value_type, 1> items,
+insert_set(THashSet set, const typename THashSet::value_type* items,
            size_t size) {
   for (auto i : tv::KernelLoopX<int>(size)) {
     set.insert(items[i]);
@@ -91,10 +78,10 @@ insert_set(THashSet set, tv::TensorView<typename THashSet::value_type, 1> items,
 template <typename THashTable>
 __global__ void
 lookup(THashTable table,
-       tv::TensorView<typename THashTable::value_type, 1> item_to_query,
+       typename THashTable::value_type* item_to_query,
        size_t size) {
   for (auto i : tv::KernelLoopX<int>(size)) {
-    auto &item = item_to_query(i);
+    auto &item = item_to_query[i];
     auto query = table.lookup(item.first);
     if (!query.empty()) {
       item.second = query.second;
@@ -119,13 +106,28 @@ query_split(THashTableSplit table,
   }
 }
 
+template <typename THashTableSplit>
+__global__ void
+query_split_benchmark(THashTableSplit table,
+            typename THashTableSplit::key_type *__restrict__ key_ptr,
+            typename THashTableSplit::mapped_type *__restrict__ value_ptr, size_t size) {
+  auto value_data = table.value_ptr();
+
+  for (auto i : tv::KernelLoopX<int>(size)) {
+    auto offset = table.lookup_offset(key_ptr[i]);
+    if (offset != -1) {
+      value_ptr[i] = value_data[offset];
+    }
+  }
+}
+
 template <typename THashTable>
 __global__ void
 lookup_default(THashTable table,
-               tv::TensorView<typename THashTable::value_type, 1> item_to_query,
+               const typename THashTable::value_type* item_to_query,
                typename THashTable::mapped_type empty_value, size_t size) {
   for (auto i : tv::KernelLoopX<int>(size)) {
-    auto &item = item_to_query(i);
+    auto &item = item_to_query[i];
     auto query = table.lookup(item.first);
     if (!query.empty()) {
       item.second = query.second;
@@ -167,15 +169,16 @@ template <typename THashSet> __global__ void clear_set2(THashSet set) {
 template <typename THashTable>
 __global__ void
 iterate_table(THashTable table,
-              tv::TensorView<typename THashTable::value_type, 1> out,
-              int32_t *count, typename THashTable::mapped_type empty_value) {
+              typename THashTable::value_type* out,
+              int32_t *count, typename THashTable::mapped_type empty_value,
+              int size_limit) {
   auto data = table.data();
   for (auto i : tv::KernelLoopX<int>(table.size())) {
     auto &item = data[i];
     if (!item.empty() && item.second != empty_value) {
       int32_t old = tv::cuda::atomicAggInc(count);
-      if (old < out.dim(0)) {
-        out(old) = item;
+      if (old < size_limit) {
+        out[old] = item;
       }
     }
   }
@@ -219,15 +222,16 @@ __global__ void assign_arange_split(THashTableSplit table, TSize *count) {
 template <typename THashTable>
 __global__ void
 iterate_table_oneshot(THashTable table,
-                      tv::TensorView<typename THashTable::value_type, 1> out,
-                      int32_t *count) {
+                    typename THashTable::value_type* out,
+                      int32_t *count,
+                    int size_limit) {
   auto data = table.data();
   for (auto i : tv::KernelLoopX<int>(table.size())) {
     auto &item = data[i];
     if (!item.empty()) {
       int32_t old = tv::cuda::atomicAggInc(count);
-      if (old < out.dim(0)) {
-        out(old) = item;
+      if (old < size_limit) {
+        out[old] = item;
       }
     }
   }
@@ -235,14 +239,15 @@ iterate_table_oneshot(THashTable table,
 
 template <typename THashSet>
 __global__ void
-iterate_set(THashSet set, tv::TensorView<typename THashSet::value_type, 1> out,
-            int32_t *count) {
+iterate_set(THashSet set, typename THashSet::value_type* out,
+            int32_t *count,
+            int size_limit) {
   auto data = set.data();
   for (auto i : tv::KernelLoopX<int>(set.size())) {
     auto &item = data[i];
     if (item != THashSet::empty_key) {
       int32_t old = tv::cuda::atomicAggInc(count);
-      if (old < out.dim(0)) {
+      if (old < size_limit) {
         out[old] = item;
       }
     }
@@ -251,43 +256,37 @@ iterate_set(THashSet set, tv::TensorView<typename THashSet::value_type, 1> out,
 
 template <typename THashTable>
 __global__ void table_probe_length(THashTable table,
-                                   tv::TensorView<int64_t, 1> out,
-                                   int32_t *count) {
+                                   int32_t *out,
+                                   int32_t *count,
+                                   int size_limit) {
   auto data = table.data();
   for (auto i : tv::KernelLoopX<int>(table.size())) {
     auto &item = data[i];
     if (!item.empty()) {
       int32_t old = tv::cuda::atomicAggInc(count);
-      if (old < out.dim(0)) {
-        out[old] = (i - table.hash(item.first)) % table.size();
-      }
-    }
-  }
-}
-
-template <typename THashSet>
-__global__ void set_probe_length(THashSet set, tv::TensorView<int64_t, 1> out,
-                                 int32_t *count) {
-  auto data = set.data();
-  for (auto i : tv::KernelLoopX<int>(set.size())) {
-    auto &item = data[i];
-    if (item != THashSet::empty_key) {
-      int32_t old = tv::cuda::atomicAggInc(count);
-      if (old < out.dim(0)) {
-        out[old] = (i - set.hash(item)) % set.size();
+      if (old < size_limit) {
+        auto hash_val = THashTable::hash_type::hash(reinterpret_cast<THashTable::key_type_uint>(item.first));
+        out[old] = (i - hash_val % table.size());
       }
     }
   }
 }
 
 template <typename THashTable>
-__global__ void
-delete_table(THashTable table,
-             tv::TensorView<typename THashTable::value_type, 1> item_to_query,
-             typename THashTable::mapped_type empty_value) {
-  for (auto i : tv::KernelLoopX<int>(item_to_query.size())) {
-    auto &item = item_to_query(i);
-    table.delete_item(item.first, empty_value);
+__global__ void table_split_probe_length(THashTable table,
+                                   int32_t *out,
+                                   int32_t *count,
+                                   int size_limit) {
+  auto data = table.key_ptr();
+  for (auto i : tv::KernelLoopX<int>(table.size())) {
+    auto key = key_ptr[i];
+    if (key != THashTableSplit::empty_key) {
+      int32_t old = tv::cuda::atomicAggInc(count);
+      if (old < size_limit) {
+        auto hash_val = THashTable::hash_type::hash(reinterpret_cast<THashTable::key_type_uint>(item.first));
+        out[old] = (i - hash_val % table.size());
+      }
+    }
   }
 }
 

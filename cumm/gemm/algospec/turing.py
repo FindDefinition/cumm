@@ -46,7 +46,9 @@ class InputTuring(bases.Input):
             trans_a: bool,
             trans_b: bool,
             algo: GemmAlgo = GemmAlgo.Turing,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            tensor_op: Optional[TensorOp] = None,
+            async_kernel: bool = False):
         m = tile_shape[0]
         n = tile_shape[1]
         k = tile_shape[2]
@@ -66,11 +68,11 @@ class InputTuring(bases.Input):
         self.num_threads = self.warp_count * constants.WARP_SIZE
 
         access_size_bits = 128
+                
         self.alignment_a = access_size_bits // dtype_a.bitsize()
         self.alignment_b = access_size_bits // dtype_b.bitsize()
         self.input_sub_tile_shape_a = seq(1, self.alignment_a)
         self.input_sub_tile_shape_b = seq(1, self.alignment_b)
-        access_size_bits = 128
         if not trans_a:
             warp_shape_raked_a = seq(
                 1, tile_shape[2] // (access_size_bits // dtype_a.bitsize()))
@@ -152,7 +154,8 @@ class MmaTuring(bases.Mma):
                  trans_a: bool,
                  trans_b: bool,
                  tensorop: TensorOp,
-                 algo: GemmAlgo = GemmAlgo.Turing):
+                 algo: GemmAlgo = GemmAlgo.Turing,
+                 async_kernel: bool = False):
         self._input_spec = input_spec
         self.warp_count_shape = tile_shape // warp_tile_shape
         self.warp_count = self.warp_count_shape.prod()

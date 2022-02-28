@@ -362,12 +362,17 @@ public:
 };
 
 #ifdef TV_CUDA
-inline auto get_measure_and_print_guard(std::string name, cudaStream_t stream = nullptr){
+inline auto measure_and_print_guard(std::string name, cudaStream_t stream = nullptr){
   return std::make_shared<CUDAKernelTimerGuard>(name, CUDAKernelTimer(true), stream, true);
 };
 #endif
-inline auto get_measure_and_print_guard(std::string name, std::uintptr_t stream = 0){
+inline auto measure_and_print_guard(std::string name, std::uintptr_t stream = 0){
   return std::make_shared<CUDAKernelTimerGuard>(name, CUDAKernelTimer(true), stream, true);
 };
+
+inline auto measure_guard(std::string name, std::uintptr_t stream = 0){
+  return std::make_shared<CUDAKernelTimerGuard>(name, CUDAKernelTimer(true), stream, true);
+};
+
 
 } // namespace tv

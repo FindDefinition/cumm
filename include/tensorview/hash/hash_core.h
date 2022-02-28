@@ -51,6 +51,38 @@ template <typename T> struct MapTypeToInt {
 template <typename T> struct MapTypeToUnsignedInt {
   using type = typename SizeToInt<sizeof(T), false>::type;
 };
+
+template <typename K>
+struct default_empty_key;
+
+template <>
+struct default_empty_key<int32_t>{
+  static constexpr int32_t value = std::numeric_limits<int32_t>::max();
+};
+
+template <>
+struct default_empty_key<int64_t>{
+  static constexpr int64_t value = std::numeric_limits<int64_t>::max();
+};
+template <>
+struct default_empty_key<uint32_t>{
+  static constexpr uint32_t value = std::numeric_limits<uint32_t>::max();
+};
+
+template <>
+struct default_empty_key<uint64_t>{
+  static constexpr uint64_t value = std::numeric_limits<uint64_t>::max();
+};
+
+struct __place_holder_t;
+
+template <>
+struct default_empty_key<
+    std::conditional<std::is_same<uint64_t, unsigned long long>::value,
+                     __place_holder_t, unsigned long long>::type> {
+  static constexpr uint64_t value = std::numeric_limits<uint64_t>::max();
+};
+
 } // namespace detail
 
 template <int K>
@@ -60,21 +92,17 @@ template <typename K>
 using to_unsigned_t = typename detail::MapTypeToUnsignedInt<K>::type;
 
 template <typename K>
-constexpr to_unsigned_t<K>
-    empty_key_v = std::numeric_limits<to_unsigned_t<K>>::max();
+constexpr K default_empty_key_v = detail::default_empty_key<K>::value;
 
-template <typename K, typename V, to_unsigned_t<K> EmptyKey = empty_key_v<K>>
+template <typename K, typename V, K EmptyKey = default_empty_key_v<K>>
 struct pair {
   K first;
   V second;
   using key_type_uint = to_unsigned_t<K>;
-  static constexpr auto empty_key = EmptyKey;
-  // static constexpr auto empty_key_uint =
-  //     *(reinterpret_cast<const key_type_uint *>(&empty_key));
-  bool TV_HOST_DEVICE_INLINE empty() { return first == empty_key; }
+  TV_HOST_DEVICE_INLINE bool empty() { return first == EmptyKey; }
 };
 
-template <typename T> size_t align_to_power2(T size) {
+template <typename T> TV_HOST_DEVICE size_t align_to_power2(T size) {
   size_t r = 0;
   size_t num_1_bit = size & 1 ? 1 : 0;
   while (size >>= 1) {

@@ -41,10 +41,10 @@ def dev_tf32():
     # params = gen_gemm_params((128, 128, 32),
     #                     (64, 64, 32), 2, "f16,f16,f16,f16,f16",
     #                     kernel.GemmAlgo.Turing, top)[0]
-
+    # ref: [4, 1], [8, 16]
     nvrtc_mode = NVRTCMode.ConstantMemory
 
-    with cudasim.enter_debug_context(True, 3):
+    with cudasim.enter_debug_context(True, 0):
         cutlass_test_tf32()
         ker = gen_gemm_kernels(params, nvrtc_mode=nvrtc_mode)
     print("start")

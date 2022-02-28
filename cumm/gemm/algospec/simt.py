@@ -53,7 +53,8 @@ class InputSimt(bases.Input):
             trans_a: bool,
             trans_b: bool,
             algo: GemmAlgo = GemmAlgo.Simt,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            tensor_op: Optional[TensorOp] = None):
         is_dp4a = algo == GemmAlgo.SimtDP4A
         self._trans_a = trans_a
         self._trans_b = trans_b

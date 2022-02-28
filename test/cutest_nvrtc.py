@@ -1,8 +1,9 @@
 from codeai.astex import lineprof
 
 from cumm import tensorview as tv
-from cumm.constants import TENSORVIEW_INCLUDE_PATH
-
+from cumm.constants import PACKAGE_ROOT, TENSORVIEW_INCLUDE_PATH
+from cumm.inliner import NVRTCInlineBuilder
+from cumm.common import TensorViewNVRTCHashKernel
 
 # @lineprof.lineprof_wrapper_cpp
 def test_nvrtc():
@@ -15,6 +16,7 @@ def test_nvrtc():
     #include <tensorview/gemm/debug.h>
     #include <tensorview/core/arrayops/all.h>
     #include <cuda/std/cfloat>
+    #include <tensorview/hash/linear.cu.h>
 
     extern \"C\" __global__
     void add(float *x, int64_t n)
@@ -48,6 +50,8 @@ constexpr auto c2 = a.op<op::inverse>();
         }
         float fval = -4.6;
         tv::printf2_once(int(fval), static_cast<int>(fval), floorf(fval));
+        int xx = 5;
+        uint32_t yy = reinterpret_cast<uint32_t&>(xx);
     }
     """,
         opts=["--std=c++17", "-I",
@@ -62,6 +66,39 @@ constexpr auto c2 = a.op<op::inverse>();
 
     print(a.cpu().numpy())
 
+def test_nvrtc2():
+    inliner = NVRTCInlineBuilder([TensorViewNVRTCHashKernel], root=PACKAGE_ROOT.parent)
+    # init driver
+    a = tv.zeros([1], tv.float32, 0)
+    keys = tv.zeros([5000], tv.int32, 0)
+    values = tv.zeros([5000], tv.int32, 0)
+    kv = tv.zeros([5000, 2], tv.int32, 0)
+
+    inliner.kernel_1d("wtf", keys.dim(0), 0, f"""
+    tv::printf2_once(tv::hash::LinearHashTableSplit<int, int>::empty_key);
+    $keys[i] = tv::hash::LinearHashTableSplit<int, int>::empty_key;
+    $kv[i * 2] = tv::hash::LinearHashTable<int, int>::empty_key;
+    """)
+    inliner.kernel_1d("wtf2", 1, 0, f"""
+    tv::hash::LinearHashTableSplit<int, int> table($keys, $values, 2500);
+    tv::hash::LinearHashTable<int, int> table2(
+        reinterpret_cast<tv::hash::LinearHashTable<int, int>::value_type*>($kv), 2500);
+
+    table.insert(5, 1);
+    table2.insert(5, 1);
+    """, verbose_path="/home/yy/Projects/cumm/build")
+
+    inliner.kernel_1d("wtf3", a.dim(0), 0, f"""
+    tv::hash::LinearHashTableSplit<int, int> table($keys, $values, 2500);
+        tv::hash::LinearHashTable<int, int> table2(
+        reinterpret_cast<tv::hash::LinearHashTable<int, int>::value_type*>($kv), 2500);
+
+    tv::printf2_once($a[0], table.lookup_offset(5));
+    tv::printf2_once($a[0], table2.lookup_offset(5));
+
+    """)
+    print(a.cpu().numpy())
+
 
 if __name__ == "__main__":
-    test_nvrtc()
+    test_nvrtc2()

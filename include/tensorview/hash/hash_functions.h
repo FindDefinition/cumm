@@ -14,15 +14,84 @@
 
 #pragma once
 #include "hash_core.h"
-#include <tensorview/tensorview.h>
+#include <tensorview/core/all.h>
 
 namespace tv {
 namespace hash {
 
+template <size_t Nbits>
+struct Morton;
+
+template<>
+struct Morton<32>{
+  static constexpr int kNumBits = 32;
+  TV_HOST_DEVICE_INLINE static uint32_t encode(uint32_t x, uint32_t y, uint32_t z){
+    return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) | (split_by_3bits(x) << 0);
+  }
+  TV_HOST_DEVICE_INLINE static tv::array<uint32_t, 3> decode(uint32_t d){
+    return {get_third_bits(d), get_third_bits(d << 1), get_third_bits(d << 2)};
+  }
+  template <uint32_t Axis>
+  TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint32_t d){
+    return get_third_bits(d << Axis);
+  }
+private: 
+  TV_HOST_DEVICE_INLINE static uint32_t split_by_3bits(uint32_t a){
+    uint32_t x = a & 0x000003ff; // we only look at the first 10 bits
+    x = (x | x << 16) & 0x30000ff; 
+    x = (x | x << 8) & 0x0300f00f;
+    x = (x | x << 4) & 0x30c30c3; 
+    x = (x | x << 2) & 0x9249249;
+    return x;
+  }
+  TV_HOST_DEVICE_INLINE static uint32_t get_third_bits(uint32_t a){
+    uint32_t x = a & 0x9249249; // we only look at the first 10 bits
+		x = (x ^ (x >> 2)) & 0x30c30c3;
+		x = (x ^ (x >> 4)) & 0x0300f00f;
+		x = (x ^ (x >> 8)) & 0x30000ff;
+		x = (x ^ (x >> 16)) & 0x000003ff;
+    return x;
+  }
+};
+
+template<>
+struct Morton<64>{
+  static constexpr int kNumBits = 64;
+  TV_HOST_DEVICE_INLINE static uint64_t encode(uint32_t x, uint32_t y, uint32_t z){
+    return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) | (split_by_3bits(x) << 0);
+  }
+  TV_HOST_DEVICE_INLINE static tv::array<uint32_t, 3> decode(uint64_t d){
+    return {get_third_bits(d), get_third_bits(d << 1), get_third_bits(d << 2)};
+  }
+  template <uint32_t Axis>
+  TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint64_t d){
+    return get_third_bits(d << Axis);
+  }
+private: 
+  TV_HOST_DEVICE_INLINE static uint64_t split_by_3bits(uint32_t a){
+    uint64_t x = a & 0x1fffff; // we only look at the first 10 bits
+    x = (x | x << 32) & 0x1f00000000ffff; 
+    x = (x | x << 16) & 0x1f0000ff0000ff; 
+    x = (x | x << 8) & 0x100f00f00f00f00f;
+    x = (x | x << 4) & 0x10c30c30c30c30c3; 
+    x = (x | x << 2) & 0x1249249249249249;
+    return x;
+  }
+  TV_HOST_DEVICE_INLINE static uint32_t get_third_bits(uint64_t a){
+    uint64_t x = a & 0x1249249249249249; // we only look at the first 21 bits
+		x = (x ^ (x >> 2)) & 0x10c30c30c30c30c3;
+		x = (x ^ (x >> 4)) & 0x100f00f00f00f00f;
+		x = (x ^ (x >> 8)) & 0x1f0000ff0000ff;
+		x = (x ^ (x >> 16)) & 0x1f00000000ffff;
+		x = (x ^ (x >> 32)) & 0x1fffff;
+    return uint32_t(x);
+  }
+};
+
 template <typename K> struct Murmur3Hash {
   using key_type = tv::hash::to_unsigned_t<K>;
 
-  key_type TV_HOST_DEVICE_INLINE operator()(key_type k) const {
+  TV_HOST_DEVICE_INLINE static key_type hash(key_type k) {
     k ^= k >> 16;
     k *= 0x85ebca6b;
     k ^= k >> 13;
@@ -30,12 +99,29 @@ template <typename K> struct Murmur3Hash {
     k ^= k >> 16;
     return k;
   }
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) {
+    return x;
+  }
 };
+
+template <typename K> struct SpatialHash {
+  using key_type = tv::hash::to_unsigned_t<K>;
+  TV_HOST_DEVICE_INLINE static key_type hash(uint32_t x, uint32_t y, uint32_t z) {
+    return x * 73856096u ^ y * 193649663u ^ z * 83492791u;
+  }
+  TV_HOST_DEVICE_INLINE static key_type encode(uint32_t x, uint32_t y, uint32_t z) {
+    return Morton<key_type>::encode(x, y, z);
+  }
+};
+
 
 template <typename K> struct IdentityHash {
   using key_type = tv::hash::to_unsigned_t<K>;
 
-  key_type TV_HOST_DEVICE_INLINE operator()(key_type k) const { return k; }
+  TV_HOST_DEVICE_INLINE static key_type hash(key_type k) { return k; }
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) {
+    return x;
+  }
 };
 
 namespace detail {
@@ -66,7 +152,7 @@ struct FNVInternal<
 template <typename K>
 struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
   using key_type = tv::hash::to_unsigned_t<K>;
-  key_type TV_HOST_DEVICE_INLINE operator()(key_type key) const {
+  TV_HOST_DEVICE_INLINE static key_type hash(key_type key) {
     key_type ret = detail::FNVInternal<key_type>::defaultOffsetBasis;
     key_type key_u = *(reinterpret_cast<key_type *>(&key));
     // const char* key_ptr = reinterpret_cast<const char*>(&key);
@@ -77,6 +163,9 @@ struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
       ret *= detail::FNVInternal<key_type>::prime;
     }
     return ret;
+  }
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) {
+    return x;
   }
 };
 

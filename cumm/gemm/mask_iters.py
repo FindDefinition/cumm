@@ -731,7 +731,7 @@ class MaskTileIterator(bases.GemmInputIterator):
             self.access_per_vector, 1)
         element_count = self.thread_access_shape[0] * self.thread_access_shape[
             1] * sub_tile_shape.prod()
-        print("INPUT TAMP", tmap.iterations, tmap.delta)
+        print("INPUT TAMP", tmap.iterations, tmap.delta, num_sub_access, )
         # raise NotImplementedError
         super().__init__(dtype, tmap, sub_tile_shape, element_count,
                          num_sub_access,
@@ -808,12 +808,14 @@ class MaskTileIterator(bases.GemmInputIterator):
         contig = 1
         strided = 0
         code = pccm.code()
+        print("KADVANCE", self.param_class.inc_advance_static)
         code.raw(f"""
         int residue_size = (extent[{self.advance_axis}] - threadblock_offset[{self.advance_axis}]) %
                         {self.tile_shape[self.advance_axis]};
         if (!residue_size) {{
             residue_size = {self.tile_shape[self.advance_axis]};
         }}
+        tv::printf2_once(params_.inc_strided_, params_.inc_next_);
         """)
         if self.last_residual:
             if self.advance_axis == 1:

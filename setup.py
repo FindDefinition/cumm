@@ -148,6 +148,11 @@ class CopyHeaderCallback(ExtCallback):
             if cudadevrt.exists():
                 lib_path.mkdir(0o755)
                 shutil.copy(str(cudadevrt), str(lib_path / "libcudadevrt.a"))
+            # copy nvrtc headers
+            nvrtc_headers = Path("/usr/local/cuda/include/cuda/std")
+            target_dir = Path(__file__).parent / "nvrtc_include" / "cuda" / "std"
+            target_dir.mkdir(0o755)
+            shutil.copytree(target_dir, nvrtc_headers)
 
 
 disable_jit = os.getenv("CUMM_DISABLE_JIT", None)

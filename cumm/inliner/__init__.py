@@ -244,7 +244,7 @@ class NVRTCInlineBuilder(InlineBuilder):
                          build_root=build_root,
                          param_deps=param_deps)
         self.index_name = index_name
-        self.maximum_1d_threads = 1024
+        self.maximum_1d_threads = 256
 
     def get_base_class(self):
         return pccm.Class()
@@ -255,8 +255,10 @@ class NVRTCInlineBuilder(InlineBuilder):
 
         if arg is None:
             code.raw(code_str)
-        if arg == CUDAMode.KernelRaw:
-            return
+            return meta
+        if arg.mode == CUDAMode.KernelRaw:
+            code.raw(code_str)
+            return meta
 
         with code.for_(
                 f"auto {self.index_name} : tv::KernelLoopX<int>({_CUMM_KERNEL_1D_SIZE_NAME})"):
@@ -294,6 +296,7 @@ class NVRTCInlineBuilder(InlineBuilder):
     def kernel_1d(self, name: str, num: int, stream: int,
                   code: Union[str, pccm.FunctionCode], verbose_path: str = ""):
         verbose = verbose_path != ""
+        num = int(num)
         user_arg = _NVRTCInlineParams(CUDAMode.Kernel1D,
                                       self.get_1d_param(num, stream=stream),
                                       verbose, verbose_path)
