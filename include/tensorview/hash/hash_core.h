@@ -80,7 +80,7 @@ template <>
 struct default_empty_key<
     std::conditional<std::is_same<uint64_t, unsigned long long>::value,
                      __place_holder_t, unsigned long long>::type> {
-  static constexpr uint64_t value = std::numeric_limits<uint64_t>::max();
+  static constexpr unsigned long long value = std::numeric_limits<unsigned long long>::max();
 };
 
 } // namespace detail

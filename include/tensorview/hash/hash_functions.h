@@ -19,72 +19,117 @@
 namespace tv {
 namespace hash {
 
-template <size_t Nbits>
-struct Morton;
+namespace detail {
+template <size_t Nbits> struct MortonCore;
 
-template<>
-struct Morton<32>{
-  static constexpr int kNumBits = 32;
-  TV_HOST_DEVICE_INLINE static uint32_t encode(uint32_t x, uint32_t y, uint32_t z){
-    return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) | (split_by_3bits(x) << 0);
-  }
-  TV_HOST_DEVICE_INLINE static tv::array<uint32_t, 3> decode(uint32_t d){
-    return {get_third_bits(d), get_third_bits(d << 1), get_third_bits(d << 2)};
-  }
-  template <uint32_t Axis>
-  TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint32_t d){
-    return get_third_bits(d << Axis);
-  }
-private: 
-  TV_HOST_DEVICE_INLINE static uint32_t split_by_3bits(uint32_t a){
+template <> struct MortonCore<32> {
+  TV_HOST_DEVICE_INLINE static uint32_t split_by_3bits(uint32_t a) {
     uint32_t x = a & 0x000003ff; // we only look at the first 10 bits
-    x = (x | x << 16) & 0x30000ff; 
+    x = (x | x << 16) & 0x30000ff;
     x = (x | x << 8) & 0x0300f00f;
-    x = (x | x << 4) & 0x30c30c3; 
+    x = (x | x << 4) & 0x30c30c3;
     x = (x | x << 2) & 0x9249249;
     return x;
   }
-  TV_HOST_DEVICE_INLINE static uint32_t get_third_bits(uint32_t a){
+  TV_HOST_DEVICE_INLINE static uint32_t get_third_bits(uint32_t a) {
     uint32_t x = a & 0x9249249; // we only look at the first 10 bits
-		x = (x ^ (x >> 2)) & 0x30c30c3;
-		x = (x ^ (x >> 4)) & 0x0300f00f;
-		x = (x ^ (x >> 8)) & 0x30000ff;
-		x = (x ^ (x >> 16)) & 0x000003ff;
+    x = (x ^ (x >> 2)) & 0x30c30c3;
+    x = (x ^ (x >> 4)) & 0x0300f00f;
+    x = (x ^ (x >> 8)) & 0x30000ff;
+    x = (x ^ (x >> 16)) & 0x000003ff;
     return x;
   }
 };
 
-template<>
-struct Morton<64>{
-  static constexpr int kNumBits = 64;
-  TV_HOST_DEVICE_INLINE static uint64_t encode(uint32_t x, uint32_t y, uint32_t z){
-    return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) | (split_by_3bits(x) << 0);
-  }
-  TV_HOST_DEVICE_INLINE static tv::array<uint32_t, 3> decode(uint64_t d){
-    return {get_third_bits(d), get_third_bits(d << 1), get_third_bits(d << 2)};
-  }
-  template <uint32_t Axis>
-  TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint64_t d){
-    return get_third_bits(d << Axis);
-  }
-private: 
-  TV_HOST_DEVICE_INLINE static uint64_t split_by_3bits(uint32_t a){
-    uint64_t x = a & 0x1fffff; // we only look at the first 10 bits
-    x = (x | x << 32) & 0x1f00000000ffff; 
-    x = (x | x << 16) & 0x1f0000ff0000ff; 
+template <> struct MortonCore<64> {
+  TV_HOST_DEVICE_INLINE static uint64_t split_by_3bits(uint32_t a) {
+    uint64_t x = a & 0x1fffff;
+    x = (x | x << 32) & 0x1f00000000ffff;
+    x = (x | x << 16) & 0x1f0000ff0000ff;
     x = (x | x << 8) & 0x100f00f00f00f00f;
-    x = (x | x << 4) & 0x10c30c30c30c30c3; 
+    x = (x | x << 4) & 0x10c30c30c30c30c3;
     x = (x | x << 2) & 0x1249249249249249;
     return x;
   }
-  TV_HOST_DEVICE_INLINE static uint32_t get_third_bits(uint64_t a){
-    uint64_t x = a & 0x1249249249249249; // we only look at the first 21 bits
-		x = (x ^ (x >> 2)) & 0x10c30c30c30c30c3;
-		x = (x ^ (x >> 4)) & 0x100f00f00f00f00f;
-		x = (x ^ (x >> 8)) & 0x1f0000ff0000ff;
-		x = (x ^ (x >> 16)) & 0x1f00000000ffff;
-		x = (x ^ (x >> 32)) & 0x1fffff;
-    return uint32_t(x);
+  TV_HOST_DEVICE_INLINE static uint32_t get_third_bits(uint64_t a) {
+    uint64_t x = a & 0x1249249249249249;
+    x = (x ^ (x >> 2)) & 0x10c30c30c30c30c3;
+    x = (x ^ (x >> 4)) & 0x100f00f00f00f00f;
+    x = (x ^ (x >> 8)) & 0x1f0000ff0000ff;
+    x = (x ^ (x >> 16)) & 0x1f00000000ffff;
+    x = (x ^ (x >> 32)) & 0x1fffff;
+    return static_cast<uint32_t>(x);
+  }
+};
+
+} // namespace detail
+
+template <typename T> struct Morton;
+
+template <> struct Morton<uint32_t> : public detail::MortonCore<32> {
+  static constexpr int kNumBits = 32;
+  TV_HOST_DEVICE_INLINE static uint32_t encode(uint32_t x, uint32_t y,
+                                               uint32_t z) {
+    return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) |
+           (split_by_3bits(x) << 0);
+  }
+  TV_HOST_DEVICE_INLINE static tv::array<uint32_t, 3> decode(uint32_t d) {
+    return {get_third_bits(d), get_third_bits(d >> 1), get_third_bits(d >> 2)};
+  }
+  template <uint32_t Axis>
+  TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint32_t d) {
+    return get_third_bits(d >> Axis);
+  }
+};
+
+// template <> struct Morton<int64_t> : public detail::MortonCore<64> {
+//   static constexpr int kNumBits = 64;
+//   TV_HOST_DEVICE_INLINE static uint64_t encode(int32_t x, int32_t y,
+//                                                int32_t z) {
+//     auto abs_x = x >= 0 ? x : -x;
+//     auto abs_y = y >= 0 ? y : -y;
+//     auto abs_z = z >= 0 ? z : -z;
+//     return (split_by_3bits(abs_z | ((z & 0x80000000u) >> 11)) << 2) |
+//            (split_by_3bits(abs_y | ((y & 0x80000000u) >> 11)) << 1) |
+//            (split_by_3bits(abs_x | ((x & 0x80000000u) >> 11)) << 0);
+//   }
+//   TV_HOST_DEVICE_INLINE static tv::array<int32_t, 3> decode(uint64_t d) {
+//     auto x_with_sign = get_third_bits(d);
+//     auto y_with_sign = get_third_bits(d >> 1);
+//     auto z_with_sign = get_third_bits(d >> 2);
+//     auto x_sign = x_with_sign & 0x100000u;
+//     auto y_sign = y_with_sign & 0x100000u;
+//     auto z_sign = z_with_sign & 0x100000u;
+//     int32_t x_abs = static_cast<int32_t>(x_with_sign & 0xfffffu);
+//     int32_t y_abs = static_cast<int32_t>(y_with_sign & 0xfffffu);
+//     int32_t z_abs = static_cast<int32_t>(z_with_sign & 0xfffffu);
+//     return {x_sign ? -x_abs : x_abs,
+//             y_sign ? -y_abs : y_abs,
+//             z_sign ? -z_abs : z_abs};
+//   }
+//   template <uint32_t Axis>
+//   TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint64_t d) {
+//     auto x_with_sign = get_third_bits(d >> Axis);
+//     auto x_sign = x_with_sign & 0x100000;
+//     auto x_abs = x_with_sign & 0xfffff;
+//     return x_sign ? -x_abs : x_abs;
+//   }
+// };
+
+template <> struct Morton<uint64_t> : public detail::MortonCore<64> {
+  static constexpr int kNumBits = 64;
+  TV_HOST_DEVICE_INLINE static uint64_t encode(uint32_t x, uint32_t y,
+                                               uint32_t z) {
+    return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) |
+           (split_by_3bits(x) << 0);
+  }
+
+  TV_HOST_DEVICE_INLINE static tv::array<uint32_t, 3> decode(uint64_t d) {
+    return {get_third_bits(d), get_third_bits(d >> 1), get_third_bits(d >> 2)};
+  }
+  template <uint32_t Axis>
+  TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint64_t d) {
+    return get_third_bits(d >> Axis);
   }
 };
 
@@ -99,28 +144,40 @@ template <typename K> struct Murmur3Hash {
     k ^= k >> 16;
     return k;
   }
-  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) {
-    return x;
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { return x; }
+  TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
+    return hash(key);
   }
 };
-
 template <typename K> struct SpatialHash {
+  TV_HOST_DEVICE_INLINE static constexpr K direct_hash_offset(){
+    return std::conditional_t<sizeof_bits_v<K> == 32,
+                         std::integral_constant<K, 0x100>,
+                         std::integral_constant<K, 0x100000>>::value;
+  }
   using key_type = tv::hash::to_unsigned_t<K>;
-  TV_HOST_DEVICE_INLINE static key_type hash(uint32_t x, uint32_t y, uint32_t z) {
+  TV_HOST_DEVICE_INLINE static key_type hash(uint32_t x, uint32_t y,
+                                             uint32_t z) {
     return x * 73856096u ^ y * 193649663u ^ z * 83492791u;
   }
-  TV_HOST_DEVICE_INLINE static key_type encode(uint32_t x, uint32_t y, uint32_t z) {
-    return Morton<key_type>::encode(x, y, z);
+  TV_HOST_DEVICE_INLINE static key_type encode(uint32_t x, uint32_t y,
+                                               uint32_t z) {
+    return Morton<K>::encode(x, y, z);
+  }
+  // this function hash a single number by decode and hash
+  TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
+    auto decoded = Morton<K>::decode(key);
+    return hash(decoded[0], decoded[1], decoded[2]);
   }
 };
-
 
 template <typename K> struct IdentityHash {
   using key_type = tv::hash::to_unsigned_t<K>;
 
   TV_HOST_DEVICE_INLINE static key_type hash(key_type k) { return k; }
-  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) {
-    return x;
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { return x; }
+  TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
+    return hash(key);
   }
 };
 
@@ -164,8 +221,9 @@ struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
     }
     return ret;
   }
-  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) {
-    return x;
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { return x; }
+  TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
+    return hash(key);
   }
 };
 

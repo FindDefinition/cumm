@@ -51,9 +51,11 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint hash(Args &&...keys) const {
-    key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    return hash_type::hash(key_u);
+    return hash_type::hash(keys...);
+  }
+
+  TV_DEVICE_INLINE int probe_length(int index, key_type key) {
+    return (index - hash_type::hash_scalar(reinterpret_cast<key_type_uint&>(key)) % hash_size_);
   }
 
   TV_HOST_DEVICE_INLINE size_type size() const { return hash_size_; }
@@ -67,7 +69,7 @@ private:
   TV_DEVICE_INLINE void insert_raw(const V &value, Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -101,13 +103,13 @@ public:
   }
 
   TV_DEVICE_INLINE void insert(const array<K, kNumHashArgs>& key_arr, const V &value) {
-    return insert_raw(key_arr, k, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
+    return insert_raw(key_arr, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
   }
 
   template <class... Args> TV_DEVICE_INLINE value_type lookup(Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -136,7 +138,7 @@ public:
   TV_DEVICE_INLINE size_type lookup_offset(Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -188,9 +190,10 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint hash(Args &&...keys) const {
-    key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    return hash_type::hash(key_u);
+    return hash_type::hash(keys...);
+  }
+  TV_DEVICE_INLINE int probe_length(int index, value_type key) {
+    return (index - hash_type::hash_scalar(reinterpret_cast<key_type_uint&>(key)) % hash_size_);
   }
 
   TV_HOST_DEVICE_INLINE size_type size() const { return hash_size_; }
@@ -202,7 +205,7 @@ public:
   template <class... Args> TV_DEVICE_INLINE void insert(Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -228,7 +231,7 @@ public:
   TV_DEVICE_INLINE size_type lookup_offset(Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -236,7 +239,9 @@ public:
       slot = hash_val % hash_size_;
     }
     value_type val;
-    while (true) {
+    int cnt = 0;
+    while (cnt < 100) {
+      cnt++;
       val = table_[slot];
       if (reinterpret_cast<key_type_uint &>(val) == key_u) {
         return slot;
@@ -289,9 +294,7 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint hash(Args &&...keys) const {
-    key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    return hash_type::hash(key_u);
+    return hash_type::hash(keys...);
   }
 
   TV_HOST_DEVICE_INLINE size_type size() const { return hash_size_; }
@@ -307,7 +310,7 @@ private:
   TV_DEVICE_INLINE void insert_raw(const V &value, Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -342,14 +345,18 @@ public:
   }
 
   TV_DEVICE_INLINE void insert(const array<K, kNumHashArgs>& key_arr, const V &value) {
-    return insert_raw(key_arr, k, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
+    return insert_raw(key_arr, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
+  }
+
+  TV_DEVICE_INLINE int probe_length(int index, key_type key) {
+    return (index - hash_type::hash_scalar(reinterpret_cast<key_type_uint&>(key)) % hash_size_);
   }
 
   template <class... Args>
   TV_DEVICE_INLINE void insert_key_only(Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);

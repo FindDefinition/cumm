@@ -788,3 +788,6 @@ def run_nvrtc_gemm_kernel(params: GemmParams) -> None:
 
 def run_nvrtc_conv_kernel(params: ConvParams) -> None:
     ...
+
+def check_cuda_error() -> None:
+    ...

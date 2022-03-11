@@ -634,6 +634,11 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   m.def("tvdtype_itemsize", [](int dtype){
     return tv::bit_size(tv::DType(dtype)) / 8;
   }); 
+  m.def("check_cuda_error", [](){
+#ifdef TV_CUDA
+    TV_CHECK_CUDA_ERR_V2("error");
+#endif
+  }); 
 
   m.def("cat_first_axis", &tv::cat_first_axis);
   m.def("is_cpu_only", [](){

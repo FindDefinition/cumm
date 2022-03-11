@@ -21,7 +21,7 @@ namespace hash {
 
 template <typename K, typename V, typename Hash,
           typename detail::MapTypeToUnsignedInt<K>::type EmptyKey =
-              empty_key_v<K>>
+              default_empty_key_v<K>>
 struct DenseTable {
 public:
   using key_type_uint =

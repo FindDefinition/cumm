@@ -32,6 +32,7 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <array>
 #endif
 
 namespace tv {
@@ -455,6 +456,7 @@ constexpr int get_max_extent_v =
                   std::integral_constant<int, -1>>::value;
 
 template <size_t N> struct array_reduce_impl {
+  static_assert(N != 0, "N can't equal to zero");
   template <typename F, typename T, size_t N1, size_t Align>
   TV_HOST_DEVICE_INLINE static constexpr T run(F &&f,
                                                const array<T, N1, Align> &arr) {
@@ -463,11 +465,11 @@ template <size_t N> struct array_reduce_impl {
   }
 };
 
-template <> struct array_reduce_impl<0> {
+template <> struct array_reduce_impl<1> {
   template <typename F, typename T, size_t N1, size_t Align>
   TV_HOST_DEVICE_INLINE static constexpr T run(F &&f,
                                                const array<T, N1, Align> &arr) {
-    return T{};
+    return arr[0];
   }
 };
 
@@ -484,6 +486,31 @@ TV_HOST_DEVICE_INLINE constexpr auto apply(F &&f, Args &&...args) {
 }
 
 } // namespace arrayops
+
+#ifndef __CUDACC_RTC__
+// std::array don't support nvrtc.
+namespace detail {
+template <typename T, size_t N, int... Inds>
+array<T, N> from_std_array_impl(const std::array<T, N>& arr, mp_list_int<Inds...>){
+  return array<T, N>{arr[Inds]...};
+}
+template <typename T, size_t N, int... Inds>
+std::array<T, N> to_std_array_impl(const array<T, N>& arr, mp_list_int<Inds...>){
+  return std::array<T, N>{arr[Inds]...};
+}
+}
+namespace arrayops {
+template <typename T, size_t N>
+array<T, N> from_std_array(const std::array<T, N>& arr){
+  return detail::from_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
+}
+template <typename T, size_t N>
+std::array<T, N> to_std_array(const array<T, N>& arr){
+  return detail::to_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
+}
+}
+#endif
+
 
 template <class L>
 constexpr auto mp_list_c_to_array =
@@ -607,15 +634,28 @@ TV_HOST_DEVICE_INLINE constexpr tv::array<T, sizeof...(Inds)>
 slice_impl(const tv::array<T, N> &arr, mp_list_int<Inds...>) noexcept {
   return array<T, sizeof...(Inds)>{arr[Inds]...};
 }
+
+template <typename T, size_t N1, size_t N2>
+TV_HOST_DEVICE_INLINE constexpr array<T, N1 + N2>
+concat2_base_impl(const array<T, N1> &a, const array<T, N2> &b) noexcept {
+  return concat_impl(a, b, mp_make_list_c_sequence<int, N1>{},
+                             mp_make_list_c_sequence<int, N2>{});
+}
+
 } // namespace detail
 
 namespace arrayops {
 
-template <typename T, size_t N1, size_t N2>
-TV_HOST_DEVICE_INLINE constexpr array<T, N1 + N2>
-concat(const array<T, N1> &a, const array<T, N2> &b) noexcept {
-  return detail::concat_impl(a, b, mp_make_list_c_sequence<int, N1>{},
-                             mp_make_list_c_sequence<int, N2>{});
+template <typename T, size_t N>
+TV_HOST_DEVICE_INLINE constexpr array<T, N>
+concat(const array<T, N>& arr) noexcept {
+  return arr;
+}
+
+template <typename T, size_t N, size_t... Ns>
+TV_HOST_DEVICE_INLINE constexpr array<T, mp_reduce_sum_v<size_t, N, Ns...>>
+concat(const array<T, N>& arr, const array<T, Ns>& ...arrs) noexcept {
+  return detail::concat2_base_impl(arr, concat(arrs...));
 }
 
 template <typename F, typename T, size_t N, size_t Align>

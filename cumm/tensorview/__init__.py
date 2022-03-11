@@ -15,6 +15,7 @@
 import contextlib
 from dataclasses import dataclass
 from enum import Enum
+from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -25,8 +26,8 @@ from pccm.middlewares.pybind import (TemplateTypeStmt,
 from cumm.core_cc import tensorview_bind
 from cumm.core_cc.tensorview_bind import CUDAKernelTimer, CUDAEvent, Context
 from cumm.core_cc.tensorview_bind import NVRTCModule as _NVRTCModule
-from cumm.core_cc.tensorview_bind import NVRTCProgram, Tensor
-from . import gemm 
+from cumm.core_cc.tensorview_bind import NVRTCProgram, Tensor, check_cuda_error
+from . import gemm, utils
 
 from cumm.dtypes import get_npdtype_from_tvdtype
 
@@ -378,13 +379,15 @@ class KernelTimer:
                 filtered_res[k] = v
         return filtered_res
 
-def _print_exit_handler(tim: CUDAKernelTimer, name: str):
+def _print_exit_handler(tim: CUDAKernelTimer, name: str, out: Optional[List[float]] = None):
     duration = tim.get_pair_duration(name)
     print(f"{name}: {duration}")
+    if out is not None:
+        out[0] = duration
 
-def measure_and_print(name: str = "CUDATimer", stream: int = 0):
+def measure_and_print(name: str = "CUDATimer", stream: int = 0, out: Optional[List[float]] = None):
     tim = KernelTimer()
-    return tim._record(name, stream, _print_exit_handler)
+    return tim._record(name, stream, partial(_print_exit_handler, out=out))
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:
     if not ten.is_contiguous():
@@ -551,3 +554,4 @@ def tvdtype_bitsize(dtype: int) -> int:
 
 def tvdtype_itemsize(dtype: int) -> int:
     return tensorview_bind.tvdtype_itemsize(dtype)
+

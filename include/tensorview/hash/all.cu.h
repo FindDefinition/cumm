@@ -17,3 +17,4 @@
 #include "dense.cu.h"
 #include "hash_functions.h"
 #include "linear.cu.h"
+#include "ops.h"

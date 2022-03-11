@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Union
-from build import subprocess
+import subprocess
 
 import pccm
 from ccimport import compat

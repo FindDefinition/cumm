@@ -88,15 +88,17 @@ def test_nvrtc2():
     table2.insert(5, 1);
     """, verbose_path="/home/yy/Projects/cumm/build")
 
-    inliner.kernel_1d("wtf3", a.dim(0), 0, f"""
-    tv::hash::LinearHashTableSplit<int, int> table($keys, $values, 2500);
-        tv::hash::LinearHashTable<int, int> table2(
-        reinterpret_cast<tv::hash::LinearHashTable<int, int>::value_type*>($kv), 2500);
-
-    tv::printf2_once($a[0], table.lookup_offset(5));
-    tv::printf2_once($a[0], table2.lookup_offset(5));
+    inliner.kernel_1d("wtf3", 1, 0, f"""
+    namespace op = tv::arrayops;
+    tv::array<float, 3> a{{2.010012, 0.530250, 0.630409}};
+    tv::printf2_once("DEBUG", a.op<op::min>());
+    int c = 1;
+    tv::printf2_once("DEBUG", c);
+    auto d = op::concat(a, a);
+    tv::printf2_array_once(d);
 
     """)
+
     print(a.cpu().numpy())
 
 

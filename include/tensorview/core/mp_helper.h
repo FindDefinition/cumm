@@ -209,7 +209,10 @@ template <typename TA, typename TB> struct mp_min_op_impl {
       std::integral_constant<typename TA::value_type,
                              (TA::value < TB::value ? TA::value : TB::value)>;
 };
-
+template <typename TA, typename TB> struct mp_sum_op_impl {
+  using type =
+      std::integral_constant<typename TA::value_type, TA::value + TB::value>;
+};
 } // namespace detail
 
 template <class L, class Init>
@@ -218,6 +221,11 @@ using mp_reduce_max = mp_reduce<detail::mp_max_op_impl, L, Init>;
 template <class L, class Init>
 using mp_reduce_min = mp_reduce<detail::mp_min_op_impl, L, Init>;
 
+template <class L, class Init>
+using mp_reduce_sum = mp_reduce<detail::mp_sum_op_impl, L, Init>;
+
+template <class T, T... Ns>
+constexpr T mp_reduce_sum_v = mp_reduce_sum<mp_list_c<T, Ns...>, std::integral_constant<T, T(0)>>::value;
 
 namespace detail {
 

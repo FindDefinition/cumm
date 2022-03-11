@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include <tensorview/core/defs.h>
 #include "core.h"
-#ifdef __CUDACC_RTC__
+#include <tensorview/core/defs.h>
 
+#ifdef __CUDACC_RTC__
 
 namespace std {
 
@@ -97,6 +97,23 @@ template <typename _Tp> struct remove_volatile<_Tp volatile> {
 template <typename _Tp> struct remove_cv {
   typedef typename remove_const<typename remove_volatile<_Tp>::type>::type type;
 };
+
+template <typename _Tp, typename> struct __remove_pointer_helper {
+  typedef _Tp type;
+};
+
+template <typename _Tp, typename _Up>
+struct __remove_pointer_helper<_Tp, _Up *> {
+  typedef _Up type;
+};
+
+/// remove_pointer
+template <typename _Tp>
+struct remove_pointer
+    : public __remove_pointer_helper<_Tp, typename remove_cv<_Tp>::type> {};
+
+template <typename _Tp>
+using remove_pointer_t = typename remove_pointer<_Tp>::type;
 
 template <typename _Tp> struct remove_reference { typedef _Tp type; };
 
@@ -261,7 +278,6 @@ template <typename _Tp> class decay {
 public:
   typedef typename __decay_selector<__remove_type>::__type type;
 };
-
 template <typename _Tp> using decay_t = typename decay<_Tp>::type;
 
 // nvrtc seems contain a built-in std::forward...
@@ -303,16 +319,13 @@ using _Require = typename enable_if<__and_<_Cond...>::value>::type;
 template <bool _Cond, typename _Iftrue, typename _Iffalse>
 using conditional_t = typename conditional<_Cond, _Iftrue, _Iffalse>::type;
 
-template<typename _Tp, typename _Up = _Tp&&>
-  _Up
-  TV_HOST_DEVICE_INLINE __declval(int);
+template <typename _Tp, typename _Up = _Tp &&>
+_Up TV_HOST_DEVICE_INLINE __declval(int);
 
-template<typename _Tp>
-  _Tp
-  TV_HOST_DEVICE_INLINE __declval(long);
+template <typename _Tp> _Tp TV_HOST_DEVICE_INLINE __declval(long);
 
-template<typename _Tp>
-  TV_HOST_DEVICE_INLINE auto declval() noexcept -> decltype(__declval<_Tp>(0));
+template <typename _Tp>
+TV_HOST_DEVICE_INLINE auto declval() noexcept -> decltype(__declval<_Tp>(0));
 
 } // namespace std
 #endif

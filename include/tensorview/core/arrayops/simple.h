@@ -63,6 +63,13 @@ template <typename T, size_t N, size_t Align> struct sum {
   }
 };
 
+template <typename T, size_t N, size_t Align> struct mean {
+  TV_HOST_DEVICE_INLINE constexpr auto
+  operator()(const array<T, N, Align> &self) {
+    return reduce(detail::array_sum<T>, self) / T(N);
+  }
+};
+
 template <typename T, size_t N, size_t Align> struct prod {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const array<T, N, Align> &self) {
