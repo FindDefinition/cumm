@@ -91,9 +91,42 @@ private:
       }
     }
   }
+
+  template <class F, class... Args>
+  TV_DEVICE_INLINE void insert_raw_custom_value(F&& f, Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint slot;
+    if (Power2) {
+      slot = hash_val & (hash_size_ - 1);
+    } else {
+      slot = hash_val % hash_size_;
+    }
+    while (true) {
+      key_type_uint prev =
+          atomicCAS(reinterpret_cast<key_type_uint *>(&table_[slot].first),
+                    empty_key_uint, key_u);
+      if (prev == empty_key_uint || prev == key_u) {
+        std::forward<F>(f)(&table_[slot].second);
+        break;
+      }
+      if (Power2) {
+        slot = (slot + 1) & (hash_size_ - 1);
+      } else {
+        slot = (slot + 1) % hash_size_;
+      }
+    }
+  }
+
   template <int... Inds>
   TV_DEVICE_INLINE void insert_raw(const array<K, kNumHashArgs>& key_arr, const V &value, mp_list_int<Inds...>) {
     return insert_raw(value, key_arr[Inds]...);
+  }
+
+  template <class F, int... Inds>
+  TV_DEVICE_INLINE void insert_raw_custom_value(const array<K, kNumHashArgs>& key_arr, F&& f, mp_list_int<Inds...>) {
+    return insert_raw_custom_value(std::forward<F>(f), key_arr[Inds]...);
   }
 
 public:
@@ -104,6 +137,17 @@ public:
 
   TV_DEVICE_INLINE void insert(const array<K, kNumHashArgs>& key_arr, const V &value) {
     return insert_raw(key_arr, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
+  }
+
+  template <class F>
+  TV_DEVICE_INLINE void insert_custom_value(const K& key, F&& f) {
+    static_assert(kNumHashArgs == 1, "you must use tv::array if hash multiple values.");
+    return insert_raw_custom_value(std::forward<F>(f), key);
+  }
+
+  template <class F>
+  TV_DEVICE_INLINE void insert_custom_value(const array<K, kNumHashArgs>& key_arr, F&& f) {
+    return insert_raw_custom_value(key_arr, std::forward<F>(f), mp_make_list_c_sequence<int, kNumHashArgs>{});
   }
 
   template <class... Args> TV_DEVICE_INLINE value_type lookup(Args &&...keys) {
@@ -333,9 +377,41 @@ private:
     }
   }
 
+  template <class F, class... Args>
+  TV_DEVICE_INLINE void insert_raw_custom_value(F&& f, Args &&...keys) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint slot;
+    if (Power2) {
+      slot = hash_val & (hash_size_ - 1);
+    } else {
+      slot = hash_val % hash_size_;
+    }
+    while (true) {
+      key_type_uint prev =
+          atomicCAS(reinterpret_cast<key_type_uint *>(&key_ptr_[slot]),
+                    empty_key_uint, key_u);
+      if (prev == empty_key_uint || prev == key_u) {
+        std::forward<F>(f)(value_ptr_ + slot);
+        break;
+      }
+      if (Power2) {
+        slot = (slot + 1) & (hash_size_ - 1);
+      } else {
+        slot = (slot + 1) % hash_size_;
+      }
+    }
+  }
+
+
   template <int... Inds>
   TV_DEVICE_INLINE void insert_raw(const array<K, kNumHashArgs>& key_arr, const V &value, mp_list_int<Inds...>) {
     return insert_raw(value, key_arr[Inds]...);
+  }
+  template <class F, int... Inds>
+  TV_DEVICE_INLINE void insert_raw_custom_value(const array<K, kNumHashArgs>& key_arr, F&& f, mp_list_int<Inds...>) {
+    return insert_raw_custom_value(std::forward<F>(f), key_arr[Inds]...);
   }
 
 public:
@@ -346,6 +422,17 @@ public:
 
   TV_DEVICE_INLINE void insert(const array<K, kNumHashArgs>& key_arr, const V &value) {
     return insert_raw(key_arr, value, mp_make_list_c_sequence<int, kNumHashArgs>{});
+  }
+
+  template <class F>
+  TV_DEVICE_INLINE void insert_custom_value(const K& key, F&& f) {
+    static_assert(kNumHashArgs == 1, "you must use tv::array if hash multiple values.");
+    return insert_raw_custom_value(std::forward<F>(f), key);
+  }
+
+  template <class F>
+  TV_DEVICE_INLINE void insert_custom_value(const array<K, kNumHashArgs>& key_arr, F&& f) {
+    return insert_raw_custom_value(key_arr, std::forward<F>(f), mp_make_list_c_sequence<int, kNumHashArgs>{});
   }
 
   TV_DEVICE_INLINE int probe_length(int index, key_type key) {
@@ -382,7 +469,7 @@ public:
   TV_DEVICE_INLINE size_type lookup_offset(Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
         reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(key_u);
+    key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);

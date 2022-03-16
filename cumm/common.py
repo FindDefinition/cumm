@@ -321,6 +321,12 @@ class TensorViewParallel(pccm.Class):
         self.add_include("tensorview/parallel/all.h")
         self.build_meta.add_cflags("nvcc", "--extended-lambda")
 
+class ExtendedLambda(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.build_meta.add_cflags("nvcc", "--extended-lambda")
+
+
 class CummNVRTCLib(pccm.Class):
     def __init__(self):
         super().__init__()

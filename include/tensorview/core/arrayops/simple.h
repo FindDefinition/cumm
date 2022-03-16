@@ -5,6 +5,12 @@
 namespace tv {
 namespace arrayops {
 
+
+template <class... Ts>
+TV_HOST_DEVICE_INLINE constexpr auto create_array(Ts... vals){
+  return array<mp_nth_t<0, Ts...>, sizeof...(Ts)>{vals...};
+}
+
 template <typename T, size_t N, size_t Align> struct max {
   // TODO why we can't use std::max?
   template <typename TOther>
