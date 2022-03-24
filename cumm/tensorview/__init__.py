@@ -339,6 +339,9 @@ class KernelTimer:
 
     @contextlib.contextmanager
     def _record(self, name: str, stream: int = 0, exit_handler: Optional[Callable[["CUDAKernelTimer", str], None]] = None):
+        if not self.enable:
+            yield None
+            return
         assert self._timer is not None
         self._timer.push(name)
         try:
@@ -385,8 +388,8 @@ def _print_exit_handler(tim: CUDAKernelTimer, name: str, out: Optional[List[floa
     if out is not None:
         out[0] = duration
 
-def measure_and_print(name: str = "CUDATimer", stream: int = 0, out: Optional[List[float]] = None):
-    tim = KernelTimer()
+def measure_and_print(name: str = "CUDATimer", stream: int = 0, out: Optional[List[float]] = None, enable: bool = True):
+    tim = KernelTimer(enable=enable)
     return tim._record(name, stream, partial(_print_exit_handler, out=out))
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:

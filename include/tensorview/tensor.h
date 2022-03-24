@@ -1641,6 +1641,22 @@ inline Tensor zeros(TensorShape shape, DType dtype, int device = -1,
   return Tensor(shape, dtype, device, pinned, managed).zero_();
 }
 
+template <typename T>
+std::tuple<Tensor, T*> empty_with_ptr(TensorShape shape, int device = -1,
+                    bool pinned = false, bool managed = false) {
+  auto res = Tensor(shape, type_v<T>, device, pinned, managed);
+  auto res_ptr = res.data_ptr<T>();
+  return std::make_tuple(res, res_ptr);
+}
+
+template <typename T>
+std::tuple<Tensor, T*> zeros_with_ptr(TensorShape shape, int device = -1,
+                    bool pinned = false, bool managed = false) {
+  auto res = Tensor(shape, type_v<T>, device, pinned, managed).zero_();
+  auto res_ptr = res.data_ptr<T>();
+  return std::make_tuple(res, res_ptr);
+}
+
 inline Tensor zeros_managed(TensorShape shape, DType dtype) {
   return Tensor(shape, dtype, 0, true, true).zero_();
 }

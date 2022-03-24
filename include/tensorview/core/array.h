@@ -314,6 +314,13 @@ TV_HOST_DEVICE_INLINE constexpr const T &
 array_or_scalar(const array<T, N, Align> &arr, int i) {
   return arr[i];
 }
+#ifndef __CUDACC_RTC__
+template <typename T, size_t N>
+TV_HOST_DEVICE_INLINE constexpr const T &
+array_or_scalar(const std::array<T, N> &arr, int i) {
+  return arr[i];
+}
+#endif
 
 template <typename T>
 TV_HOST_DEVICE_INLINE constexpr const T &array_or_scalar(const T &arr, int i) {
@@ -490,27 +497,72 @@ TV_HOST_DEVICE_INLINE constexpr auto apply(F &&f, Args &&...args) {
 #ifndef __CUDACC_RTC__
 // std::array don't support nvrtc.
 namespace detail {
-template <typename T, size_t N, int... Inds>
-array<T, N> from_std_array_impl(const std::array<T, N>& arr, mp_list_int<Inds...>){
-  return array<T, N>{arr[Inds]...};
+
+template <typename T>
+struct nested_conversion{
+  using type = std::decay_t<T>;
+};
+
+
+template <typename T, size_t N>
+struct nested_conversion<std::array<T, N>>{
+  using type = tv::array<typename nested_conversion<std::decay_t<T>>::type, N>;
+};
+
+template <typename T, size_t N>
+struct nested_conversion<tv::array<T, N>>{
+  using type = std::array<typename nested_conversion<std::decay_t<T>>::type, N>;
+};
+
+template <typename T>
+using nested_conversion_t = typename nested_conversion<std::decay_t<T>>::type;
+
+template <typename T, size_t N>
+constexpr nested_conversion_t<std::array<T, N>> from_std_array_impl_expand(const std::array<T, N>& arr);
+template <typename T>
+constexpr T from_std_array_impl_expand(const T& arr){
+  return arr;
 }
-template <typename T, size_t N, int... Inds>
-std::array<T, N> to_std_array_impl(const array<T, N>& arr, mp_list_int<Inds...>){
-  return std::array<T, N>{arr[Inds]...};
+
+template <typename T, size_t N>
+constexpr nested_conversion_t<tv::array<T, N>> to_std_array_impl_expand(const tv::array<T, N>& arr);
+template <typename T>
+constexpr T to_std_array_impl_expand(const T& arr){
+  return arr;
 }
+
+template <typename T, size_t N, int... Inds>
+constexpr auto from_std_array_impl(const std::array<T, N>& arr, mp_list_int<Inds...>){
+  return nested_conversion_t<std::array<T, N>>{from_std_array_impl_expand(arr[Inds])...};
+}
+
+template <typename T, size_t N>
+constexpr nested_conversion_t<std::array<T, N>> from_std_array_impl_expand(const std::array<T, N>& arr){
+  return from_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
+}
+
+template <typename T, size_t N, int... Inds>
+constexpr auto to_std_array_impl(const tv::array<T, N>& arr, mp_list_int<Inds...>){
+  return nested_conversion_t<tv::array<T, N>>{to_std_array_impl_expand(arr[Inds])...};
+}
+
+template <typename T, size_t N>
+constexpr nested_conversion_t<tv::array<T, N>> to_std_array_impl_expand(const tv::array<T, N>& arr){
+  return to_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
+}
+
 }
 namespace arrayops {
 template <typename T, size_t N>
-array<T, N> from_std_array(const std::array<T, N>& arr){
-  return detail::from_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
+constexpr detail::nested_conversion_t<std::array<T, N>> from_std_array(const std::array<T, N>& arr){
+  return detail::from_std_array_impl_expand(arr);
 }
 template <typename T, size_t N>
-std::array<T, N> to_std_array(const array<T, N>& arr){
-  return detail::to_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
+constexpr detail::nested_conversion_t<tv::array<T, N>> to_std_array(const tv::array<T, N>& arr){
+  return detail::to_std_array_impl_expand(arr);
 }
 }
 #endif
-
 
 template <class L>
 constexpr auto mp_list_c_to_array =
