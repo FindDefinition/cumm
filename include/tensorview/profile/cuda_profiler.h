@@ -336,7 +336,7 @@ public:
           timer_.push(name_);
         }
         pair_name_ = timer_.insert_pair("", "start", "stop");
-        timer_.record("start", reinterpret_cast<std::uintptr_t>(stream_));
+        timer_.record("start", stream_);
       }
     }
   }
@@ -349,7 +349,7 @@ public:
   ~CUDAKernelTimerGuard() {
     if (timer_.enable()) {
       {
-        timer_.record("stop", reinterpret_cast<std::uintptr_t>(stream_));
+        timer_.record("stop", stream_);
         if (!name_.empty()) {
           timer_.pop();
         }
