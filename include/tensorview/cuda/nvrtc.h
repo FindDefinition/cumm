@@ -202,12 +202,11 @@ public:
   }
 
   std::string ptx() const {
+#ifdef TV_CUDA
     if (prog_ == nullptr){
       TV_ASSERT_RT_ERR(!ptx_.empty(), "PTX is empty!!!");
       return ptx_;
     }
-#ifdef TV_CUDA
-
     size_t ptxSize;
     TV_NVRTC_SAFE_CALL(nvrtcGetPTXSize(prog_, &ptxSize));
     std::string ptx(ptxSize, '0');
@@ -220,18 +219,18 @@ public:
   }
 
   tv::Tensor cubin() const {
+#ifdef TV_CUDA
     if (prog_ == nullptr){
       TV_ASSERT_RT_ERR(!cubin_.empty(), "Cubin is empty!!!");
       return cubin_;
     }
-#ifdef TV_CUDA
     size_t cubinSize;
     TV_NVRTC_SAFE_CALL(nvrtcGetCUBINSize(prog_, &cubinSize));
     tv::Tensor bin({int64_t(cubinSize)}, tv::uint8, -1);
     TV_NVRTC_SAFE_CALL(nvrtcGetCUBIN(prog_, reinterpret_cast<char*>(bin.data_ptr<uint8_t>())));
     return bin;
 #else
-    return tv.Tensor();
+    return tv::Tensor();
 #endif
 
   }
