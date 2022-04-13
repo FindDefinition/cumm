@@ -242,11 +242,11 @@ public:
   std::vector<std::string> name_exprs() const { return name_exprs_; }
 
   std::string get_lowered_name(std::string name) const {
+#ifdef TV_CUDA
     if (prog_ == nullptr){
       TV_ASSERT_RT_ERR(predefined_name_expr_map_.find(name) != predefined_name_expr_map_.end(), "can't find your name");
       return predefined_name_expr_map_.at(name);
     }
-#ifdef TV_CUDA
     const char *lowered_name;
     TV_NVRTC_SAFE_CALL(nvrtcGetLoweredName(prog_,
                                            name.c_str(), // name expression

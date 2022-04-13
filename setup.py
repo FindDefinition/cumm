@@ -136,23 +136,28 @@ class CopyHeaderCallback(ExtCallback):
     def __call__(self, ext: Extension, package_dir: Path,
                  built_target_path: Path):
         include_path = package_dir / "cumm" / "include"
+        target_lib_path = package_dir / "cumm" / "lib"
+        target_nvrtc_include_path = package_dir / "cumm" / "nvrtc_include"
+        if target_lib_path.exists():
+            shutil.rmtree(target_lib_path)
+        if target_nvrtc_include_path.exists():
+            shutil.rmtree(target_nvrtc_include_path)
         if include_path.exists():
             shutil.rmtree(include_path)
-        code_path = Path(__file__).parent / "include"
+        root = Path(__file__).parent.resolve()
+        code_path = root / "include"
         shutil.copytree(code_path, include_path)
-        lib_path = Path(__file__).parent / "lib"
-
         if compat.InLinux:
             # copy /usr/local/cuda/lib64/libcudadevrt.a
             cudadevrt = Path("/usr/local/cuda/lib64/libcudadevrt.a")
             if cudadevrt.exists():
-                lib_path.mkdir(0o755)
-                shutil.copy(str(cudadevrt), str(lib_path / "libcudadevrt.a"))
+                target_lib_path.mkdir(0o755, exist_ok=True)
+                shutil.copy(str(cudadevrt), str(target_lib_path / "libcudadevrt.a"))
             # copy nvrtc headers
             nvrtc_headers = Path("/usr/local/cuda/include/cuda/std")
-            target_dir = Path(__file__).parent / "nvrtc_include" / "cuda" / "std"
-            target_dir.mkdir(0o755)
-            shutil.copytree(target_dir, nvrtc_headers)
+            target_dir = target_nvrtc_include_path / "cuda" / "std"
+            target_dir.parent.mkdir(0o755, exist_ok=True, parents=True)
+            shutil.copytree(nvrtc_headers, target_dir)
 
 
 disable_jit = os.getenv("CUMM_DISABLE_JIT", None)

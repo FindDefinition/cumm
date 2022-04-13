@@ -1,0 +1,1 @@
+docker run --rm -it -e PLAT=manylinux2014_x86_64 -v `pwd`:/io -v $HOME:/myhome scrin/manylinux2014-cuda:cu114-devel bash -c "source /etc/bashrc && /io/tools/build-wheels-dev.sh"
