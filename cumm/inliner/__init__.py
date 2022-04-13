@@ -258,6 +258,12 @@ class NVRTCInlineBuilder(InlineBuilder):
         self.maximum_1d_threads = 256
         self.measure_build_time = measure_build_time
 
+    def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
+        for k, v in self.module_functions.items():
+            if name == k[1]:
+                return v
+        return None
+
     def get_save_root(self,
                       path: Path,
                       root: Optional[Path] = None,

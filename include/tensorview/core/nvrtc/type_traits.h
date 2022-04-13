@@ -98,6 +98,16 @@ template <typename _Tp> struct remove_cv {
   typedef typename remove_const<typename remove_volatile<_Tp>::type>::type type;
 };
 
+template <typename _Tp> struct add_const { typedef _Tp const type; };
+
+/// add_volatile
+template <typename _Tp> struct add_volatile { typedef _Tp volatile type; };
+
+/// add_cv
+template <typename _Tp> struct add_cv {
+  typedef typename add_const<typename add_volatile<_Tp>::type>::type type;
+};
+
 template <typename _Tp, typename> struct __remove_pointer_helper {
   typedef _Tp type;
 };
@@ -316,6 +326,9 @@ template <typename _Tp> struct enable_if<true, _Tp> { typedef _Tp type; };
 template <typename... _Cond>
 using _Require = typename enable_if<__and_<_Cond...>::value>::type;
 
+template <bool _Cond, typename _Tp = void>
+using enable_if_t = typename enable_if<_Cond, _Tp>::type;
+
 template <bool _Cond, typename _Iftrue, typename _Iffalse>
 using conditional_t = typename conditional<_Cond, _Iftrue, _Iffalse>::type;
 
@@ -326,6 +339,65 @@ template <typename _Tp> _Tp TV_HOST_DEVICE_INLINE __declval(long);
 
 template <typename _Tp>
 TV_HOST_DEVICE_INLINE auto declval() noexcept -> decltype(__declval<_Tp>(0));
+
+template <typename _Tp> class reference_wrapper;
+
+// Helper which adds a reference to a type when given a reference_wrapper
+template <typename _Tp> struct __strip_reference_wrapper {
+  typedef _Tp __type;
+};
+
+template <typename _Tp>
+struct __strip_reference_wrapper<reference_wrapper<_Tp>> {
+  typedef _Tp &__type;
+};
+
+template <typename _Tp> struct __decay_and_strip {
+  typedef typename __strip_reference_wrapper<typename decay<_Tp>::type>::__type
+      __type;
+};
+
+template <typename _Tp> struct tuple_size;
+
+template <typename _Tp, typename _Up = typename remove_cv<_Tp>::type,
+          typename = typename enable_if<is_same<_Tp, _Up>::value>::type,
+          size_t = tuple_size<_Tp>::value>
+using __enable_if_has_tuple_size = _Tp;
+
+template <typename _Tp>
+struct tuple_size<const __enable_if_has_tuple_size<_Tp>>
+    : public tuple_size<_Tp> {};
+
+template <typename _Tp>
+struct tuple_size<volatile __enable_if_has_tuple_size<_Tp>>
+    : public tuple_size<_Tp> {};
+
+template <typename _Tp>
+struct tuple_size<const volatile __enable_if_has_tuple_size<_Tp>>
+    : public tuple_size<_Tp> {};
+
+template <std::size_t __i, typename _Tp> struct tuple_element;
+
+// Duplicate of C++14's tuple_element_t for internal use in C++11 mode
+template <std::size_t __i, typename _Tp>
+using __tuple_element_t = typename tuple_element<__i, _Tp>::type;
+
+template <std::size_t __i, typename _Tp> struct tuple_element<__i, const _Tp> {
+  typedef typename add_const<__tuple_element_t<__i, _Tp>>::type type;
+};
+
+template <std::size_t __i, typename _Tp>
+struct tuple_element<__i, volatile _Tp> {
+  typedef typename add_volatile<__tuple_element_t<__i, _Tp>>::type type;
+};
+
+template <std::size_t __i, typename _Tp>
+struct tuple_element<__i, const volatile _Tp> {
+  typedef typename add_cv<__tuple_element_t<__i, _Tp>>::type type;
+};
+
+template <std::size_t __i, typename _Tp>
+using tuple_element_t = typename tuple_element<__i, _Tp>::type;
 
 } // namespace std
 #endif

@@ -175,6 +175,7 @@ class NVRTCModule:
             self._mod = _NVRTCModule(code, cudadevrt_path)
         self._name_exprs = name_exprs
         self.name_to_meta = name_to_meta
+        self.cudadevrt_path = cudadevrt_path
 
     def load(self):
         return self._mod.load()
@@ -187,6 +188,19 @@ class NVRTCModule:
 
     def to_string(self):
         return self._mod.program.to_string()
+
+    def __getstate__(self):
+        buf = self._mod.program.to_binary(NVRTCProgram.kCuBin)
+        state = self.__dict__.copy()
+        # Remove the unpicklable entries.
+        del state['_mod']
+        state['_mod'] = buf
+        return state 
+
+    def __setstate__(self, state):
+        prog = NVRTCProgram.from_binary(state["_mod"])
+        state["_mod"] = _NVRTCModule(prog, state["cudadevrt_path"])
+        self.__dict__.update(state)
 
     def get_1d_launch_param(self, num: int, smem: int = 0, stream: int = 0):
         if num > 1024:
@@ -541,7 +555,7 @@ def from_numpy(arr: np.ndarray) -> Tensor:
     return tensorview_bind.from_numpy(arr)
 
 
-def get_compute_capability(index: int):
+def get_compute_capability(index: int = -1):
     return tensorview_bind.get_compute_capability(index)
 
 
@@ -558,3 +572,5 @@ def tvdtype_bitsize(dtype: int) -> int:
 def tvdtype_itemsize(dtype: int) -> int:
     return tensorview_bind.tvdtype_itemsize(dtype)
 
+def cat_first_axis(tens: List[Tensor]):
+    return tensorview_bind.cat_first_axis(tens)

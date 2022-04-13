@@ -264,19 +264,3 @@ def loads_jsonarray(binary, copy=False):
     results = put_arrays_to_data(results_array, data_skeleton, json_index=True)
     return results
 
-
-def main():
-    d = {
-        "a": np.eye(4),
-        "b": [np.zeros([5, 3]), tv.zeros([3, 5], dtype=tv.int32)]
-    } 
-    data = dumps_jsonarray(d)
-    d2 = loads_jsonarray(data)
-    print(d2)
-
-    with open("/mnt/truenas/scratch/yan.yan/nerf_debug_data.jarr", "rb") as f:
-        data = loads_jsonarray(f.read())
-    breakpoint()
-    # print(data["wtf2"].numpy())
-if __name__ == "__main__":
-    main()

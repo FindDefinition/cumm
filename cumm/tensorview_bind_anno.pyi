@@ -89,6 +89,9 @@ class CUDAKernelTimer:
 
 
 class NVRTCProgram:
+    kSource = 0
+    kPTX = 1
+    kCuBin = 2
     def __init__(self,
                  code: str,
                  headers: Dict[str, str] = {},
@@ -108,10 +111,19 @@ class NVRTCProgram:
     def to_string(self) -> str:
         ...
 
+    def to_binary(self, serial_type: int) -> bytes:
+        ...
+
+    def get_predefined_lowered_name_map(self) -> Dict[str, str]: 
+        ...
+
     @staticmethod
     def from_string(json_string: str) -> "NVRTCProgram":
         ...
 
+    @staticmethod
+    def from_binary(buffer: bytes) -> "NVRTCProgram":
+        ...
 
 class NVRTCModule:
     kTensor = 0
@@ -418,7 +430,7 @@ def from_numpy(arr: np.ndarray) -> Tensor:
     ...
 
 
-def get_compute_capability(index: int) -> Tuple[int, int]:
+def get_compute_capability(index: int = -1) -> Tuple[int, int]:
     ...
 
 
@@ -790,4 +802,7 @@ def run_nvrtc_conv_kernel(params: ConvParams) -> None:
     ...
 
 def check_cuda_error() -> None:
+    ...
+
+def cat_first_axis(tens: List[Tensor]) -> Tensor:
     ...

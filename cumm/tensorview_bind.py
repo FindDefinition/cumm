@@ -397,17 +397,34 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("get_pair_duration", &tv::CUDAKernelTimer::get_pair_duration, py::arg("name"))
     .def("get_all_pair_duration", &tv::CUDAKernelTimer::get_all_pair_duration);
 
-  py::class_<tv::NVRTCProgram, std::shared_ptr<tv::NVRTCProgram>>(m, "NVRTCProgram")
-    .def(py::init(&tv::NVRTCProgram::create), py::arg("code"), py::arg("headers") = std::unordered_map<std::string, std::string>{}, 
+  py::class_<tv::NVRTCProgram, std::shared_ptr<tv::NVRTCProgram>> nvrtc_prog_m(m, "NVRTCProgram");
+
+  nvrtc_prog_m.def(py::init(&tv::NVRTCProgram::create), py::arg("code"), py::arg("headers") = std::unordered_map<std::string, std::string>{}, 
          py::arg("opts") = std::vector<std::string>{}, py::arg("program_name") = std::string("kernel.cu"),
          py::arg("name_exprs") = std::vector<std::string>{})
     .def("ptx", &tv::NVRTCProgram::ptx)
+    .def("cubin", &tv::NVRTCProgram::cubin)
+    .def("get_predefined_lowered_name_map", &tv::NVRTCProgram::get_predefined_lowered_name_map)
     .def("to_string", &tv::NVRTCProgram::to_string)
     .def_static("from_string", &tv::NVRTCProgram::from_string, py::arg("json_string"))
+    .def("to_binary", [](const tv::NVRTCProgram& prog, int serial_type){
+      auto buffer = prog.to_binary(static_cast<tv::NVRTCProgram::SerializationType>(serial_type));
+      return py::bytes(reinterpret_cast<const char *>(buffer.data()), buffer.size());
+    }, py::arg("serial_type"))
+    .def_static("from_binary", [](pybind11::bytes buffer){
+        py::buffer_info info(py::buffer(buffer).request());
+        const uint8_t *data = reinterpret_cast<const uint8_t *>(info.ptr);
+        size_t length = static_cast<size_t>(info.size);
+        return tv::NVRTCProgram::from_binary(data, length);
+    }, py::arg("buffer"))
 
     .def("compile_log", &tv::NVRTCProgram::compile_log)
     .def("get_lowered_name", &tv::NVRTCProgram::get_lowered_name);
-  
+  py::enum_<tv::NVRTCProgram::SerializationType>(nvrtc_prog_m, "SerializationType")
+      .value("kSource", tv::NVRTCProgram::SerializationType::kSource)
+      .value("kPTX", tv::NVRTCProgram::SerializationType::kPTX)
+      .value("kCuBin", tv::NVRTCProgram::SerializationType::kCuBin)
+      .export_values();
 
 
   py::class_<tv::NVRTCModule, std::shared_ptr<tv::NVRTCModule>> nvrtc_m(m, "NVRTCModule");
@@ -616,6 +633,9 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   // }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0); 
 #endif
   m.def("get_compute_capability", [](int index){
+    if (index == -1){
+      checkCudaErrors(cudaGetDevice(&index));
+    }
 #ifdef TV_CUDA
     cudaDeviceProp prop;
     checkCudaErrors(cudaGetDeviceProperties(&prop, index));
@@ -623,7 +643,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
 #else 
     return std::make_tuple(-1, -1);
 #endif
-  }, py::arg("index")); 
+  }, py::arg("index") = -1); 
 
   m.def("from_numpy", [](py::array arr){
     return tv::array2tensor(arr);

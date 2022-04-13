@@ -503,7 +503,7 @@ class ConvMainUnitTest(pccm.Class):
                     input_dims[i - {dim_start}] = input.dim(i);
                     output_dims[i - {dim_start}] = output.dim(i);
                 }}
-                int kernel_volume = tv::arrayops::prod(ksize);
+                int kernel_volume = ksize.op<tv::arrayops::prod>();
                 tv::array<int, {p.ndim}> padding_arr{{{code.unpack([f"padding[{i}]" for i in range(p.ndim)])}}};
                 tv::array<int, {p.ndim}> stride_arr{{{code.unpack([f"stride[{i}]" for i in range(p.ndim)])}}};
                 tv::array<int, {p.ndim}> dilation_arr{{{code.unpack([f"dilation[{i}]" for i in range(p.ndim)])}}};

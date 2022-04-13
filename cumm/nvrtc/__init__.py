@@ -47,7 +47,8 @@ class CummNVRTCModule(tv.NVRTCModule):
                  verbose: bool = False,
                  cudadevrt_path: str = "",
                  custom_names: Optional[List[str]] = None,
-                 verbose_path: str = "") -> None:
+                 verbose_path: str = "",
+                 std: str = "c++14") -> None:
         cg = CodeGenerator([], verbose=verbose)
         user_cus = cg.build_graph(cus, namespace_root)
         # iterate cus and get all kernels
@@ -62,7 +63,7 @@ class CummNVRTCModule(tv.NVRTCModule):
                     if decl.code.is_template():
                         # don't support template kernel
                         continue
-                    # is global functino. firstly check types
+                    # is global function. firstly check types
                     meta = tv.NVRTCKernelMeta(meta.name, cu_ns,
                                               decl.code.arguments)
                     self.kernel_metas.append(meta)
@@ -81,8 +82,8 @@ class CummNVRTCModule(tv.NVRTCModule):
         for cu in user_cus:
             extern_build_meta += cu.build_meta
         # this function will call driver init
-        arch = tv.get_compute_capability(0)
-        opts = ["-std=c++14", f"--gpu-architecture=sm_{arch[0]}{arch[1]}"]
+        arch = tv.get_compute_capability()
+        opts = [f"-std={std}", f"--gpu-architecture=sm_{arch[0]}{arch[1]}"]
         if Path(cudadevrt_path).exists():
             opts.append("--relocatable-device-code=true")
         if "nvcc" in extern_build_meta.compiler_to_cflags:
@@ -102,12 +103,9 @@ class CummNVRTCModule(tv.NVRTCModule):
                 for k, v in header_code_dict.items():
                     print(k)
                     print(v)
-        # print(header_code_dict)
         name_exprs = list(name_to_meta.keys())
         if custom_names is not None:
             name_exprs.extend(custom_names)
-        # print(opts)
-        # breakpoint()
         super().__init__(final_code,
                          header_code_dict,
                          opts,
@@ -122,6 +120,8 @@ class CummNVRTCModule(tv.NVRTCModule):
             if line.startswith(".global .align"):
                 parts = line.split(" ")
                 name = parts[4]
+                if "[" in name:
+                    continue
                 if len(parts) == 7:
                     name = cufilt(name)
                     name = "::".join(name.split("::")[1:])
@@ -130,9 +130,8 @@ class CummNVRTCModule(tv.NVRTCModule):
                     name = cufilt(name[:-1])
                     name = "::".join(name.split("::")[1:])
                     const_values[name] = 0
-        # print(const_values)
-        # breakpoint()
         self.const_values = const_values
+
 
     @property
     def kernels(self):

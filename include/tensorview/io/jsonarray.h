@@ -101,10 +101,9 @@ inline int64_t align_offset(int64_t offset, int64_t n) {
 
 } // namespace detail
 
-template <typename Tbuffer> JsonArray decode(const Tbuffer &buffer) {
+inline JsonArray decode(const uint8_t* buffer_ptr, size_t size) {
   JsonArray res;
-  auto buffer_ptr = buffer.data();
-  if (buffer.size() < 16) {
+  if (size < 16) {
     TV_THROW_RT_ERR("buffer length invalid");
   }
   int64_t content_end = *(reinterpret_cast<const int64_t *>(buffer_ptr));
@@ -114,7 +113,7 @@ template <typename Tbuffer> JsonArray decode(const Tbuffer &buffer) {
   TV_ASSERT_RT_ERR(content_end < meta_end, "error");
 
   auto meta =
-      json::parse(buffer.begin() + content_end, buffer.begin() + meta_end);
+      json::parse(buffer_ptr + content_end, buffer_ptr + meta_end);
   auto array_metas = meta["array"];
   auto data_skeleton = meta["data"];
   std::vector<tv::Tensor> res_tensors;
@@ -134,6 +133,11 @@ template <typename Tbuffer> JsonArray decode(const Tbuffer &buffer) {
     res_tensors.push_back(tensor.clone());
   }
   return {data_skeleton, res_tensors};
+}
+
+
+inline JsonArray decode(const std::vector<uint8_t> &buffer) {
+  return decode(buffer.data(), buffer.size());
 }
 
 inline std::vector<uint8_t> encode(const std::vector<tv::Tensor> tensors,

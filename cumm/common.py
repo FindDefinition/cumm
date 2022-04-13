@@ -393,6 +393,14 @@ class TensorViewCore(pccm.Class):
         self.add_include("tensorview/core/all.h")
         self.add_include("tensorview/core/arrayops/simple.h")
 
+
+class TensorViewArrayLinalg(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorViewCore)
+        self.add_include("tensorview/core/arrayops/linalg.h")
+
+
 class TensorViewNVRTCKernel(pccm.Class):
     def __init__(self):
         super().__init__()

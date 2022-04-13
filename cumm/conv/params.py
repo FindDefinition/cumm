@@ -275,9 +275,9 @@ class ConvProblem(pccm.ParameterizedClass):
             """)
         else:
             code.raw(f"""
-            int ksize_prod = tv::arrayops::prod(ksize);
-            int in_prod = tv::arrayops::prod(input_dims);
-            int out_prod = tv::arrayops::prod(output_dims);
+            int ksize_prod = ksize.op<tv::arrayops::prod>();
+            int in_prod = input_dims.op<tv::arrayops::prod>();
+            int out_prod = output_dims.op<tv::arrayops::prod>();
             return ConvProblemCommon::implicit_gemm_mnk(op_type, N, C, K, ksize_prod, in_prod, out_prod, false);
             """)
 
@@ -319,9 +319,9 @@ class ConvProblem(pccm.ParameterizedClass):
             """)
         else:
             code.raw(f"""
-            int ksize_prod = tv::arrayops::prod(ksize);
-            int in_prod = tv::arrayops::prod(input_dims);
-            int out_prod = tv::arrayops::prod(output_dims);
+            int ksize_prod = ksize.op<tv::arrayops::prod>();
+            int in_prod = input_dims.op<tv::arrayops::prod>();
+            int out_prod = output_dims.op<tv::arrayops::prod>();
             switch (op_type) {{
                 case tv::gemm::ConvOpType::kForward:
                     return ksize_prod * tv::div_up(tv::div_up(C, split_k_slices), tile_shape_k);

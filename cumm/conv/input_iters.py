@@ -255,7 +255,7 @@ class WeightOptParams(bases.ConvIterParams):
             # for weight opt params, the C is actually K, so we
             # need to multplie stride.
             mul_stride_if_bwd = " * layout.strides[0]"
-        kernel_vol = "problem.kernel_volume" if self.problem.mask_sparse else "tv::arrayops::prod(problem.ksize)"
+        kernel_vol = "problem.kernel_volume" if self.problem.mask_sparse else "problem.ksize.op<tv::arrayops::prod>()"
         if self.increment_k_first:
             code.raw(f"""
             // int kernel_prod = {kernel_vol};

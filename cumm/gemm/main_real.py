@@ -481,7 +481,7 @@ def _asdv_test_regular_gemm():
 
         mod = CummNVRTCModule(
             [ker],
-            cudadevrt_path="/usr/local/cuda-11.4/lib64/libcudadevrt.a",
+            cudadevrt_path="/usr/local/cuda/lib64/libcudadevrt.a",
             verbose=False,
             custom_names=custom_names)
         # print(mod.get_ptx())
@@ -595,12 +595,13 @@ def _asdv_test_regular_gemm():
             lib_object.matmul2(params_cpp)
         else:
             params_cpp.nvrtc_params = nvrtc_params
-            with tv.KernelTimer().measure_and_print():
+            with tv.measure_and_print():
                 tv.gemm.run_nvrtc_gemm_kernel(params_cpp)
         c_cpu = c_tv.cpu().numpy()
         print(c_cpu.reshape(-1)[-16:])
         print(c.reshape(-1)[-16:])
-        print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
+        
+        print(params_cpp.algo_desp, a.mean(), b.mean(), c.mean(),
               np.linalg.norm(c_cpu - c))
 
 

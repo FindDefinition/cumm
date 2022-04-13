@@ -19,7 +19,7 @@
 #include "defs.h"
 
 #ifdef __CUDACC_RTC__
-#include "nvrtc_std.h"
+#include "nvrtc/type_traits.h"
 #else
 #include "cc17.h"
 #include <functional>
@@ -139,6 +139,13 @@ struct mp_append_impl<L<Ts...>, T> {
   using type = mp_list<Ts..., T>;
 };
 
+template <class L, class T> struct mp_insert_front_impl;
+
+template <class... Ts, class T, template <class...> class L>
+struct mp_insert_front_impl<L<Ts...>, T> {
+  using type = mp_list<T, Ts...>;
+};
+
 template <template <class> class F, class L> struct mp_transform_impl;
 
 template <template <class> class F, template <class...> class L, class... T>
@@ -175,6 +182,9 @@ using mp_transform = typename detail::mp_transform_impl<F, L>::type;
 
 template <class L, class T>
 using mp_append = typename detail::mp_append_impl<L, T>::type;
+
+template <class L, class T>
+using mp_insert_front = typename detail::mp_insert_front_impl<L, T>::type;
 
 template <class A, template <class...> class B>
 using mp_rename = typename detail::mp_rename_impl<A, B>::type;
@@ -229,10 +239,10 @@ constexpr T mp_reduce_sum_v = mp_reduce_sum<mp_list_c<T, Ns...>, std::integral_c
 
 namespace detail {
 
-template <typename T, typename L> struct mp_append_impl;
-template <typename T, class... Ts> struct mp_append_impl<T, mp_list<Ts...>> {
-  using type = mp_list<Ts..., T>;
-};
+// template <typename T, typename L> struct mp_append_impl;
+// template <typename T, class... Ts> struct mp_append_impl<T, mp_list<Ts...>> {
+//   using type = mp_list<Ts..., T>;
+// };
 
 template <typename T, int N> struct mp_make_integer_sequence_impl {
   using type = typename mp_append_impl<

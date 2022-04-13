@@ -24,3 +24,4 @@
 #include "nvrtc/core.h"
 #include "nvrtc/type_traits.h"
 #include "nvrtc/limits.h"
+#include "nvrtc/tuple.h"

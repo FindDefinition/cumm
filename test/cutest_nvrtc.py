@@ -1,9 +1,10 @@
+import pickle
 from codeai.astex import lineprof
 
 from cumm import tensorview as tv
 from cumm.constants import PACKAGE_ROOT, TENSORVIEW_INCLUDE_PATH
 from cumm.inliner import NVRTCInlineBuilder
-from cumm.common import TensorViewNVRTCHashKernel
+from cumm.common import TensorViewNVRTCHashKernel, TensorViewArrayLinalg
 
 # @lineprof.lineprof_wrapper_cpp
 def test_nvrtc():
@@ -67,7 +68,7 @@ constexpr auto c2 = a.op<op::inverse>();
     print(a.cpu().numpy())
 
 def test_nvrtc2():
-    inliner = NVRTCInlineBuilder([TensorViewNVRTCHashKernel], root=PACKAGE_ROOT.parent)
+    inliner = NVRTCInlineBuilder([TensorViewNVRTCHashKernel, TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
     # init driver
     a = tv.zeros([1], tv.float32, 0)
     keys = tv.zeros([5000], tv.int32, 0)
@@ -96,11 +97,55 @@ def test_nvrtc2():
     tv::printf2_once("DEBUG", c);
     auto d = op::concat(a, a);
     tv::printf2_array_once(d);
+    std::tuple<float, int> ctx{{1.0f, 2}};
+    // std::tuple<float> ctx2{{1.0f}};
+    // const auto [ctx2_0] = ctx2;
+    // int ctx[2] = {{1, 2}};
+    // const auto [ctx_0, ctx_1] = ctx;
+    tv::printf2_once(std::get<0>(ctx), std::get<1>(ctx));
+    tv::printf2_once(__ffs(1u << 0));
+
+    tv::array_nd<float, 8, 3> corners{{}};
+    tv::array_nd<float, 4, 4> imu2enu{{}};
+    auto corners2 = corners.op<op::transform_3d>(imu2enu);
 
     """)
 
     print(a.cpu().numpy())
 
+def test_nvrtc3():
+    import numpy as np 
+    inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
+    # init driver
+    a = tv.zeros([3], tv.float32, 0)
+    t = np.zeros((4, 4), np.float32)
+    b_out = tv.zeros([3], tv.float32, 0)
+
+    inliner.kernel_raw("wtf", inliner.get_1d_param(1), f"""
+    namespace op = tv::arrayops;
+
+    auto tr = $t;
+    auto p = reinterpret_cast<tv::array<float, 3>*>($a)[0];
+    auto b = p.op<op::transform_3d>(tr);
+    reinterpret_cast<tv::array<float, 3>*>($b_out)[0] = b;
+    """)
+    print(inliner.get_nvrtc_module("wtf").get_ptx())
+
+    inliner.kernel_raw("wtf2", inliner.get_1d_param(1), f"""
+    namespace op = tv::arrayops;
+    tv::array_nd<float, 4, 4> wf;
+    auto tr = $t;
+    auto p = reinterpret_cast<tv::array<float, 3>*>($a)[0];
+    tv::array<float, 3> b;
+    b[0] = p[0] * tr[0][0] + p[1] * tr[0][1] + p[2] * tr[0][2] + tr[0][3];
+    b[1] = p[0] * tr[1][0] + p[1] * tr[1][1] + p[2] * tr[1][2] + tr[1][3];
+    b[2] = p[0] * tr[2][0] + p[1] * tr[2][1] + p[2] * tr[2][2] + tr[2][3];
+    reinterpret_cast<tv::array<float, 3>*>($b_out)[0] = b;
+    """)
+    print(inliner.get_nvrtc_module("wtf2").get_ptx())
+    binary = pickle.dumps(inliner.get_nvrtc_module("wtf"))
+    model2 = pickle.loads(binary)
+    print(len(binary))
 
 if __name__ == "__main__":
-    test_nvrtc2()
+    test_nvrtc3()

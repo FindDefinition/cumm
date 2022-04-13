@@ -26,13 +26,13 @@
 #ifdef __CUDACC_RTC__
 #include "nvrtc_std.h"
 #else
+#include <array>
 #include <cassert>
 #include <functional>
 #include <iterator>
 #include <type_traits>
 #include <utility>
 #include <vector>
-#include <array>
 #endif
 
 namespace tv {
@@ -381,6 +381,14 @@ struct get_tv_array_rank<array<T, N, Align>>
     : public std::integral_constant<std::size_t,
                                     get_tv_array_rank<T>::value + 1> {};
 
+template <typename T> struct get_tv_array_shape { using type = mp_list<>; };
+
+template <typename T, size_t N, size_t Align>
+struct get_tv_array_shape<tv::array<T, N, Align>> {
+  using type = mp_insert_front<typename get_tv_array_shape<T>::type,
+                               std::integral_constant<std::size_t, N>>;
+};
+
 template <typename T> struct _get_tv_value_type { using type = void; };
 
 template <typename T, size_t N, size_t Align>
@@ -482,6 +490,9 @@ template <> struct array_reduce_impl<1> {
 
 } // namespace detail
 
+template <typename T>
+constexpr bool is_tv_array_v = detail::is_tv_array<std::decay_t<T>>::value;
+
 namespace arrayops {
 
 template <class F, class... Args>
@@ -493,24 +504,33 @@ TV_HOST_DEVICE_INLINE constexpr auto apply(F &&f, Args &&...args) {
 }
 
 } // namespace arrayops
+namespace detail {
+
+template <typename T, size_t N, size_t... Ns> struct nested_array_type {
+  using type = array<typename nested_array_type<T, Ns...>::type, N>;
+};
+
+template <typename T, size_t N> struct nested_array_type<T, N> {
+  using type = array<T, N>;
+};
+} // namespace detail
+
+template <typename T, size_t... Ns>
+using array_nd = typename detail::nested_array_type<T, Ns...>::type;
 
 #ifndef __CUDACC_RTC__
 // std::array don't support nvrtc.
 namespace detail {
 
-template <typename T>
-struct nested_conversion{
+template <typename T> struct nested_conversion {
   using type = std::decay_t<T>;
 };
 
-
-template <typename T, size_t N>
-struct nested_conversion<std::array<T, N>>{
+template <typename T, size_t N> struct nested_conversion<std::array<T, N>> {
   using type = tv::array<typename nested_conversion<std::decay_t<T>>::type, N>;
 };
 
-template <typename T, size_t N>
-struct nested_conversion<tv::array<T, N>>{
+template <typename T, size_t N> struct nested_conversion<tv::array<T, N>> {
   using type = std::array<typename nested_conversion<std::decay_t<T>>::type, N>;
 };
 
@@ -518,50 +538,59 @@ template <typename T>
 using nested_conversion_t = typename nested_conversion<std::decay_t<T>>::type;
 
 template <typename T, size_t N>
-constexpr nested_conversion_t<std::array<T, N>> from_std_array_impl_expand(const std::array<T, N>& arr);
-template <typename T>
-constexpr T from_std_array_impl_expand(const T& arr){
+constexpr nested_conversion_t<std::array<T, N>>
+from_std_array_impl_expand(const std::array<T, N> &arr);
+template <typename T> constexpr T from_std_array_impl_expand(const T &arr) {
   return arr;
 }
 
 template <typename T, size_t N>
-constexpr nested_conversion_t<tv::array<T, N>> to_std_array_impl_expand(const tv::array<T, N>& arr);
-template <typename T>
-constexpr T to_std_array_impl_expand(const T& arr){
+constexpr nested_conversion_t<tv::array<T, N>>
+to_std_array_impl_expand(const tv::array<T, N> &arr);
+template <typename T> constexpr T to_std_array_impl_expand(const T &arr) {
   return arr;
 }
 
 template <typename T, size_t N, int... Inds>
-constexpr auto from_std_array_impl(const std::array<T, N>& arr, mp_list_int<Inds...>){
-  return nested_conversion_t<std::array<T, N>>{from_std_array_impl_expand(arr[Inds])...};
+constexpr auto from_std_array_impl(const std::array<T, N> &arr,
+                                   mp_list_int<Inds...>) {
+  return nested_conversion_t<std::array<T, N>>{
+      from_std_array_impl_expand(arr[Inds])...};
 }
 
 template <typename T, size_t N>
-constexpr nested_conversion_t<std::array<T, N>> from_std_array_impl_expand(const std::array<T, N>& arr){
+constexpr nested_conversion_t<std::array<T, N>>
+from_std_array_impl_expand(const std::array<T, N> &arr) {
   return from_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
 }
 
 template <typename T, size_t N, int... Inds>
-constexpr auto to_std_array_impl(const tv::array<T, N>& arr, mp_list_int<Inds...>){
-  return nested_conversion_t<tv::array<T, N>>{to_std_array_impl_expand(arr[Inds])...};
+constexpr auto to_std_array_impl(const tv::array<T, N> &arr,
+                                 mp_list_int<Inds...>) {
+  return nested_conversion_t<tv::array<T, N>>{
+      to_std_array_impl_expand(arr[Inds])...};
 }
 
 template <typename T, size_t N>
-constexpr nested_conversion_t<tv::array<T, N>> to_std_array_impl_expand(const tv::array<T, N>& arr){
+constexpr nested_conversion_t<tv::array<T, N>>
+to_std_array_impl_expand(const tv::array<T, N> &arr) {
   return to_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
 }
 
-}
+} // namespace detail
+
 namespace arrayops {
 template <typename T, size_t N>
-constexpr detail::nested_conversion_t<std::array<T, N>> from_std_array(const std::array<T, N>& arr){
+constexpr detail::nested_conversion_t<std::array<T, N>>
+from_std_array(const std::array<T, N> &arr) {
   return detail::from_std_array_impl_expand(arr);
 }
 template <typename T, size_t N>
-constexpr detail::nested_conversion_t<tv::array<T, N>> to_std_array(const tv::array<T, N>& arr){
+constexpr detail::nested_conversion_t<tv::array<T, N>>
+to_std_array(const tv::array<T, N> &arr) {
   return detail::to_std_array_impl_expand(arr);
 }
-}
+} // namespace arrayops
 #endif
 
 template <class L>
@@ -580,14 +609,16 @@ operator+(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator+(const array<T, N, Align> &lfs, const T2 &rfs) {
   return arrayops::apply(detail::array_sum<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator+(const T2 &lfs, const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_sum<detail::get_nested_element_t<T>>,
@@ -601,14 +632,16 @@ operator-(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator-(const array<T, N, Align> &lfs, const T2 &rfs) {
   return arrayops::apply(detail::array_sub<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator-(const T2 &lfs, const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_sub<detail::get_nested_element_t<T>>,
@@ -622,14 +655,16 @@ operator*(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator*(const array<T, N, Align> &lfs, const T2 &rfs) {
   return arrayops::apply(detail::array_mul<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator*(const T2 &lfs, const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_mul<detail::get_nested_element_t<T>>,
@@ -643,14 +678,16 @@ operator/(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator/(const array<T, N, Align> &lfs, const T2 &rfs) {
   return arrayops::apply(detail::array_div<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
 
-template <typename T, size_t N, size_t Align, typename T2>
+template <typename T, size_t N, size_t Align, typename T2,
+          typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
 operator/(const T2 &lfs, const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_div<detail::get_nested_element_t<T>>,
@@ -682,16 +719,23 @@ constant_impl(T val, mp_list_int<Inds...>) noexcept {
 }
 
 template <typename T, size_t N, int... Inds>
-TV_HOST_DEVICE_INLINE constexpr tv::array<T, sizeof...(Inds)>
-slice_impl(const tv::array<T, N> &arr, mp_list_int<Inds...>) noexcept {
+TV_HOST_DEVICE_INLINE constexpr array<T, sizeof...(Inds)>
+slice_impl(const array<T, N> &arr, mp_list_int<Inds...>) noexcept {
   return array<T, sizeof...(Inds)>{arr[Inds]...};
 }
+
+template <int Start, int End, typename T, size_t N1, size_t N2, int... Inds>
+TV_HOST_DEVICE_INLINE constexpr array<array<T, End - Start>, sizeof...(Inds)>
+slice_2d_impl(const array<array<T, N2>, N1> &arr, mp_list_int<Inds...>) noexcept {
+  return array<array<T, End - Start>, sizeof...(Inds)>{slice_impl(arr[Inds], mp_list_int_range<Start, End>{})...};
+}
+
 
 template <typename T, size_t N1, size_t N2>
 TV_HOST_DEVICE_INLINE constexpr array<T, N1 + N2>
 concat2_base_impl(const array<T, N1> &a, const array<T, N2> &b) noexcept {
   return concat_impl(a, b, mp_make_list_c_sequence<int, N1>{},
-                             mp_make_list_c_sequence<int, N2>{});
+                     mp_make_list_c_sequence<int, N2>{});
 }
 
 } // namespace detail
@@ -700,13 +744,13 @@ namespace arrayops {
 
 template <typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<T, N>
-concat(const array<T, N>& arr) noexcept {
+concat(const array<T, N> &arr) noexcept {
   return arr;
 }
 
 template <typename T, size_t N, size_t... Ns>
 TV_HOST_DEVICE_INLINE constexpr array<T, mp_reduce_sum_v<size_t, N, Ns...>>
-concat(const array<T, N>& arr, const array<T, Ns>& ...arrs) noexcept {
+concat(const array<T, N> &arr, const array<T, Ns> &...arrs) noexcept {
   return detail::concat2_base_impl(arr, concat(arrs...));
 }
 
@@ -723,18 +767,25 @@ TV_HOST_DEVICE_INLINE constexpr auto constant(T val) noexcept {
 }
 
 template <typename T, size_t N>
-TV_HOST_DEVICE_INLINE constexpr tv::array<T, N>
+TV_HOST_DEVICE_INLINE constexpr array<T, N>
 reverse(const array<T, N> &a) noexcept {
   return detail::reverse_impl(a, mp_make_list_c_sequence_reverse<int, N>{});
 }
-
 template <int Start, int End, typename T, size_t N>
-TV_HOST_DEVICE_INLINE constexpr tv::array<
+TV_HOST_DEVICE_INLINE constexpr array<
     T, (End > 0 ? End : End + int64_t(N)) - Start>
-slice(const tv::array<T, N> &arr) {
+slice(const array<T, N> &arr) {
   // TODO this function have problem in intellisense engine
   return detail::slice_impl(
       arr, mp_list_int_range<Start, (End > 0 ? End : End + int64_t(N))>{});
+}
+
+template <int Start1, int Start2, int End1, int End2, typename T, size_t N1, size_t N2>
+TV_HOST_DEVICE_INLINE constexpr array<
+    array<T, (End2 > 0 ? End2 : End2 + int64_t(N2)) - Start2>, (End1 > 0 ? End1 : End1 + int64_t(N1)) - Start1>
+slice_2d(const array<array<T, N2>, N1> &arr) {
+  return detail::slice_2d_impl<Start2, (End2 > 0 ? End2 : End2 + int64_t(N2))>(
+      arr, mp_list_int_range<Start1, (End1 > 0 ? End1 : End1 + int64_t(N1))>{});
 }
 
 template <typename T, size_t N>

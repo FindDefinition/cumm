@@ -17,6 +17,8 @@
 #include <memory>
 #include <string>
 #include <tensorview/tensor.h>
+#include <tensorview/io/jsonarray.h>
+
 #include <unordered_map>
 #include <vector>
 #ifdef TV_CUDA
@@ -39,6 +41,11 @@ namespace tv {
 
 class NVRTCProgram {
 public:
+  enum SerializationType {
+    kSource = 0,
+    kPTX = 1,
+    kCuBin = 2
+  };
   NVRTCProgram(std::string code,
                std::unordered_map<std::string, std::string> headers = {},
                std::vector<std::string> opts = {},
@@ -89,13 +96,22 @@ public:
     compile_log_ = log;
     TV_ASSERT_RT_ERR(compileResult == NVRTC_SUCCESS, "nvrtc compile failed.");
     // post check
+    predefined_name_expr_map_.clear();
     for (size_t i = 0; i < name_exprs_.size(); ++i) {
-      get_lowered_name(name_exprs_[i]);
+      predefined_name_expr_map_[name_exprs_[i]] = get_lowered_name(name_exprs_[i]);
     }
 
 #else
     TV_THROW_RT_ERR("you must compile with CUDA first to use nvrtc program");
 #endif
+  }
+
+  NVRTCProgram(std::unordered_map<std::string, std::string> predefined_name_map, std::string ptx):
+        ptx_(ptx), predefined_name_expr_map_(predefined_name_map), serial_type_(kPTX) {
+  }
+
+  NVRTCProgram(std::unordered_map<std::string, std::string> predefined_name_map, tv::Tensor cubin):
+        cubin_(cubin), predefined_name_expr_map_(predefined_name_map), serial_type_(kCuBin) {
   }
 
   static std::shared_ptr<NVRTCProgram>
@@ -119,13 +135,54 @@ public:
   }
 
   std::string to_string() const {
+    TV_ASSERT_RT_ERR(serial_type_ == kSource, "only kSource program can be converted to string")
     nlohmann::json j;
+    j["type"] = kSource;
     j["code"] = code_;
     j["headers"] = headers_;
     j["opts"] = opts_;
     j["program_name"] = program_name_;
     j["name_exprs"] = name_exprs_;
     return j.dump();
+  }
+
+  std::vector<uint8_t> to_binary(SerializationType type) const {
+    tv::io::JsonArray jarr;
+    if (type == kSource){
+      jarr.data["type"] = static_cast<int>(kSource);
+      jarr.data["code"] = code_;
+      jarr.data["headers"] = headers_;
+      jarr.data["opts"] = opts_;
+      jarr.data["program_name"] = program_name_;
+      jarr.data["name_exprs"] = name_exprs_;
+    } else if (type == kPTX){
+      jarr.data["type"] = static_cast<int>(kPTX);;
+      jarr.data["ptx"] = ptx();
+      jarr.data["name_map"] = get_predefined_lowered_name_map();
+    }else{
+      jarr.data["type"] = static_cast<int>(kCuBin);
+      jarr.assign("cubin", cubin());
+      jarr.data["name_map"] = get_predefined_lowered_name_map();
+    }
+    return tv::io::encode(jarr.tensors, jarr.data);
+  }
+
+  static std::shared_ptr<NVRTCProgram> from_binary(const uint8_t* buffer, size_t size) {
+    auto jarr = tv::io::decode(buffer, size);
+    SerializationType type = static_cast<SerializationType>(jarr.data["type"].get<int>());
+    if (type == kSource){
+      return std::make_shared<NVRTCProgram>(jarr.data["code"].get<std::string>(),
+        jarr.data["headers"].get<std::unordered_map<std::string, std::string>>(),
+        jarr.data["opts"].get<std::vector<std::string>>(),
+        jarr.data["program_name"].get<std::string>(),
+        jarr.data["name_exprs"].get<std::vector<std::string>>());
+    } else if (type == kPTX){
+      return std::make_shared<NVRTCProgram>( 
+        jarr.data["name_map"].get<std::unordered_map<std::string, std::string>>(), jarr.data["ptx"].get<std::string>());
+    }else{
+      return std::make_shared<NVRTCProgram>(
+        jarr.data["name_map"].get<std::unordered_map<std::string, std::string>>(), jarr.tensors[0]);
+    }
   }
 
   std::unordered_map<std::string, std::string> get_predefined_lowered_name_map() const {
@@ -145,6 +202,10 @@ public:
   }
 
   std::string ptx() const {
+    if (prog_ == nullptr){
+      TV_ASSERT_RT_ERR(!ptx_.empty(), "PTX is empty!!!");
+      return ptx_;
+    }
 #ifdef TV_CUDA
 
     size_t ptxSize;
@@ -158,6 +219,23 @@ public:
 #endif
   }
 
+  tv::Tensor cubin() const {
+    if (prog_ == nullptr){
+      TV_ASSERT_RT_ERR(!cubin_.empty(), "Cubin is empty!!!");
+      return cubin_;
+    }
+#ifdef TV_CUDA
+    size_t cubinSize;
+    TV_NVRTC_SAFE_CALL(nvrtcGetCUBINSize(prog_, &cubinSize));
+    tv::Tensor bin({int64_t(cubinSize)}, tv::uint8, -1);
+    TV_NVRTC_SAFE_CALL(nvrtcGetCUBIN(prog_, reinterpret_cast<char*>(bin.data_ptr<uint8_t>())));
+    return bin;
+#else
+    return tv.Tensor();
+#endif
+
+  }
+
   std::string compile_log() const { return compile_log_; }
 
   std::string program_name() const { return program_name_; }
@@ -165,6 +243,10 @@ public:
   std::vector<std::string> name_exprs() const { return name_exprs_; }
 
   std::string get_lowered_name(std::string name) const {
+    if (prog_ == nullptr){
+      TV_ASSERT_RT_ERR(predefined_name_expr_map_.find(name) != predefined_name_expr_map_.end(), "can't find your name");
+      return predefined_name_expr_map_.at(name);
+    }
 #ifdef TV_CUDA
     const char *lowered_name;
     TV_NVRTC_SAFE_CALL(nvrtcGetLoweredName(prog_,
@@ -183,10 +265,14 @@ private:
 #endif
   std::string code_;
   std::string compile_log_;
-
+  // used if program is loaded from binary data or ptx.
+  std::string ptx_;
+  tv::Tensor cubin_;
+  SerializationType serial_type_ = kSource;
   std::unordered_map<std::string, std::string> headers_;
   std::string program_name_;
   std::vector<std::string> name_exprs_;
+  std::unordered_map<std::string, std::string> predefined_name_expr_map_;
   std::vector<std::string> opts_;
 };
 
