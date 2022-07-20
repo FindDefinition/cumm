@@ -14,7 +14,9 @@
 
 #pragma once
 #include "array.h"
-
+#ifndef TV_CUDA_CC
+#include <string>
+#endif 
 namespace tv {
 
 template <size_t N> class const_string : public array<char, N + 1> {
@@ -48,6 +50,9 @@ public:
   TV_HOST_DEVICE_INLINE constexpr const char *c_str() const {
     return this->array_;
   }
+#ifndef TV_CUDA_CC
+  operator std::string() const { return std::string(c_str()); }
+#endif
 };
 
 namespace detail {

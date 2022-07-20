@@ -153,12 +153,10 @@ class CopyHeaderCallback(ExtCallback):
             if cudadevrt.exists():
                 target_lib_path.mkdir(0o755, exist_ok=True)
                 shutil.copy(str(cudadevrt), str(target_lib_path / "libcudadevrt.a"))
-            # copy nvrtc headers
-            nvrtc_headers = Path("/usr/local/cuda/include/cuda/std")
-            target_dir = target_nvrtc_include_path / "cuda" / "std"
-            target_dir.parent.mkdir(0o755, exist_ok=True, parents=True)
-            shutil.copytree(nvrtc_headers, target_dir)
-
+            # copy cuda headers isn't allowed. so users must install CUDA (or just CUDA headers) by themselves if nvrtc.
+            # nvrtc_headers = Path("/usr/local/cuda/include")
+            # target_dir = target_nvrtc_include_path
+            # shutil.copytree(nvrtc_headers, target_dir)
 
 disable_jit = os.getenv("CUMM_DISABLE_JIT", None)
 

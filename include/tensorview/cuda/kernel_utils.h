@@ -14,7 +14,8 @@
 
 #pragma once
 // from tensorflow
-#if (defined(TV_CUDA) && !defined(__clang__))
+#include <tensorview/core/defs.h>
+#if defined(TV_CUDA_CC)
 namespace tv {
 namespace detail {
 

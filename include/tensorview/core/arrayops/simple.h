@@ -96,15 +96,15 @@ template <typename T, size_t N, size_t Align> struct cross {
                                                   const array<T, 2, Align> &b) {
     return a[0] * b[1] - a[1] * b[0];
   }
-  TV_HOST_DEVICE_INLINE constexpr auto operator()(const array<T, 2, Align> &a,
+  TV_HOST_DEVICE_INLINE constexpr array<T, 2, Align> operator()(const array<T, 2, Align> &a,
                                                   const T &b) {
     return {a[1] * b, -a[0] * b};
   }
-  TV_HOST_DEVICE_INLINE constexpr auto operator()(const T &a,
+  TV_HOST_DEVICE_INLINE constexpr array<T, 2, Align> operator()(const T &a,
                                                   const array<T, 2, Align> &b) {
     return {-a * b[1], a * b[0]};
   }
-  TV_HOST_DEVICE_INLINE constexpr auto operator()(const array<T, 3, Align> &a,
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3, Align> operator()(const array<T, 3, Align> &a,
                                                   const array<T, 3, Align> &b) {
     return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
             a[0] * b[1] - a[1] * b[0]};

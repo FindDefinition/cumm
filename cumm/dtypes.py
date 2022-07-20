@@ -135,6 +135,8 @@ TVDTYPE_TO_NPDTYPE = {
     uint64.tv_dtype: np.dtype(np.uint64),
 }  # type: Dict[int, np.dtype]
 
+TVDTYPE_TO_DTYPE = {x.tv_dtype: x for x in ALL_DTYPES}
+
 NPDTYPE_TO_DTYPE = {v: k
                     for k, v in DTYPE_TO_NPDTYPE.items()
                     }  # type: Dict[np.dtype, DType]
@@ -150,14 +152,13 @@ def get_npdtype(dtype: DType):
 def get_npdtype_from_tvdtype(tv_dtype: int):
     return TVDTYPE_TO_NPDTYPE[tv_dtype]
 
-
 def get_dtype_from_npdtype(npdtype: np.dtype):
     return NPDTYPE_TO_DTYPE[npdtype]
 
 def get_dtype_from_tvdtype(tv_dtype: int, use_cuda_half: bool = False):
     if use_cuda_half and tv_dtype == float16_origin.tv_dtype:
         return float16_origin
-    return NPDTYPE_TO_DTYPE[TVDTYPE_TO_NPDTYPE[tv_dtype]]
+    return TVDTYPE_TO_DTYPE[tv_dtype]
 
 if __name__ == "__main__":
     a = np.zeros((1, 2))

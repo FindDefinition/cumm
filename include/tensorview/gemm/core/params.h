@@ -41,6 +41,7 @@ struct GemmAlgoDesp {
   int element_per_access_b = -1;
   int element_per_access_c = -1;
   int access_per_vector = 1;
+  bool is_nvrtc = false;
   GemmAlgoDesp()
       : dtype_a(int(tv::unknown)), dtype_b(int(tv::unknown)),
         dtype_c(int(tv::unknown)), trans_a_(-1), trans_b_(-1), trans_c_(-1),
@@ -207,7 +208,7 @@ struct ConvAlgoDesp : public GemmAlgoDesp {
     }
     ss << layout_i_str << layout_w_str << layout_o_str;
     if (mask_sparse) {
-      ss << "_" << increment_k_first ? "SF" : "SK";
+      ss << "_" << (increment_k_first ? "SK" : "SF");
     }
     return ss.str();
   }

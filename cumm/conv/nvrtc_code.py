@@ -192,6 +192,9 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
             sp_kernel_params.mask_ptr = mask.data_ptr<uint32_t>();
             sp_kernel_params.reverse_mask = params.reverse_mask;
             sp_kernel_params.mask_filter = params.mask_filter;
+            sp_kernel_params.indice_ptr = indices.data_ptr<int32_t>();
+            sp_kernel_params.mask_argsort_ptr = mask_argsort.data_ptr<int32_t>();
+
             grid_dims_arr = tv::gemm::get_spconv_logical_tile_count(mnk[0], mnk[1], mnk[2], 
                             algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices, kernel_volume, algo_desp.op_type);
         }}else{{
@@ -238,8 +241,6 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
         // ev1.sync();
         // ev2.sync();
         // tv::ssprint("prep time", tv::CUDAEvent::duration(ev1, ev2));
-
-
 
         if (nvrtc_params.mode == {NVRTCMode.DynamicParallism.value}){{
             tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
@@ -306,7 +307,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
                 constant_ten.copy_(temp_data, ctx);
                 std::vector<void*> args{{}};
                 TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
-                    nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
+                    nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, nullptr, 0));
             }}
 
         }}else{{

@@ -1028,6 +1028,10 @@ public:
   size_t ndim() const { return shape_.ndim(); }
 
   const TensorShape &shape() const { return shape_; }
+  const std::vector<int64_t> shape_vector() const { 
+    return std::vector<int64_t>(shape_.begin(), shape_.end()); 
+  }
+
   const TensorShape &strides() const { return stride_; }
   int64_t stride(int idx) const {
     if (idx < 0) {
@@ -1059,6 +1063,7 @@ public:
   size_t raw_size() const { return size() * itemsize(); }
   size_t nbytes() const { return raw_size(); }
   size_t size() const { return shape_.size(); }
+  size_t numel() const { return shape_.size(); }
   size_t size(int64_t idx) const { return dim(idx); }
   size_t storage_size() const { return storage_->size(); }
 
@@ -1264,11 +1269,9 @@ public:
     TV_ASSERT_RT_ERR(this->device() == -1 && tensor.device() == -1,
                      "all tensors must be cpu");
 
-    Dispatch<detail::all_tensor_types_t>()(tensor.dtype(), [&](auto I) {
-      using T = TV_DECLTYPE(I);
-      std::copy(tensor.data<T>(), tensor.data<T>() + tensor.size(),
-                this->data<T>());
-    });
+    std::copy(tensor.raw_data(),
+              tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
+              raw_data());
   }
 
   Tensor cpu(Context ctx = Context()) const {

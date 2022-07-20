@@ -55,7 +55,8 @@ class GemmAlgoParams(object):
             splitk_serial: bool = False,
             splitk_parallel: bool = False,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
-            access_per_vector: int = 1):
+            access_per_vector: int = 1,
+            is_nvrtc: bool = False):
         self.ts = MetaArray(*ts)
         self.wts = MetaArray(*wts)
         self.num_stage = num_stage
@@ -80,6 +81,8 @@ class GemmAlgoParams(object):
         self.splitk_parallel = splitk_parallel
         self.shuffle_stride = shuffle_stride
         self.access_per_vector = access_per_vector
+        self.is_nvrtc = is_nvrtc
+
 
     def support_splitk(self):
         return self.splitk_serial or self.splitk_parallel
@@ -108,8 +111,8 @@ def gen_gemm_params(
     #             p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc, algo, tensorop)
     #             if not p.skipped():
     #                 res.append(p)
-    for ta in [False]:
-        for tb in [True]:
+    for ta in [True]:
+        for tb in [False]:
             for tc in [False]:
                 p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc,
                                    algo, tensorop, splitk_serial,
@@ -123,7 +126,7 @@ def gen_gemm_params(
 def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
                        algo: kernel.GemmAlgo,
                        tensorop: Optional[kernel.TensorOp]):
-    res = []
+    res: List[GemmAlgoParams] = []
     for ds in dss:
         for tb in [False, True]:
             p = GemmAlgoParams(ts, wts, stage, ds, False, tb, False, algo,
@@ -140,19 +143,22 @@ def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
 
 def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: str, stage: int,
                           algo: kernel.GemmAlgo,
-                          tensorop: Optional[kernel.TensorOp]):
-    res = []
+                          tensorop: Optional[kernel.TensorOp],
+                    is_nvrtc: bool = False):
+    res: List[GemmAlgoParams] = []
     for ds in dss:
         for tb in [False, True]:
             p = GemmAlgoParams(ts, wts, stage, ds, False, tb, False, algo,
                                tensorop, False, False,
-                               ShuffleStrideType.ShuffleAC)
+                               ShuffleStrideType.ShuffleAC, 
+                               is_nvrtc=is_nvrtc)
             if not p.skipped():
                 res.append(p)
     if ds_for_sab:
         p = GemmAlgoParams(ts, wts, stage, ds_for_sab, True, False, False,
                            algo, tensorop, True, False,
-                           ShuffleStrideType.ShuffleAB)
+                           ShuffleStrideType.ShuffleAB,
+                           is_nvrtc=is_nvrtc)
         if not p.skipped():
             res.append(p)
     return res
@@ -431,8 +437,8 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params((64, 64, 32),
                     #                  (32, 32, 32), 2, "s8,s8,s32,s32,s32",
                     #                  kernel.GemmAlgo.SimtDP4A, None),
-                    *gen_gemm_params((128, 128, 8),
-                                     (32, 64, 8), 2, "f32,f32,f32,f32,f32",
+                    *gen_gemm_params((64, 64, 8),
+                                     (64, 64, 8), 2, "f32,f32,f32,f32,f32",
                                      kernel.GemmAlgo.Simt, None),
                     # *gen_gemm_params((128, 128, 8),
                     #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
@@ -755,7 +761,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             desp.element_per_access_b = {ker.input_spec.input_iter_b.element_per_acc};
             desp.element_per_access_c = {ker.output_spec.out_iter.element_per_acc};
             desp.access_per_vector = {ker.access_per_vector};
-            TV_ASSERT_RT_ERR(desp.__repr__() == {ker.get_algo_name()});
+            TV_ASSERT_RT_ERR(desp.__repr__() == \"{ker.get_algo_name()}\", "error");
             desps.push_back(desp);
             """)
             code.raw("}")
@@ -770,8 +776,8 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         code = pccm.code()
         code.arg("a_shape,b_shape", "std::vector<int64_t>")
         code.arg("trans_a,trans_b,trans_c", "bool")
-        code.arg("shuffle_type", "std::string",
-                 f"\"{ShuffleStrideType.NoShuffle.value}\"")
+        code.arg("shuffle_type", "int",
+                 f"{ShuffleStrideType.NoShuffle.value}")
 
         code.arg("a_inds_shape",
                  "std::vector<int64_t>",
@@ -795,7 +801,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             std::swap(a_shape, b_shape);
         }}
         int m, n, k, k2;
-        if (shuffle_type == "{ShuffleStrideType.ShuffleAC.value}"){{
+        if (shuffle_type == {ShuffleStrideType.ShuffleAC.value}){{
             TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
             TV_ASSERT_RT_ERR(!c_inds_shape.empty(), "c_inds must not empty");
             if (!a_inds_shape.empty()){{
@@ -807,7 +813,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             k2 = b_shape[(int(trans_b))];
             n = b_shape[(int(!trans_b) )];
         }}
-        else if (shuffle_type == "{ShuffleStrideType.ShuffleAB.value}"){{
+        else if (shuffle_type == {ShuffleStrideType.ShuffleAB.value}){{
             TV_ASSERT_RT_ERR(!a_inds_shape.empty() && !b_inds_shape.empty(), "a_inds and c_inds must not empty");
             TV_ASSERT_RT_ERR(trans_a && !trans_b, "shuffle AB must be nt, i.e. backward weight");
             m = a_shape[(int(trans_a))];
@@ -1039,7 +1045,6 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     code.raw(f"""
                     auto timer = tv::CudaContextTimer<>();
                     """)
-
                 code.raw(f"""
                 {{
                     tv::CUDAKernelTimerGuard timerguard(\"{ker.get_algo_name()}\", evtimer, reinterpret_cast<cudaStream_t>(params.stream));

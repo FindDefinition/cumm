@@ -17,7 +17,6 @@ _cudadevrt_libname = "libcudadevrt.a"
 if compat.InWindows:
     _cudadevrt_libname = "cudadevrt.lib"
 
-
 def get_cudadevrt_path():
     _, lib64 = _get_cuda_include_lib()
     _cudadevrt_path_candidates = [
@@ -84,13 +83,22 @@ class CummNVRTCModule(tv.NVRTCModule):
         # this function will call driver init
         arch = tv.get_compute_capability()
         opts = [f"-std={std}", f"--gpu-architecture=sm_{arch[0]}{arch[1]}"]
-        if Path(cudadevrt_path).exists():
+        if cudadevrt_path and Path(cudadevrt_path).exists():
             opts.append("--relocatable-device-code=true")
-        if "nvcc" in extern_build_meta.compiler_to_cflags:
-            opts.extend(extern_build_meta.compiler_to_cflags["nvcc"])
-        for inc in extern_build_meta.includes:
+        global_cflags = extern_build_meta.get_global_cflags()
+        if "nvcc" in global_cflags:
+            opts.extend(global_cflags["nvcc"])
+        local_cflags = extern_build_meta.get_local_cflags()
+        if "nvcc" in local_cflags:
+            opts.extend(local_cflags["nvcc"])
+        # print(opts)
+        for inc in extern_build_meta.get_global_includes():
             opts.append("-I")
             opts.append(str(inc))
+        for inc in extern_build_meta.get_local_includes():
+            opts.append("-I")
+            opts.append(str(inc))
+
         if verbose:
             if verbose_path:
                 verbose_path_p = Path(verbose_path)

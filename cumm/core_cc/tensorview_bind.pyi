@@ -227,6 +227,12 @@ class Tensor:
 
     def byte_offset(self) -> int:
         ...
+        
+    def storage_bytesize(self) -> int:
+        ...
+
+    def bytesize(self) -> int:
+        ...
 
     def empty(self) -> bool:
         ...
@@ -353,6 +359,12 @@ class Tensor:
     @overload
     def fill_float_(self, val: Union[int, float],
                     ctx: Context) -> "Tensor":
+        ...
+    @overload
+    def type_view(self, dtype: int) -> "Tensor":
+        ...
+    @overload
+    def type_view(self, dtype: int, shape: List[int]) -> "Tensor":
         ...
 
     def byte_pointer(self) -> int:
@@ -504,7 +516,7 @@ class GemmAlgoDesp:
     dacc: int
     dcomp: int
     algo: str
-    tensorop: List[int]
+    tensorop: Tuple[int, int, int]
     split_k_serial_: int
     split_k_parallel_: int
     shuffle_type: ShuffleStrideType
@@ -512,11 +524,15 @@ class GemmAlgoDesp:
     element_per_access_b: int
     element_per_access_c: int
     access_per_vector: int
+    is_nvrtc: bool
 
     def __init__(self) -> None:
         ...
 
     def __repr__(self) -> str:
+        ...
+
+    def copy(self) -> "GemmAlgoDesp":
         ...
 
     @property
@@ -624,6 +640,9 @@ class ConvAlgoDesp(GemmAlgoDesp):
     interleave_o: int
     mask_sparse: bool
     increment_k_first: bool
+
+    def copy(self) -> "ConvAlgoDesp":
+        ...
 
     def __init__(self, ndim: int, op_type: ConvOpType) -> None:
         """

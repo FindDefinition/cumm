@@ -31,5 +31,12 @@ enum class ConvLayoutType {
 
 enum class ShuffleStrideType { kNoShuffle = 0, kShuffleAC = 1, kShuffleAB = 2 };
 
+enum class SparseConvAlgo {
+  kNative = 0,
+  kMaskImplicitGemm = 1,
+  kMaskSplitImplicitGemm = 2
+};
+
+
 } // namespace gemm
 } // namespace tv

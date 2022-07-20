@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pickle
 import sys
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import codeai.visualization as vis
+from tensorpc.apps import vis
 import numpy as np
 
 from cumm import cudasim, dtypes
@@ -26,7 +27,7 @@ from cumm import tensorview as tv
 from cumm.gemm import kernel
 from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
 
-VIS_IP = "127.0.0.1:50093"
+VIS_IP = "127.0.0.1:50083"
 
 GEMM_VIS_GLOBAL_SCALE = 10
 import os
@@ -354,7 +355,7 @@ def _asdv_test_simt_python(coord_input: bool = False):
     with cudasim.enter_debug_context(True):
 
         main_cu = GemmMainUnitTest()
-        for params in main_cu.simt_params[:1]:
+        for params in main_cu.all_params[:]:
             np.random.seed(12315)
 
             ker = gen_gemm_kernels(params)
@@ -491,13 +492,12 @@ def _asdv_test_simt_python(coord_input: bool = False):
             O_bound = vis_gemm_output_2d(params.dtype_acc, blocks, threads,
                                          fig_per_group, vis_res["Output"], "O",
                                          [0, B_bound[3] + 10])
-
+            data = pickle.dumps(fig_per_group)
             vis_in_relay(list(fig_per_group.values()))
             # print(TestCase().assertAllClose(c_tv, c))
             print(c_tv.reshape(-1)[:10], c.reshape(-1)[:10])
             print(c_tv.reshape(-1)[-10:], c.reshape(-1)[-10:])
-
-            print(params.get_algo_name(), a.mean(), b.mean(),
+            print(a.mean(), b.mean(),
                   np.linalg.norm(c_tv - c), "Time=", duration)
 
 
@@ -804,6 +804,6 @@ if __name__ == "__main__":
 
     # vis_in_relay([fig])
     # unittest_python()
-    # _asdv_test_simt_python(True)
-    _asdv_test_turing_python(True)
+    _asdv_test_simt_python(True)
+    # _asdv_test_turing_python(True)
     # _asdv_test_volta_python(True)

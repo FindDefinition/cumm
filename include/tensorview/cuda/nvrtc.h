@@ -17,7 +17,6 @@
 #include <memory>
 #include <string>
 #include <tensorview/tensor.h>
-#include <tensorview/io/jsonarray.h>
 
 #include <unordered_map>
 #include <vector>
@@ -26,7 +25,11 @@
 #include <nvrtc.h>
 #include <tensorview/cuda/driver.h>
 #endif
+
+#if !(defined(__CUDA__) || defined(__NVCC__))
+#include <tensorview/io/jsonarray.h>
 #include <tensorview/thirdparty/nlohmann/json.hpp>
+#endif
 
 #define TV_NVRTC_SAFE_CALL(x)                                                  \
   do {                                                                         \
@@ -41,11 +44,7 @@ namespace tv {
 
 class NVRTCProgram {
 public:
-  enum SerializationType {
-    kSource = 0,
-    kPTX = 1,
-    kCuBin = 2
-  };
+  enum SerializationType { kSource = 0, kPTX = 1, kCuBin = 2 };
   NVRTCProgram(std::string code,
                std::unordered_map<std::string, std::string> headers = {},
                std::vector<std::string> opts = {},
@@ -98,7 +97,8 @@ public:
     // post check
     predefined_name_expr_map_.clear();
     for (size_t i = 0; i < name_exprs_.size(); ++i) {
-      predefined_name_expr_map_[name_exprs_[i]] = get_lowered_name(name_exprs_[i]);
+      predefined_name_expr_map_[name_exprs_[i]] =
+          get_lowered_name(name_exprs_[i]);
     }
 
 #else
@@ -106,13 +106,15 @@ public:
 #endif
   }
 
-  NVRTCProgram(std::unordered_map<std::string, std::string> predefined_name_map, std::string ptx):
-        ptx_(ptx), predefined_name_expr_map_(predefined_name_map), serial_type_(kPTX) {
-  }
+  NVRTCProgram(std::unordered_map<std::string, std::string> predefined_name_map,
+               std::string ptx)
+      : ptx_(ptx), predefined_name_expr_map_(predefined_name_map),
+        serial_type_(kPTX) {}
 
-  NVRTCProgram(std::unordered_map<std::string, std::string> predefined_name_map, tv::Tensor cubin):
-        cubin_(cubin), predefined_name_expr_map_(predefined_name_map), serial_type_(kCuBin) {
-  }
+  NVRTCProgram(std::unordered_map<std::string, std::string> predefined_name_map,
+               tv::Tensor cubin)
+      : cubin_(cubin), predefined_name_expr_map_(predefined_name_map),
+        serial_type_(kCuBin) {}
 
   static std::shared_ptr<NVRTCProgram>
   create(std::string code,
@@ -123,7 +125,7 @@ public:
     return std::make_shared<NVRTCProgram>(code, headers, opts, program_name,
                                           name_exprs);
   }
-
+#if !(defined(__CUDA__) || defined(__NVCC__))
   static std::shared_ptr<NVRTCProgram> from_string(std::string json_string) {
     nlohmann::json j = nlohmann::json::parse(json_string);
     return std::make_shared<NVRTCProgram>(
@@ -135,7 +137,8 @@ public:
   }
 
   std::string to_string() const {
-    TV_ASSERT_RT_ERR(serial_type_ == kSource, "only kSource program can be converted to string")
+    TV_ASSERT_RT_ERR(serial_type_ == kSource,
+                     "only kSource program can be converted to string")
     nlohmann::json j;
     j["type"] = kSource;
     j["code"] = code_;
@@ -148,18 +151,18 @@ public:
 
   std::vector<uint8_t> to_binary(SerializationType type) const {
     tv::io::JsonArray jarr;
-    if (type == kSource){
+    if (type == kSource) {
       jarr.data["type"] = static_cast<int>(kSource);
       jarr.data["code"] = code_;
       jarr.data["headers"] = headers_;
       jarr.data["opts"] = opts_;
       jarr.data["program_name"] = program_name_;
       jarr.data["name_exprs"] = name_exprs_;
-    } else if (type == kPTX){
-      jarr.data["type"] = static_cast<int>(kPTX);;
+    } else if (type == kPTX) {
+      jarr.data["type"] = static_cast<int>(kPTX);
       jarr.data["ptx"] = ptx();
       jarr.data["name_map"] = get_predefined_lowered_name_map();
-    }else{
+    } else {
       jarr.data["type"] = static_cast<int>(kCuBin);
       jarr.assign("cubin", cubin());
       jarr.data["name_map"] = get_predefined_lowered_name_map();
@@ -167,25 +170,34 @@ public:
     return tv::io::encode(jarr.tensors, jarr.data);
   }
 
-  static std::shared_ptr<NVRTCProgram> from_binary(const uint8_t* buffer, size_t size) {
+  static std::shared_ptr<NVRTCProgram> from_binary(const uint8_t *buffer,
+                                                   size_t size) {
     auto jarr = tv::io::decode(buffer, size);
-    SerializationType type = static_cast<SerializationType>(jarr.data["type"].get<int>());
-    if (type == kSource){
-      return std::make_shared<NVRTCProgram>(jarr.data["code"].get<std::string>(),
-        jarr.data["headers"].get<std::unordered_map<std::string, std::string>>(),
-        jarr.data["opts"].get<std::vector<std::string>>(),
-        jarr.data["program_name"].get<std::string>(),
-        jarr.data["name_exprs"].get<std::vector<std::string>>());
-    } else if (type == kPTX){
-      return std::make_shared<NVRTCProgram>( 
-        jarr.data["name_map"].get<std::unordered_map<std::string, std::string>>(), jarr.data["ptx"].get<std::string>());
-    }else{
+    SerializationType type =
+        static_cast<SerializationType>(jarr.data["type"].get<int>());
+    if (type == kSource) {
       return std::make_shared<NVRTCProgram>(
-        jarr.data["name_map"].get<std::unordered_map<std::string, std::string>>(), jarr.tensors[0]);
+          jarr.data["code"].get<std::string>(),
+          jarr.data["headers"]
+              .get<std::unordered_map<std::string, std::string>>(),
+          jarr.data["opts"].get<std::vector<std::string>>(),
+          jarr.data["program_name"].get<std::string>(),
+          jarr.data["name_exprs"].get<std::vector<std::string>>());
+    } else if (type == kPTX) {
+      return std::make_shared<NVRTCProgram>(
+          jarr.data["name_map"]
+              .get<std::unordered_map<std::string, std::string>>(),
+          jarr.data["ptx"].get<std::string>());
+    } else {
+      return std::make_shared<NVRTCProgram>(
+          jarr.data["name_map"]
+              .get<std::unordered_map<std::string, std::string>>(),
+          jarr.tensors[0]);
     }
   }
-
-  std::unordered_map<std::string, std::string> get_predefined_lowered_name_map() const {
+#endif
+  std::unordered_map<std::string, std::string>
+  get_predefined_lowered_name_map() const {
     std::unordered_map<std::string, std::string> res;
     for (size_t i = 0; i < name_exprs_.size(); ++i) {
       res[name_exprs_[i]] = get_lowered_name(name_exprs_[i]);
@@ -203,7 +215,7 @@ public:
 
   std::string ptx() const {
 #ifdef TV_CUDA
-    if (prog_ == nullptr){
+    if (prog_ == nullptr) {
       TV_ASSERT_RT_ERR(!ptx_.empty(), "PTX is empty!!!");
       return ptx_;
     }
@@ -220,19 +232,19 @@ public:
 
   tv::Tensor cubin() const {
 #ifdef TV_CUDA
-    if (prog_ == nullptr){
+    if (prog_ == nullptr) {
       TV_ASSERT_RT_ERR(!cubin_.empty(), "Cubin is empty!!!");
       return cubin_;
     }
     size_t cubinSize;
     TV_NVRTC_SAFE_CALL(nvrtcGetCUBINSize(prog_, &cubinSize));
     tv::Tensor bin({int64_t(cubinSize)}, tv::uint8, -1);
-    TV_NVRTC_SAFE_CALL(nvrtcGetCUBIN(prog_, reinterpret_cast<char*>(bin.data_ptr<uint8_t>())));
+    TV_NVRTC_SAFE_CALL(nvrtcGetCUBIN(
+        prog_, reinterpret_cast<char *>(bin.data_ptr<uint8_t>())));
     return bin;
 #else
     return tv::Tensor();
 #endif
-
   }
 
   std::string compile_log() const { return compile_log_; }
@@ -243,8 +255,10 @@ public:
 
   std::string get_lowered_name(std::string name) const {
 #ifdef TV_CUDA
-    if (prog_ == nullptr){
-      TV_ASSERT_RT_ERR(predefined_name_expr_map_.find(name) != predefined_name_expr_map_.end(), "can't find your name");
+    if (prog_ == nullptr) {
+      TV_ASSERT_RT_ERR(predefined_name_expr_map_.find(name) !=
+                           predefined_name_expr_map_.end(),
+                       "can't find your name");
       return predefined_name_expr_map_.at(name);
     }
     const char *lowered_name;
@@ -379,7 +393,7 @@ public:
     return res;
   }
 
-  void set_max_dynamic_shared_size_bytes(std::string name, int size){
+  void set_max_dynamic_shared_size_bytes(std::string name, int size) {
 #ifdef TV_CUDA
     auto k = kernel(name);
     TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncSetAttribute(
@@ -411,9 +425,9 @@ public:
       auto arg_type = std::get<1>(arg);
       switch (arg_type) {
       case ArgType::kTensor: {
-        if (ten.empty()){
+        if (ten.empty()) {
           tensor_ptrs[cnt] = nullptr;
-        }else{
+        } else {
           TV_ASSERT_INVALID_ARG(ten.device() == 0, "tensor must be GPU");
           tensor_ptrs[cnt] = ten.const_raw_data();
         }
@@ -423,7 +437,8 @@ public:
       }
       case ArgType::kArray: {
         TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
-        params.push_back(const_cast<void*>(reinterpret_cast<const void*>(ten.const_raw_data())));
+        params.push_back(const_cast<void *>(
+            reinterpret_cast<const void *>(ten.const_raw_data())));
         break;
       }
       default:

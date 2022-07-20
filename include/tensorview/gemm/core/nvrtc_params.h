@@ -42,6 +42,9 @@ public:
 
   const uint32_t *mask_ptr;
   uint32_t *mask_out_ptr;
+  const int32_t *indice_ptr;
+  const int32_t *mask_argsort_ptr;
+
   uint32_t mask_filter;
   bool reverse_mask;
   int mask_width;

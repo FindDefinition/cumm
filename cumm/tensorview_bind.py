@@ -55,6 +55,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                 self.build_meta.add_libraries("nvrtc", "cufilt")
             else:
                 self.build_meta.add_libraries("nvrtc")
+            if compat.InLinux:
+                self.build_meta.add_ldflags("g++", "-Wl,--no-as-needed", "-lnvrtc-builtins")
+                self.build_meta.add_ldflags("clang++", "-Wl,--no-as-needed", "-lnvrtc-builtins")
+                self.build_meta.add_ldflags("nvcc", "-Wl,--no-as-needed", "-lnvrtc-builtins")
             if not compat.InWindows:
                 self.build_meta.add_libraries("dl")
             else:
@@ -155,7 +159,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         code.arg("module_", "pybind11::module_")
         code.raw("""
         pybind11::class_<tv::gemm::GemmAlgoDesp> m_cls(
-            module_, "GemmAlgoDesp", pybind11::module_local());
+            module_, "GemmAlgoDesp");
         m_cls.def(pybind11::init<>());
         m_cls.def("__repr__", &tv::gemm::GemmAlgoDesp::__repr__,
                   pybind11::return_value_policy::automatic);
@@ -169,6 +173,9 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                           pybind11::return_value_policy::automatic);
         m_cls.def("check_valid", &tv::gemm::GemmAlgoDesp::check_valid,
                   pybind11::return_value_policy::automatic);
+        m_cls.def("copy", [](const tv::gemm::GemmAlgoDesp& self) -> tv::gemm::GemmAlgoDesp{
+          return self;
+        }, pybind11::return_value_policy::automatic);
         m_cls.def_property("trans_a", &tv::gemm::GemmAlgoDesp::trans_a,
                           &tv::gemm::GemmAlgoDesp::trans_a_set,
                           pybind11::return_value_policy::automatic);
@@ -216,7 +223,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                             &tv::gemm::GemmAlgoDesp::element_per_access_c);
         m_cls.def_readwrite("access_per_vector",
                             &tv::gemm::GemmAlgoDesp::access_per_vector);
-
+        m_cls.def_readwrite("is_nvrtc",
+                            &tv::gemm::GemmAlgoDesp::is_nvrtc);
         """)
         return code
 
@@ -232,6 +240,9 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                   pybind11::arg("op_type"));
         m_cls.def("__repr__", &tv::gemm::ConvAlgoDesp::__repr__,
                   pybind11::return_value_policy::automatic);
+        m_cls.def("copy", [](const tv::gemm::ConvAlgoDesp& self) -> tv::gemm::ConvAlgoDesp{
+          return self;
+        }, pybind11::return_value_policy::automatic);
         m_cls.def_static("conv_iwo_012_to_abc",
                         &tv::gemm::ConvAlgoDesp::conv_iwo_012_to_abc,
                         pybind11::arg("op_type"),
@@ -555,6 +566,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
       TV_ASSERT_RT_ERR(ten.device() == -1 || (ten.device() == 0 && ten.managed()), "you need to call .cpu() before convert cuda tensor to numpy");
       return tv::tensor2array(ten);
     })
+    .def("type_view", [](const tv::Tensor& ten, int dtype){
+      return ten.type_view(tv::DType(dtype));
+    })
+    .def("type_view", [](const tv::Tensor& ten, int dtype, std::vector<int64_t> shape){
+      return ten.type_view(tv::DType(dtype), tv::TensorShape(shape));
+    })
     .def_property_readonly("size", py::overload_cast<>(&tv::Tensor::size, py::const_))
     .def_property_readonly("itemsize", &tv::Tensor::itemsize)
     .def_property_readonly("ndim", &tv::Tensor::ndim)
@@ -566,7 +583,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("is_readonly", &tv::Tensor::is_readonly)
     .def("get_readonly", &tv::Tensor::get_readonly)
     .def("byte_offset", &tv::Tensor::byte_offset)
-
+    .def("storage_bytesize", &tv::Tensor::storage_size)
+    .def("bytesize", &tv::Tensor::raw_size)
     .def("unsqueeze", &tv::Tensor::unsqueeze)
     .def("empty", &tv::Tensor::empty)
     .def("byte_pointer", [](const tv::Tensor& ten){

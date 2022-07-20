@@ -63,7 +63,7 @@ _GPU_NAME_TO_ARCH = {
 }
 
 
-def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
+def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[int, int]]]:
     r'''
     Determine CUDA arch flags to use.
 
@@ -124,13 +124,23 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
             else:
                 _arch_list = "5.3;6.2;7.2;8.7+PTX"
         else:
-            if (major, minor) < (11, 0):
-                _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5"
-            elif (major, minor) < (12, 0):
-                _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+            if is_gemm:
+                if (major, minor) < (11, 0):
+                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5"
+                elif (major, minor) < (12, 0):
+                    _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+                else:
+                    # remove sm5x support in CUDA 12.
+                    _arch_list = "6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
             else:
-                # remove sm5x support in CUDA 12.
-                _arch_list = "6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
+                # TODO add more flags here.
+                if (major, minor) < (11, 0):
+                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5"
+                elif (major, minor) < (12, 0):
+                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+                else:
+                    # remove sm5x support in CUDA 12.
+                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     for named_arch, archval in named_arches.items():
         _all_arch = _all_arch.replace(named_arch, archval)
@@ -192,9 +202,12 @@ def _get_cuda_arch_flags() -> Tuple[List[str], List[Tuple[int, int]]]:
         else:
             num = arch_vers[0] + arch_vers[1]
             nums.append((int(arch_vers[0]), int(arch_vers[1])))
-            flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
             if arch.endswith('+PTX'):
-                flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
+                flags.append(f'-gencode=arch=compute_{num},code=[sm_{num},compute_{num}]')
+            else:
+                flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
+
+                # flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
     return sorted(list(set(flags))), nums
 
@@ -226,30 +239,43 @@ def _get_cuda_include_lib():
     return include, lib64
 
 
+class GemmKernelFlags(pccm.Class):
+    """gemm support nvrtc, so we use less flags here.
+    """
+    def __init__(self):
+        super().__init__()
+        gpu_arch_flags, self.cuda_archs = _get_cuda_arch_flags(True)
+        include, lib64 = _get_cuda_include_lib()
+        self.build_meta.add_public_includes(include)
+        self.build_meta.add_public_cflags("nvcc", *gpu_arch_flags)
+        self.build_meta.add_public_cflags("nvcc",
+            "-Xcudafe \"--diag_suppress=implicit_return_from_non_void_function\"",
+        )
+
+class GenericKernelFlags(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        gpu_arch_flags, self.cuda_archs = _get_cuda_arch_flags(False)
+        include, lib64 = _get_cuda_include_lib()
+        self.build_meta.add_public_includes(include)
+        self.build_meta.add_public_cflags("nvcc", *gpu_arch_flags)
+        # http://www.ssl.berkeley.edu/~jimm/grizzly_docs/SSL/opt/intel/cc/9.0/lib/locale/en_US/mcpcom.msg
+        self.build_meta.add_public_cflags("nvcc",
+            "-Xcudafe \"--diag_suppress=implicit_return_from_non_void_function\"",
+        )
+
 class CUDALibs(pccm.Class):
     def __init__(self):
         super().__init__()
-        gpu_arch_flags, self.cuda_archs = _get_cuda_arch_flags()
+        self.add_dependency(GenericKernelFlags)
         include, lib64 = _get_cuda_include_lib()
-        self.build_meta.includes.append(include)
         self.build_meta.libraries.extend(["cudart"])
-        self.build_meta.compiler_to_cflags["nvcc"] = gpu_arch_flags
-        # if not compat.InWindows:
-        #     self.build_meta.compiler_to_ldflags["g++,clang++"] = ["-Wl,-rpath='/usr/local/cuda/lib64'", f"-Wl,-rpath-link='{lib64}'"]
-        # else:
         self.build_meta.libpaths.append(lib64)
-        # self.build_meta.compiler_to_cflags["nvcc"] += ["-keep", "-lineinfo", "--source-in-ptx"]
-        # http://www.ssl.berkeley.edu/~jimm/grizzly_docs/SSL/opt/intel/cc/9.0/lib/locale/en_US/mcpcom.msg
-        self.build_meta.compiler_to_cflags["nvcc"].extend([
-            "-Xcudafe",
-            "\"--diag_suppress=implicit_return_from_non_void_function\""
-        ])
-
 
 class TensorViewCPU(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.build_meta.includes.append(TENSORVIEW_INCLUDE_PATH)
+        self.build_meta.add_public_includes(TENSORVIEW_INCLUDE_PATH)
         self.add_include("array")
         self.add_include("tensorview/core/all.h")
         self.add_include("tensorview/tensor.h")
@@ -268,8 +294,7 @@ class ThrustLib(pccm.Class):
         # workaround for windows CI, thrust may not exist in windows CUDA
         thrust_include = os.getenv("CUMM_THRUST_INCLUDE", "")
         if thrust_include:
-            self.build_meta.includes.append(thrust_include)
-
+            self.build_meta.add_public_includes(thrust_include)
 
 
 class PyTorchLib(pccm.Class):
@@ -283,16 +308,14 @@ class PyTorchLib(pccm.Class):
         libtorch = origin.parent
         self.add_dependency(CUDALibs, TensorView)
 
-        self.build_meta.includes.append(str(libtorch / "include"))
-        self.build_meta.includes.append(str(libtorch / "include/torch/csrc/api/include"))
+        self.build_meta.add_public_includes(str(libtorch / "include"))
+        self.build_meta.add_public_includes(str(libtorch / "include/torch/csrc/api/include"))
         torch_lib_paths = [str(libtorch / "lib")]
         torch_libs = ["c10", "torch", 'torch_cpu', 'torch_python']
         torch_cuda_libs = ["c10_cuda", "torch_cuda"]
         self.build_meta.libraries.extend(torch_libs + torch_cuda_libs)
         self.build_meta.libpaths.extend(torch_lib_paths)
-        self.build_meta.compiler_to_cflags["g++"] = ["-D_GLIBCXX_USE_CXX11_ABI=0"]
-        self.build_meta.compiler_to_cflags["clang++"] = ["-D_GLIBCXX_USE_CXX11_ABI=0"]
-        self.build_meta.compiler_to_cflags["nvcc"] = ["-D_GLIBCXX_USE_CXX11_ABI=0"]
+        self.build_meta.add_public_cflags("nvcc,clang++,g++", "-D_GLIBCXX_USE_CXX11_ABI=0")
 
         self.add_include("torch/script.h")
         self.add_include("torch/extension.h") # include this to add pybind for torch.Tensor
@@ -305,12 +328,15 @@ class PyTorchLib(pccm.Class):
 class TensorView(pccm.Class):
     def __init__(self):
         super().__init__()
+        # any project depend on TensorView will add global nvcc flags:
+        self.build_meta.add_global_cflags("nvcc", "--expt-relaxed-constexpr")
+        self.build_meta.add_global_cflags("cl",  "/O2")
+        self.build_meta.add_global_cflags("g++,clang++", "-O3")
+
         if not CUMM_CPU_ONLY_BUILD:
             self.add_dependency(CUDALibs, TensorViewCPU)
-            self.build_meta.compiler_to_cflags["nvcc,clang++,g++"] = [
-                "-DTV_CUDA"
-            ]
-            self.build_meta.compiler_to_cflags["cl"] = ["/DTV_CUDA"]
+            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_CUDA")
+            self.build_meta.add_public_cflags("cl", "/DTV_CUDA")
         else:
             self.add_dependency(TensorViewCPU)
 
@@ -338,6 +364,10 @@ class CummNVRTCLink(pccm.Class):
     def __init__(self):
         super().__init__()
         self.build_meta.add_libraries("nvrtc")
+        if compat.InLinux:
+            self.build_meta.add_ldflags("g++", "-Wl,--no-as-needed", "nvrtc-builtins")
+            self.build_meta.add_ldflags("clang++", "-Wl,--no-as-needed", "nvrtc-builtins")
+            self.build_meta.add_ldflags("nvcc", "-Wl,--no-as-needed", "nvrtc-builtins")
 
 class CompileInfo(pccm.Class):
     def __init__(self):
@@ -362,6 +392,21 @@ class CompileInfo(pccm.Class):
         code.raw(f"return res;")
         return code.ret("std::vector<std::tuple<int, int>>")
 
+    @pccm.pybind.mark
+    @pccm.static_function
+    def arch_is_compiled(self):
+        code = pccm.code()
+        code.arg("arch", "std::tuple<int, int>")
+        code.raw(f"""
+        """)
+        for ar0, ar1 in self.cuda_archs:
+            code.raw(f"""
+            if (arch == std::make_tuple({ar0}, {ar1})){{
+                return true;
+            }}
+            """)
+        code.raw(f"return false;")
+        return code.ret("bool")
 
 class TensorViewKernel(pccm.Class):
     def __init__(self):
@@ -376,15 +421,18 @@ class TensorViewNVRTC(pccm.Class):
     """
     def __init__(self):
         super().__init__()
-        include, lib64 = _get_cuda_include_lib()
-        self.build_meta.add_includes(include, TENSORVIEW_INCLUDE_PATH)
-        self.build_meta.compiler_to_cflags["nvcc"] = ["-DTV_CUDA"]
         self.add_include("tensorview/core/all.h")
-        self.add_include("tensorview/cuda/kernel_utils.h")
         self.add_include("tensorview/core/arrayops/simple.h")
-        if compat.InLinux:
-            nvrtc_include = PACKAGE_ROOT / "nvrtc_include"
-            self.build_meta.add_includes(nvrtc_include)
+        if not CUMM_CPU_ONLY_BUILD:
+            # here we can't depend on GemmKernelFlags
+            # because nvrtc don't support regular arch flags.
+            include, lib64 = _get_cuda_include_lib()
+            self.build_meta.add_public_includes(include, TENSORVIEW_INCLUDE_PATH)
+            self.add_include("tensorview/cuda/kernel_utils.h")
+            self.build_meta.add_public_cflags("nvcc", "-DTV_CUDA")
+            # if compat.InLinux:
+            #     nvrtc_include = PACKAGE_ROOT / "nvrtc_include"
+            #     self.build_meta.add_public_includes(nvrtc_include)
 
 
 class TensorViewCore(pccm.Class):
@@ -436,7 +484,7 @@ class GemmDTypes(pccm.Class):
 class GemmBasic(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_include("cuda_runtime_api.h"
+        self.add_include("tensorview/core/nvrtc/runtime_include.h"
                          )  # for __global__, __host__ and other cuda attrs.
         self.add_include("tensorview/gemm/core/constants.h")
         self.add_include("tensorview/gemm/core/utils.h")

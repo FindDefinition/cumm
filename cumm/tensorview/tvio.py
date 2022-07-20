@@ -234,7 +234,7 @@ def dumps_jsonarray(obj, multi_thread=False, buffer=None, use_bytearray=False, a
     return buffer
 
 
-def loads_jsonarray(binary, copy=False):
+def loads_jsonarray(binary, copy=True):
     buffer_view = memoryview(binary)
     content_end_offset = np.frombuffer(buffer_view[:8], dtype=np.int64).item()
     meta_end_offset = np.frombuffer(buffer_view[8:16], dtype=np.int64).item()

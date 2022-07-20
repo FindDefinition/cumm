@@ -124,7 +124,7 @@ class WarpTileIterator(bases.GemmWarpIterator):
         tv::array<int, 2> logical_offset{{warp_idx_k * {self.num_k_iters},
                                         warp_idx_residual * {self.wmma_mat_shape_per_k_iter[1]}}};
         // int lane_offset;
-        if ({pccm.boolean(self.left)}) {{
+        if ({pccm.literal(self.left)}) {{
             // 0, 1, 0, 1, 0, 1, ..., 2, 3, 2, 3, 2, 3
             logical_offset[1] += lane_layout.inverse_0(lane_idx) * {self.lane_mma_shape[1]};
         }} else {{
@@ -731,7 +731,7 @@ class MaskTileIterator(bases.GemmInputIterator):
             self.access_per_vector, 1)
         element_count = self.thread_access_shape[0] * self.thread_access_shape[
             1] * sub_tile_shape.prod()
-        print("INPUT TAMP", tmap.iterations, tmap.delta, num_sub_access, )
+        # print("INPUT TAMP", tmap.iterations, tmap.delta, num_sub_access, )
         # raise NotImplementedError
         super().__init__(dtype, tmap, sub_tile_shape, element_count,
                          num_sub_access,
@@ -808,14 +808,14 @@ class MaskTileIterator(bases.GemmInputIterator):
         contig = 1
         strided = 0
         code = pccm.code()
-        print("KADVANCE", self.param_class.inc_advance_static)
+        # print("KADVANCE", self.param_class.inc_advance_static)
         code.raw(f"""
         int residue_size = (extent[{self.advance_axis}] - threadblock_offset[{self.advance_axis}]) %
                         {self.tile_shape[self.advance_axis]};
         if (!residue_size) {{
             residue_size = {self.tile_shape[self.advance_axis]};
         }}
-        tv::printf2_once(params_.inc_strided_, params_.inc_next_);
+        // tv::printf2_once(params_.inc_strided_, params_.inc_next_);
         """)
         if self.last_residual:
             if self.advance_axis == 1:
@@ -1261,6 +1261,13 @@ class MaskTileIterator(bases.GemmInputIterator):
             frag, pointer_offset * self.dtype.itemsize())
 
     def loadstore_with_byte_offset_template(self, store: bool):
+        """we don't handle transposed input for simt here because:
+        if A is transposed (i.e. tile shape is [k, m])
+        we load them to smem directly (always [k, m])
+        if A isn't transposed, we need to transpose before save to smem.
+        the problem is k is small enough (always < num_threads),
+        so we don't need to perform any transpose operation for [1xn] -> [nx1].
+        """
         contig = 1
         strided = 0
         code = pccm.cuda.PTXCode("")

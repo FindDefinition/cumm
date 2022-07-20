@@ -30,4 +30,4 @@ if project_is_installed(PACKAGE_NAME) and project_is_editable(
                               PACKAGE_ROOT / "core_cc",
                               namespace_root=PACKAGE_ROOT,
                               load_library=False,
-                              verbose=True)
+                              verbose=False)

@@ -96,7 +96,7 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
         m = a_ten.dim(int(trans_a));
         k = a_inds.dim(0);
         k2 = b_inds.dim(0);
-        auto n = b_ten.dim(int(!trans_b) );
+        n = b_ten.dim(int(!trans_b) );
         TV_ASSERT_RT_ERR(int64_t(a.dim(0)) * int64_t(a.dim(1)) * tv::bit_size(algo_desp.dtype_a)/ 8 < int_max, 
             "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
         TV_ASSERT_RT_ERR(int64_t(b.dim(0)) * int64_t(b.dim(1)) * tv::bit_size(algo_desp.dtype_b) / 8 < int_max, 
@@ -172,6 +172,8 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
             algo_name = algo_desp.__repr__();
         }}
         auto grid_dims_arr = tv::gemm::get_logical_tile_count(m, n, k, algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices);
+        TV_ASSERT_RT_ERR(grid_dims_arr[0] != 0 && grid_dims_arr[1] != 0 && grid_dims_arr[2] != 0, "unexpected error",
+            m, n, k, algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices);
         dim3 grid_dims;
         grid_dims.x = grid_dims_arr[0];
         grid_dims.y = grid_dims_arr[1];
@@ -244,7 +246,6 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
                 TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
                     nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
             }}
-
         }}else{{
             TV_THROW_RT_ERR("not implemented");
         }}

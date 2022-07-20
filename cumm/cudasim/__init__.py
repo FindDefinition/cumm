@@ -85,17 +85,15 @@ class SyncResource(SyncLock):
         self.resource = [None for _ in range(thread_count)]
 
     async def gather(self, tid: int, obj: Any, root_id: int = 0):
-        async with self.lock:
-            self.resource[tid] = obj
-            self.count -= 1
-            if self.count == 0:
-                self.ev.set()
+        self.resource[tid] = obj
+        self.count -= 1
+        if self.count == 0:
+            self.ev.set()
 
         await self.ev.wait()
-        async with self.lock:
-            if self.count == 0:
-                self.ev.clear()
-                self.count = self.thread_count
+        if self.count == 0:
+            self.ev.clear()
+            self.count = self.thread_count
         if tid == root_id:
             res = self.resource.copy()
             await self.wait()
@@ -104,17 +102,15 @@ class SyncResource(SyncLock):
         return None
 
     async def broadcast(self, tid: int, obj, root_id: int = 0):
-        async with self.lock:
-            if root_id == tid:
-                self.resource[0] = obj
-            self.count -= 1
-            if self.count == 0:
-                self.ev.set()
+        if root_id == tid:
+            self.resource[0] = obj
+        self.count -= 1
+        if self.count == 0:
+            self.ev.set()
         await self.ev.wait()
-        async with self.lock:
-            if self.count == 0:
-                self.ev.clear()
-                self.count = self.thread_count
+        if self.count == 0:
+            self.ev.clear()
+            self.count = self.thread_count
         res = self.resource[0]
         await self.wait()
         return res

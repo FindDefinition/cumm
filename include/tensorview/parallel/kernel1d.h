@@ -184,7 +184,7 @@ template <size_t MaxNumThreads = 512, size_t GrainSize = 0,
           bool MapMode = false, typename F, class... Args>
 void kernel_1d_impl_cpu(int device, size_t size, F &&f, Args &&...args) {
   static_assert(argument_size_v<F> == sizeof...(args) + (MapMode ? 1 : 3),
-                "your lambda must have N + 1(3 if not MapMode) argg (begin, "
+                "your lambda must have N + 1(or 3 if not MapMode) args (begin, "
                 "[end, step])");
   if (device == -1) {
 #ifdef _OPENMP
@@ -245,7 +245,7 @@ void kernel_1d_impl_cpu(int device, size_t size, F &&f, Args &&...args) {
         });
 #endif
   } else {
-    TV_THROW_INVALID_ARG("you use cpu-only kernel_id with GPU tensor.")
+    TV_THROW_INVALID_ARG("you use cpu-only kernel_1d with GPU tensor.")
   }
 }
 

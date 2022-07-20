@@ -207,7 +207,7 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
     auto __macro_err = EXPR;                                                   \
     if (__macro_err) {                                                         \
       std::stringstream __macro_s;                                             \
-      __macro_s << __func__ << " " << __FILE__ << " " << __LINE__ << "\n";     \
+      __macro_s << __func__ << " " << __FILE__ << ":" << __LINE__ << "\n";     \
       __macro_s << "cuda failed with error code"                               \
                 << static_cast<int>(__macro_err);                              \
       __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.\n"; \

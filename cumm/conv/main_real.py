@@ -287,7 +287,7 @@ def _asdv_test_simt_python_v2():
         else:
             HW = [244] * ndim
 
-        RS = [1] * ndim
+        RS = [3] * ndim
         N = 1
         C = 128
         K = 128
@@ -301,10 +301,10 @@ def _asdv_test_simt_python_v2():
         iter_algo = ConvIterAlgo.Analytic
 
         if params.dtype_a == dtypes.int8:
-            inp = np.random.randint(-2, 2, size=[N, *HW, C]).astype(np.int8)
-            weight = np.random.randint(-2, 2, size=[K, *RS, C]).astype(np.int8)
-            output = np.random.randint(-2, 2, size=[N, *PQ, K]).astype(np.int8)
-            doutput = np.random.randint(-2, 2, size=[N, *PQ,
+            inp = np.random.randint(-1, 1, size=[N, *HW, C]).astype(np.int8)
+            weight = np.random.randint(-1, 1, size=[K, *RS, C]).astype(np.int8)
+            output = np.random.randint(-1, 1, size=[N, *PQ, K]).astype(np.int8)
+            doutput = np.random.randint(-1, 1, size=[N, *PQ,
                                                      K]).astype(np.int8)
 
         else:
@@ -413,7 +413,6 @@ def _asdv_test_simt_python_v2():
         algo.dtype_a = params.dtype_a.tv_dtype
         algo.dtype_b = params.dtype_b.tv_dtype
         algo.dtype_c = params.dtype_c.tv_dtype
-
         if params.tensorop is not None:
             algo.tensorop = params.tensorop.shape
         assert str(algo) == ker.get_algo_name()
@@ -463,11 +462,11 @@ def _asdv_test_simt_python_v2():
                 "wtf::nvrtc_kernel_cpu_out")
             nvrtc_params.param_size = mod.const_values[
                 f"wtf::{NVRTCConstants.SIZEOF_KEY}"]
+            print(nvrtc_params.param_size)
             nvrtc_params.constant_name = mod.get_lowered_name(
                 "&wtf::params_raw")
             nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
                                                   tv.uint8, 0)
-
         else:
             raise NotImplementedError
         kt = tv.KernelTimer()
@@ -492,7 +491,7 @@ def _asdv_test_simt_python_v2():
             if params.dtype_a.itemsize() == 1:
                 output_cpu = output_cpu.astype(np.float32)
             duration = time.time() - t
-            # print(output_cpu.reshape(-1)[:10], out_ref_nhwc.reshape(-1)[:10])
+            print(output_cpu.reshape(-1)[:10], out_ref_nhwc.reshape(-1)[:10])
             print(ker.get_algo_name(),
                   np.linalg.norm(out_ref_nhwc - output_cpu), "Time=",
                   op_duration)
@@ -500,15 +499,16 @@ def _asdv_test_simt_python_v2():
             print(ker.input_spec.tmap_b.iterations)
             din_cpu = inp_tv.cpu().numpy()
             duration = time.time() - t
-            # print(din_cpu.reshape(-1)[:10], din_ref_nhwc.reshape(-1)[:10])
+            print(din_cpu.reshape(-1)[:10], din_ref_nhwc.reshape(-1)[:10])
             print(ker.get_algo_name(),
                   np.linalg.norm(din_cpu - din_ref_nhwc), "Time=", op_duration)
         else:
             dw_cpu = weight_tv.cpu().numpy()
             duration = time.time() - t
-            # print(dw_cpu.reshape(-1)[:10], dw_ref_nhwc.reshape(-1)[:10])
+            print(dw_cpu.reshape(-1)[:10], dw_ref_nhwc.reshape(-1)[:10])
             print(ker.get_algo_name(), np.linalg.norm(dw_cpu - dw_ref_nhwc),
                   "Time=", op_duration)
+
 
 
 if __name__ == "__main__":

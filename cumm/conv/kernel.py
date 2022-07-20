@@ -23,7 +23,7 @@ from pccm.targets.cuda_ptx import RegDType
 
 from cumm import cudasim, dtypes
 from cumm import tensorview as tv
-from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
+from cumm.common import (GemmBasic, GemmBasicKernel, GemmKernelFlags, TensorView,
                          TensorViewKernel, TensorViewNVRTC,
                          TensorViewNVRTCKernel)
 from cumm.constants import CUMM_MAXIMUM_NVRTC_CONV_NDIM
@@ -451,6 +451,9 @@ class ConvKernel(pccm.ParameterizedClass):
         super().__init__()
         self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
                             layout.ColumnMajor, GemmBasicKernel, GemmBasic)
+        if nvrtc_mode == NVRTCMode.Disabled:
+            self.add_dependency(GemmKernelFlags)
+
         self.need_source = need_source
         self.nvrtc_mode = nvrtc_mode
         self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
@@ -637,14 +640,13 @@ class ConvKernel(pccm.ParameterizedClass):
         if self.is_nvrtc:
             if self.nvrtc_mode != NVRTCMode.ConstantMemory:
                 if self.nvrtc_mode == NVRTCMode.Direct:
-
                     code.arg("conv_nvrtc_params", self.nvrtc_params_name)
                     self._nvrtc_params_template(code, "conv_nvrtc_params")
                 else:
                     code.arg("params", "ConvParams")
             else:
                 code.raw(f"""
-                ConvParams& params = *(reinterpret_cast<ConvParams*>(
+                ConvParams params = *(reinterpret_cast<ConvParams*>(
                     {NVRTCConstants.CONSTANT_PARAM_KEY}.data()));
                 """)
         else:
@@ -927,7 +929,7 @@ class ConvKernel(pccm.ParameterizedClass):
             if self.problem.op_type == ConvOpType.kForward:
                 args.append(f"{p}.mask_out_ptr")
             args.extend([
-                f"{p}.mask_filter, {p}.reverse_mask, {p}.indice_ptr",
+                f"{p}.mask_filter, {p}.reverse_mask",
             ])
             if self.problem.op_type == ConvOpType.kBackwardWeight:
                 args.append(f"{p}.mask_width")

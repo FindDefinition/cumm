@@ -23,7 +23,7 @@ from cumm import cudasim, dtypes
 from cumm import tensorview as tv
 from cumm.common import (GemmBasic, GemmBasicKernel, TensorView,
                          TensorViewKernel, TensorViewNVRTC,
-                         TensorViewNVRTCKernel)
+                         TensorViewNVRTCKernel, GemmKernelFlags)
 from cumm.constants import (CUTLASS_DEBUG, CUTLASS_INPUT_ITER, CUTLASS_MODE,
                             CUTLASS_OUTPUT_ITER, CUTLASS_SMEM_WARP_ITER)
 from cumm.core_cc.csrc.arrayref import ArrayPtr
@@ -377,6 +377,8 @@ class GemmKernel(pccm.ParameterizedClass):
         super().__init__()
         self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
                             layout.ColumnMajor, GemmBasicKernel, GemmUtilsCPU)
+        if nvrtc_mode == NVRTCMode.Disabled:
+            self.add_dependency(GemmKernelFlags)
         self.add_param_class("gemmutils", GemmUtils(tile_shape), "GemmUtils")
         self.tile_shape = tile_shape
         self.shuffle_stride = shuffle_stride
@@ -544,7 +546,7 @@ class GemmKernel(pccm.ParameterizedClass):
                     code.arg("params", "GemmParams")
             else:
                 code.raw(f"""
-                GemmParams& params = *(reinterpret_cast<GemmParams*>(
+                GemmParams params = *(reinterpret_cast<GemmParams*>(
                     {NVRTCConstants.CONSTANT_PARAM_KEY}.data()));
                 """)
         else:
@@ -873,13 +875,13 @@ class GemmKernel(pccm.ParameterizedClass):
             f"{p}.stride_A, {p}.stride_B, {p}.stride_C, {p}.stride_D", 
         ]
         if self.shuffle_stride != ShuffleStrideType.NoShuffle:
-            args.extend(f"{p}.IndiceA, {p}.IndiceBorC")
+            args.append(f"{p}.IndiceA, {p}.IndiceBorC")
         args.extend([ 
             f"{self.dtype_comp}({p}.alpha), {self.dtype_comp}({p}.beta)",
             f"{p}.split_k_slices"
         ])
         if self.have_workspace:
-            args.extend(f"{p}.workspace")
+            args.append(f"{p}.workspace")
         code.raw(f"""
         GemmParams params({", ".join(args)});
         """)

@@ -28,6 +28,9 @@ class NVRTCMode(enum.Enum):
     """nvrtc mode for *NON-STATIC* gemm kernels.
     kernel params of gemm contains different init code that need jit
     if we doesn't provide a static init function.
+    another solution is implement all param calculation in c++/python.
+    this method requires additional time to maintain code, so I
+    have no interest on it.
     """
     Disabled = 0
     # calc params directly in kernel. VERY SLOW.
@@ -39,10 +42,13 @@ class NVRTCMode(enum.Enum):
     # run init kernel first to generate params, copy params to cpu, then use
     # that param to launch kernel in host.
     KernelAndCPU = 3
-    # similar to KernelAndCPU, don't need dev to cpu copy.
+    # similar to KernelAndCPU, don't need dev to cpu copy, copy result to 
+    # Constant Memory instead.
     # fastest way, but DON'T SUPPORT MULTIPLE STREAM. the
     # constant memory is allocated once when nvrtc
-    # module is created.
+    # module is created. so create new nvrtc module
+    # for every stream.
     ConstantMemory = 4
-    # static mode, only support implemented input iterators.
+    # static mode, only support implemented input iterators. NOT IMPLEMENTED
     Static = 5  
+

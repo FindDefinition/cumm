@@ -14,6 +14,9 @@
 #pragma once
 
 #include "linear.cu.h"
+#include <tensorview/tensor.h>
+#include <tensorview/cuda/launch.h>
+
 namespace tv {
 
 namespace hash {

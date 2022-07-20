@@ -27,6 +27,8 @@ enum _Arch {
   kSm75 = 75, // RTX 2000
   kSm80 = 80, // A100
   kSm86 = 86, // RTX 3000
+  kSm87 = 87, // orin
+  kSm80 = 90, // H100
   kEnd = 999999
 };
 }

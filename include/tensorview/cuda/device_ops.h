@@ -83,7 +83,7 @@ template <typename T> __device__ T atomicAggInc(T *ctr) {
   auto g = cg::coalesced_threads();
   T warp_res;
   if (g.thread_rank() == 0)
-    warp_res = atomicAdd(ctr, g.size());
+    warp_res = atomicAdd(ctr, T(g.size()));
   return g.shfl(warp_res, 0) + g.thread_rank();
 }
 

@@ -66,7 +66,8 @@ class ConvAlgoParams(GemmAlgoParams):
                  splitk_parallel: bool = False,
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
-                 access_per_vector: int = 1):
+                 access_per_vector: int = 1,
+                 is_nvrtc: bool = False):
         trans_a, trans_b, trans_c = get_gemm_trans_abc(op_type)
         super().__init__(ts,
                          wts,
@@ -79,7 +80,8 @@ class ConvAlgoParams(GemmAlgoParams):
                          tensorop,
                          splitk_serial,
                          splitk_parallel,
-                         access_per_vector=access_per_vector)
+                         access_per_vector=access_per_vector,
+                         is_nvrtc=is_nvrtc)
         self.ndim = ndim
         self.op_type = op_type
         self.iter_algo = iter_algo
@@ -120,8 +122,9 @@ def gen_gemm_params(op_types: List[ConvOpType],
                     splitk_parallel: bool = False,
                     mask_sparse: bool = False,
                     increment_k_first: bool = False,
-                    access_per_vector: int = 1):
-    res = []
+                    access_per_vector: int = 1,
+                    is_nvrtc: bool = False):
+    res: List[ConvAlgoParams] = []
     if not isinstance(dtypes_string, list):
         dtypes_string = [dtypes_string]
     for dts in dtypes_string:
@@ -130,12 +133,14 @@ def gen_gemm_params(op_types: List[ConvOpType],
                 p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
                                    dts, li, lw, lo, algo, tensorop, True,
                                    splitk_parallel, mask_sparse,
-                                   increment_k_first, access_per_vector)
+                                   increment_k_first, access_per_vector,
+                                   is_nvrtc=is_nvrtc)
             else:
                 p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
                                    dts, li, lw, lo, algo, tensorop,
                                    splitk_serial, splitk_parallel, mask_sparse,
-                                   increment_k_first, access_per_vector)
+                                   increment_k_first, access_per_vector,
+                                   is_nvrtc=is_nvrtc)
 
             if not p.skipped():
                 res.append(p)
@@ -143,6 +148,8 @@ def gen_gemm_params(op_types: List[ConvOpType],
 
 
 ConvFwdAndBwdInput = [ConvOpType.kBackwardInput, ConvOpType.kForward, ]
+ConvFwd = [ConvOpType.kForward, ]
+
 ConvBwdWeight = [ConvOpType.kBackwardWeight]
 ConvAllOp = [
     ConvOpType.kForward, ConvOpType.kBackwardInput, ConvOpType.kBackwardWeight
@@ -204,7 +211,7 @@ SHUFFLE_VOLTA_PARAMS = []
 SHUFFLE_TURING_PARAMS = []
 
 
-class ConvMainUnitTest(pccm.Class):
+class ConvMainUnitTest(pccm.ParameterizedClass):
     def __init__(self, conv_params: Optional[List[ConvAlgoParams]] = None):
         super().__init__()
         self.add_dependency(TensorView, GemmBasic, GemmBasicHost, kernel.ConvNVRTCParams,
@@ -214,40 +221,44 @@ class ConvMainUnitTest(pccm.Class):
             is_debug = os.getenv("CUMM_DEBUG", None)
             if is_debug is not None and is_debug == "1":
                 simt_params: List[ConvAlgoParams] = [
-                    # *gen_gemm_params((64, 128, 32), (32, 64, 32), 2, ConvIterAlgo.Optimized, 2, "s8,s8,s32,s32,s32",
+                    # *gen_gemm_params(ConvFwd, (64, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "s8,s8,s8,s32,s32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.SimtDP4A, None),
                     # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True),
                     # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32),
-                                     (32, 32, 32), 3, ConvIterAlgo.Optimized,
-                                     2, "f16,f16,f16,f32,f32", NHWC, NHWC,
-                                     NHWC, GemmAlgo.Turing,
-                                     TensorOp((16, 8, 8))),
-                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16),
-                                     (32, 32, 8), 3, ConvIterAlgo.Optimized, 2,
-                                     "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC,
-                                     GemmAlgo.Simt, None),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32),
+                    #                  (32, 32, 32), 3, ConvIterAlgo.Optimized,
+                    #                  2, "f16,f16,f16,f32,f32", NHWC, NHWC,
+                    #                  NHWC, GemmAlgo.Turing,
+                    #                  TensorOp((16, 8, 8))),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16),
+                    #                  (32, 32, 8), 3, ConvIterAlgo.Optimized, 2,
+                    #                  "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC,
+                    #                  GemmAlgo.Simt, None),
 
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-                    # *gen_gemm_params(ConvBwdWeight, (128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 64, 32), (32, 32, 16), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
-                    # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
-                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
+                    # # *gen_gemm_params(ConvBwdWeight, (128, 128, 8), (32, 64, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True),
+                    # # *gen_gemm_params(ConvFwdAndBwdInput, (32, 64, 32), (32, 32, 16), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # # *gen_gemm_params(ConvFwdAndBwdInput, (32, 256, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # # *gen_gemm_params(ConvFwdAndBwdInput, (32, 128, 64), (32, 32, 64), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f32,f32", "f16,f16,f16,f16,f16"],
+                    # #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
+                    # *gen_gemm_params(ConvFwd, (64, 32, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["s8,s8,s8,s32,s32"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
+                    # *gen_gemm_params(ConvFwd, (64, 64, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["s8,s8,s8,s32,s32"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
+                    *gen_gemm_params(ConvFwd, (128, 128, 64), (64, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["s8,s8,s8,s32,s32"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
 
                     # *gen_gemm_params(ConvBwdWeight, (128, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
@@ -650,7 +661,7 @@ class ConvMainUnitTest(pccm.Class):
             desp.interleave_o = {ker.problem.layout_desp_output.interleave};
             desp.mask_sparse = {pccm.boolean(ker.mask_sparse)};
             desp.increment_k_first = {pccm.boolean(ker.increment_k_first)};
-            TV_ASSERT_RT_ERR(desp.__repr__() == {ker.get_algo_name()});
+            TV_ASSERT_RT_ERR(desp.__repr__() == \"{ker.get_algo_name()}\", "error", desp.__repr__(), \"{ker.get_algo_name()}\");
             desps.push_back(desp);
             """)
             code.raw("}")

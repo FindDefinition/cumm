@@ -19,6 +19,7 @@
 #include <tensorview/core/nvrtc_std.h>
 #else
 #include <type_traits>
+#include <limits>
 #endif
 
 namespace tv {
