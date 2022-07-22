@@ -675,8 +675,9 @@ def _asdv_test_turing_python(coord_input: bool = False):
         print(len(main_cu.all_params))
 
         for params in main_cu.all_params[:1]:
-            print(params.get_algo_name())
             ker = gen_gemm_kernels(params)
+            print(ker.get_algo_name())
+
             # print("START", params.get_algo_name())
             m = 256 + 32
             n = 256 + 40

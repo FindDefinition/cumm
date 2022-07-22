@@ -1087,11 +1087,13 @@ public:
     TV_ASSERT_INVALID_ARG(ndim() == 2, "tensor must be 2d");
     return stride(0) == 1 && stride(1) == dim(0);
   }
-  uint8_t *raw_data() {
+  uint8_t *raw_data(bool writeable_check = true) {
     if (empty()) {
       return nullptr;
     }
-    writable_check();
+    if (writeable_check){
+      writable_check();
+    }
     return storage_->data() + byte_offset();
   }
   const uint8_t *const_raw_data() const {
@@ -1167,8 +1169,10 @@ public:
       return nullptr;
     }
     template_dtype_check<T>();
-    writable_check();
-    return reinterpret_cast<T *>(raw_data());
+    if (!std::is_const<T>::value){
+      writable_check();
+    }
+    return reinterpret_cast<T *>(raw_data(false));
   }
 
   template <typename T> const T *data() const {
@@ -1546,7 +1550,9 @@ public:
     });
     return tensor;
   }
-
+  bool writeable() const {
+    return writeable_;
+  }
 protected:
   inline void writable_check() {
     TV_ASSERT_RT_ERR(writeable_,

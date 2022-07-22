@@ -1,10 +1,11 @@
 # Changelog
 
+
 ## [0.3.0] - 2022-02-02
 ### Added
 * Add nvrtc support for conv kernel.
 ### Changed
-* format all code
+* BREAKING CHANGE: change dtype enum value for some important reason.
 
 ## [0.2.8] - 2021-12-8
 ### Fixed

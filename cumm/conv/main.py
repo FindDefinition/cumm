@@ -536,17 +536,17 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
 
                 code.raw(f"""
                 {param_type_str} ker_params(
-                    problem, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                    problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
                     c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(),
-                    mask.data_ptr<uint32_t>(), mask_argsort.data_ptr<int32_t>(),
-                    indices.data_ptr<int32_t>(), {mask_out_ptr} params.mask_filter, 
+                    mask.data_ptr<const uint32_t>(), mask_argsort.data_ptr<const int32_t>(),
+                    indices.data_ptr<const int32_t>(), {mask_out_ptr} params.mask_filter, 
                     params.reverse_mask, {mask_width_str} 
                     {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
                 """)
             else:
                 code.raw(f"""
                 {param_type_str} ker_params(
-                    problem, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                    problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
                     c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
                     {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
                 """)

@@ -69,8 +69,8 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     tv::gemm::ConvNVRTCParams kernel_params;
     tv::gemm::SparseConvNVRTCParams sp_kernel_params;
 
-    kernel_params.ptr_A = a_ten.raw_data();
-    kernel_params.ptr_B = b_ten.raw_data();
+    kernel_params.ptr_A = a_ten.const_raw_data();
+    kernel_params.ptr_B = b_ten.const_raw_data();
     kernel_params.ptr_C = c_ten.raw_data();
     kernel_params.ptr_D = c_ten.raw_data();
     kernel_params.alpha = params.alpha;
@@ -189,11 +189,11 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
         if (algo_desp.mask_sparse){{
             sp_kernel_params.mask_out_ptr = mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>();
             sp_kernel_params.mask_width = mask_width;
-            sp_kernel_params.mask_ptr = mask.data_ptr<uint32_t>();
+            sp_kernel_params.mask_ptr = mask.data_ptr<const uint32_t>();
             sp_kernel_params.reverse_mask = params.reverse_mask;
             sp_kernel_params.mask_filter = params.mask_filter;
-            sp_kernel_params.indice_ptr = indices.data_ptr<int32_t>();
-            sp_kernel_params.mask_argsort_ptr = mask_argsort.data_ptr<int32_t>();
+            sp_kernel_params.indice_ptr = indices.data_ptr<const int32_t>();
+            sp_kernel_params.mask_argsort_ptr = mask_argsort.data_ptr<const int32_t>();
 
             grid_dims_arr = tv::gemm::get_spconv_logical_tile_count(mnk[0], mnk[1], mnk[2], 
                             algo_desp.tile_shape[0], algo_desp.tile_shape[1], split_k_slices, kernel_volume, algo_desp.op_type);

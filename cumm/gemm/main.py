@@ -761,7 +761,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             desp.element_per_access_b = {ker.input_spec.input_iter_b.element_per_acc};
             desp.element_per_access_c = {ker.output_spec.out_iter.element_per_acc};
             desp.access_per_vector = {ker.access_per_vector};
-            TV_ASSERT_RT_ERR(desp.__repr__() == \"{ker.get_algo_name()}\", "error");
+            TV_ASSERT_RT_ERR(desp.__repr__() == \"{ker.get_algo_name()}\", "error", desp.__repr__());
             desps.push_back(desp);
             """)
             code.raw("}")
@@ -1001,7 +1001,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     }}
                     TV_ASSERT_RT_ERR(!c_inds.empty(), "c must not empty");
                     {param_type_str} kernel_params(
-                        m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                        m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
                         a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
                         a_ptr, c_inds.data_ptr<const int>(),
@@ -1011,7 +1011,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
                     {param_type_str} kernel_params(
-                        m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                        m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
                         a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
                         a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(),
@@ -1020,7 +1020,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 else:
                     code.raw(f"""
                     {param_type_str} kernel_params(
-                        m, n, k, a_ten.data_ptr<{ker.dtype_a}>(), b_ten.data_ptr<{ker.dtype_b}>(),
+                        m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
                         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
                         a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
                         {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});

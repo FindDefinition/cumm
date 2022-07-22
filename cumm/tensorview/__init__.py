@@ -31,15 +31,15 @@ from . import gemm, utils
 
 from cumm.dtypes import get_npdtype_from_tvdtype
 
-bool_ = 0
-float16 = 1
-float32 = 2
-float64 = 3
-int8 = 4
-int16 = 5
-int32 = 6
-int64 = 7
-uint8 = 8
+bool_ = 5
+float16 = 7
+float32 = 0
+float64 = 4
+int8 = 3
+int16 = 2
+int32 = 1
+int64 = 8
+uint8 = 6
 uint16 = 9
 uint32 = 10
 uint64 = 11

@@ -7,6 +7,10 @@ CUda Matrix Multiply library.
 Now ```pccm``` become a foundational framework of ```cumm``` and my other c++ project such as [spconv](https://github.com/traveller59/spconv). 
 ```cumm``` also contains a python asyncio-based gemm simulator that **share same meta program** with CUDA code, enable gemm visualization and easy debug experience.
 
+## BREAKING CHANGES
+
+* 0.3.1: tv::DType enum value changed, this will affect all binary code of tv::Tensor user. you must recompile all code if upgrade to cumm >= 0.3.1.
+
 ## Install
 
 ### Prebuilt

@@ -147,21 +147,21 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
                 a_ptr = a_inds.data_ptr<const int>();
             }}
             TV_ASSERT_RT_ERR(!c_inds.empty(), "c must not empty");
-            kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.raw_data(),  b_ten.raw_data(),  
+            kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.const_raw_data(),  b_ten.const_raw_data(),  
                 c_ten.raw_data(), c_ten.raw_data(), 
                 a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
                 a_ptr, c_inds.data_ptr<const int>(), float(params.alpha), float(params.beta), 
                 split_k_slices, workspace_ptr}};
         }}else if (algo_desp.shuffle_type == tv::gemm::ShuffleStrideType::kShuffleAB){{
             TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
-            kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.raw_data(),  b_ten.raw_data(),  
+            kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.const_raw_data(),  b_ten.const_raw_data(),  
                 c_ten.raw_data(), c_ten.raw_data(), 
                 a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
                 a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(), 
                 float(params.alpha), float(params.beta), split_k_slices, workspace_ptr}};
 
         }}else{{
-            kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.raw_data(),  b_ten.raw_data(),  
+            kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.const_raw_data(),  b_ten.const_raw_data(),  
                 c_ten.raw_data(), c_ten.raw_data(), 
                 a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
                 nullptr, nullptr, 
