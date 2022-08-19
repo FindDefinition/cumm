@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from operator import truediv
 from typing import List
 
 import numpy as np
@@ -21,7 +22,7 @@ from cumm import dtypes
 from cumm import tensorview as tv
 from cumm.common import GemmBasic, GemmBasicKernel, TensorView
 from cumm.core_cc.csrc.arrayref import ArrayPtr
-from cumm.cudasim import checkers
+from cumm.cudasim import checkers, warp_broadcast
 from cumm.gemm import arch, bases, constants, layout_tensorop, thread_map
 from cumm.gemm.core import MetaArray, metaseq, seq
 from cumm.gemm.thread_map import PitchLinearWarpRaked
@@ -384,12 +385,14 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
         for PermuteM iters, permute_m_pointer_idx may larger than 0, and 
         interleave must be 1 (TODO actually interleave can > 1).
         """
-        if permute_m_pointer_idx > 0:
-            assert self.interleave == 1
+        # if permute_m_pointer_idx > 0:
+        #     assert self.interleave == 1   
+        #  we support NOW!
         if self.interleave == 4:
             # 0 1 2 3    0 1 2 3
             #  4 5 6 7  4 5 6 7
             if ldm_count[1] == 1:
+                assert(permute_m_pointer_idx < 2)
                 # Q0
                 # Q1
                 # Q2
@@ -398,9 +401,10 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                 # contig_vec: 0246 1357 0246 1357 ... = 0246[...] ^ (stride & 1)
                 # 0246[...] = (lane_idx & 3) << 1)
                 stride = lane_idx >> 2
-                contig_vec = ((lane_idx & 3) << 1) ^ (stride & 1)
+                contig_vec = ((lane_idx & 3) << 1) ^ (stride & 1) ^ permute_m_pointer_idx           # LINK  modify here
             elif ldm_count == (2, 2):
                 if transpose:  # operand B
+                    assert(permute_m_pointer_idx == 0)
                     # Q0 Q1
                     # Q2 Q3
                     # stride: 00001111 00001111 22223333 22223333 = 00001111[...] + 0[16] 1[16]
@@ -425,6 +429,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                     contig_vec = ((lane_idx & 3) << 1) + (stride & 1) ^ (
                         (lane_idx & 0b10000) >> 4)
             else:
+                assert(permute_m_pointer_idx < 1 and ldm_count == (1, 2))       # no other possible
                 # Q0 Q1 Q2 Q3
                 # stride: 0000 1111 0000 1111 ...
                 # contig: 02461357 13570246 +8 +8
@@ -441,6 +446,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
             #    4   5
             #   6   7
             if ldm_count[1] == 1:
+                assert(permute_m_pointer_idx < 4)
                 # Q0
                 # Q1
                 # Q2
@@ -449,8 +455,9 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                 # contig_vec: 04152637 ... = 00112233 + 04040404 = (lane_idx >> 1) & 0b11 + (lane_idx & 1) << 2
                 # 0246[...] = (lane_idx & 3) << 1)
                 stride = lane_idx >> 1
-                contig_vec = ((lane_idx >> 1) & 0b11) + ((lane_idx & 1) << 2)
+                contig_vec = ((lane_idx >> 1) & 0b11) ^ ((lane_idx & 1) << 2) ^ permute_m_pointer_idx           # LINK moified here
             elif ldm_count == (2, 2):
+                assert(permute_m_pointer_idx < 2)
                 if transpose:  # operand B
                     # Q0 Q1
                     # Q2 Q3
@@ -459,7 +466,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                     _00112233 = ((lane_idx >> 1) & 0b11)
                     stride = _00112233 + (lane_idx >> 4 << 2)
                     contig_vec = (_00112233 + ((lane_idx & 1) << 2)) ^ (
-                        (lane_idx >> 3) & 1)
+                        (lane_idx >> 3) & 1) ^ (permute_m_pointer_idx << 1)                     # LINK modify here
                 else:  # operand A
                     # Q0 Q2
                     # Q1 Q3
@@ -467,9 +474,15 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                     # contig: 04152637 04152637 15043726 15043726
                     # 0[8] 1[8] = lane_idx >> 4
                     stride = (lane_idx & 0b1111) >> 1
-                    contig_vec = (((lane_idx >> 1) & 0b11) +
-                                  ((lane_idx & 1) << 2)) ^ (lane_idx >> 4)
+                    contig_vec = ((((lane_idx >> 1) & 0b11) +
+                                  ((lane_idx & 1) << 2)) ^ (lane_idx >> 4)) ^ (permute_m_pointer_idx << 1)   # LINK modify here
+            elif ldm_count == (1, 2):
+                assert(permute_m_pointer_idx < 2 and lane_idx < 16)
+                stride = (lane_idx & 0b111) >> 1
+                contig_vec = ((((lane_idx >> 1) & 0b11) +
+                              ((lane_idx & 1) << 2)) ^ (lane_idx >> 3)) ^ (permute_m_pointer_idx << 1)          # LINK add for this
             else:
+                assert(permute_m_pointer_idx < 1 and ldm_count == (1, 4))
                 # Q0 Q1 Q2 Q3
                 # stride: 00112233 00112233 00112233 00112233
                 # contig: 04152637 15043726 26370415 37261504 = 04152637 ^ 00000000 11111111 22222222 33333333
@@ -519,6 +532,11 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                     contig_vec = _01234567 ^ ((lane_idx >> 4) +
                                               (permute_m_pointer_idx << 1))
                 assert permute_m_pointer_idx < 4
+            elif ldm_count == (1, 2):
+                assert(lane_idx < 16 and permute_m_pointer_idx < 4)
+                stride = lane_idx & 0b111
+                contig_vec = stride ^ ((lane_idx >> 3) ^
+                                       (permute_m_pointer_idx << 1))
             else:
                 # Q0 Q1 Q2 Q3
                 # stride: 01234567 01234567 01234567 01234567
@@ -568,7 +586,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
             code.raw(f"""
             if (LdmCountContig == 1){{
                 stride = lane_idx >> 2;
-                contig_vec = ((lane_idx & 3) << 1) ^ (stride & 1);
+                contig_vec = ((lane_idx & 3) << 1) ^ (stride & 1) ^ permute_m_pointer_idx;
             }} else if (LdmCountContig == 2 && LdmCountStride == 2){{
                 if (transpose){{
                     stride = ((lane_idx & 0b111) >> 2) + (lane_idx >> 4 << 1);
@@ -586,17 +604,20 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
             code.raw(f"""
             if (LdmCountContig == 1){{
                 stride = lane_idx >> 1;
-                contig_vec = ((lane_idx >> 1) & 0b11) + ((lane_idx & 1) << 2);
+                contig_vec = ((lane_idx >> 1) & 0b11) ^ ((lane_idx & 1) << 2) ^ permute_m_pointer_idx;
             }} else if (LdmCountContig == 2 && LdmCountStride == 2){{
                 if (transpose){{
                     int _00112233 = ((lane_idx >> 1) & 0b11);
                     stride = _00112233 + (lane_idx >> 4 << 2);
-                    contig_vec = (_00112233 + ((lane_idx & 1) << 2)) ^ ((lane_idx >> 3) & 1);
+                    contig_vec = (_00112233 + ((lane_idx & 1) << 2)) ^ ((lane_idx >> 3) & 1) ^ (permute_m_pointer_idx << 1);
                 }}else{{
                     stride = (lane_idx & 0b1111) >> 1;
-                    contig_vec = (((lane_idx >> 1) & 0b11) + ((lane_idx & 1) << 2)) ^ (lane_idx >> 4);
+                    contig_vec = ((((lane_idx >> 1) & 0b11) + ((lane_idx & 1) << 2)) ^ (lane_idx >> 4)) ^ (permute_m_pointer_idx << 1);
                 }}
-            }}else{{
+            }}else if (LdmCountContig == 2 && LdmCountStride == 1){{  //incomplete ldm block
+                stride = (lane_idx & 0b111) >> 1;
+                contig_vec = (((lane_idx >> 1) & 0b11) ^ ((lane_idx & 1) << 2)) ^ (lane_idx >> 3) ^ (permute_m_pointer_idx << 1);
+            }} else{{
                 stride = (lane_idx & 0b111) >> 1;
                 contig_vec = (((lane_idx >> 1) & 0b11) + ((lane_idx & 1) << 2)) ^ (lane_idx >> 3);
             }}
@@ -616,7 +637,10 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
                     stride = lane_idx & 0b1111;
                     contig_vec = _01234567 ^ ((lane_idx >> 4) + (permute_m_pointer_idx << 1));
                 }}
-            }}else{{
+            }}else if (LdmCountContig == 2 && LdmCountStride == 1){{    // incomplete ldm block
+                stride = lane_idx & 0b111;
+                contig_vec = stride ^ ((lane_idx >> 3) ^ (permute_m_pointer_idx << 1));
+            }}else {{
                 stride = lane_idx & 0b111;
                 contig_vec = stride ^ ((lane_idx >> 3) + (permute_m_pointer_idx << 2));
             }}
@@ -701,6 +725,9 @@ class SmemTileIterator(bases.GemmSmemIterator):
         # our shape: km
         # A crosswise: [64, 32], congruous: [32, 64]
         # , congruous: [32, 128]
+        self.is_sparse_input_distribute = hasattr(tmap, "is_sparse") and tmap.is_sparse   
+        if(self.is_sparse_input_distribute):
+            self.add_member('is_skipped', 'bool')
         self.transposed_smem = is_crosswise
         self.ref_layout = smem_layout
         # if crosswise, A is mk, B is nk, so k_axis == 1
@@ -768,6 +795,13 @@ class SmemTileIterator(bases.GemmSmemIterator):
         code.arg("thread_id", "int")
         code.ctor_init("byte_offset_", "0")
 
+        if self.is_sparse_input_distribute:
+            code.raw('''
+                is_skipped = ThreadMap::is_skipped(thread_id);
+                if(is_skipped)
+                    return;
+            ''')
+
         code.raw(f"""
         auto thread_offset_base = ThreadMap::initial_offset(thread_id);
         auto layout = Layout();
@@ -800,6 +834,9 @@ class SmemTileIterator(bases.GemmSmemIterator):
             #     print(off, refoff)
             new_obj.pointer_[i] = (ptr + off).change_access_size(
                 new_obj.element_per_acc)
+        if self.is_sparse_input_distribute:
+            assert(new_obj.is_sparse_input_distribute)
+            new_obj.is_skipped = new_obj.tmap.is_skipped_python(thread_id)
         return new_obj
 
     @pccm.cuda.member_function(device=True, forceinline=True, const=True)
@@ -891,7 +928,13 @@ class SmemTileIterator(bases.GemmSmemIterator):
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def store_with_byte_offset(self):
-        code = pccm.FunctionCode(f"""
+        code = pccm.FunctionCode()
+        if self.is_sparse_input_distribute:
+            code.raw(f"""
+                if(is_skipped)
+                    return;
+            """)
+        code.raw(f"""
         {self.const_access_pointer} frag_ptr = reinterpret_cast<{self.const_access_pointer}>(&frag);
 
         TV_PRAGMA_UNROLL
@@ -914,6 +957,8 @@ class SmemTileIterator(bases.GemmSmemIterator):
     async def store_with_byte_offset_python(self, frag: ArrayPtr,
                                             byte_offset: int):
         ptr_addrs = np.zeros((frag.length, ), dtype=np.int32)
+        if self.is_sparse_input_distribute and self.is_skipped:
+            return ptr_addrs
         frag_ptr = frag.change_access_size(self.element_per_acc)
         for s in range(self.tmap.iterations[0]):
             for c in range(self.tmap.iterations[1]):
@@ -1335,11 +1380,12 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
             self.lds_op_inner = 8
             self.ldm_count = metaseq(inst_shape_km[0] // self.ldm_num_line, 1)
             self.ldm_count[
-                1] = arch.ldmatrix.LdMatrix.MaxNum // self.ldm_count[0]
+                1] = min(arch.ldmatrix.LdMatrix.MaxNum // self.ldm_count[0], 
+                warp_tile_shape_km[1] // self.lds_op_outer)
             self.ldm_iters = metaseq(
                 1, warp_tile_shape_km[1] // self.layout.element_per_acc //
                 self.ldm_count[1])
-            self.pointer_count = self.layout.sw_shape[1] // self.ldm_count[1]
+            self.pointer_count = self.layout.sw_shape[1] // self.layout.interleave // self.ldm_count[1]
         assert warp_tile_shape_km[1] % self.ldm_line_size == 0
         assert warp_tile_shape_km[0] % self.ldm_num_line == 0
 
@@ -1348,6 +1394,14 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         # print(self.layout.tile_shape)
         # print(self.class_name, self.ldm_count, self.ldm_iters,
         #       self.k_groups_per_tile)
+
+        self.real_pointer_count = self.pointer_count
+        self.minimize_regisiter_optimize = False
+        if self.pointer_count > self.ldm_iters[1]:       # to much pointer,  we need to do something to reduce register cnt
+            self.pointer_count = min(self.pointer_count, self.ldm_iters[1])
+            self.minimize_regisiter_optimize = True
+            self.add_member("ref_pointer_", self.pointer + "&")
+            self.add_member("lane_id_", "const int&", "0")
 
         self.add_member("wmma_k_index_", "int")
         self.add_member("pointer_",
@@ -1374,16 +1428,25 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         code.arg("warp_idx_k, warp_idx_mn, lane_idx", "int")
         code.ctor_init("wmma_k_index_", "0")
         code.ctor_init("byte_offset_", "0")
+        code.raw(f"lane_idx %= {self.ldm_count.prod() * 8};")
+        if self.minimize_regisiter_optimize:
+            code.ctor_init("ref_pointer_", "ptr")
+            code.ctor_init("lane_id_", "lane_idx")
         if not self.is_spec_32:
-            code.raw(f"""
-            TV_PRAGMA_UNROLL
-            for (int i = 0; i < {self.pointer_count}; ++i) {{
-                int offset = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
-                    lane_idx, i, {pccm.boolean(not self.operand_a)});
-                pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ptr + offset);
-            }}
-            add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn);
-            """)
+            if self.minimize_regisiter_optimize:
+                code.raw(f"""
+            add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn, true);
+                """)
+            else:
+                code.raw(f"""
+                TV_PRAGMA_UNROLL
+                for (int i = 0; i < {self.pointer_count}; ++i) {{
+                    int offset = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
+                        lane_idx, i, {pccm.boolean(not self.operand_a)});
+                    pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ptr + offset);
+                }}
+                add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn);
+                """)
         else:
             code.raw(f"""
             for (int i = 0; i < {self.pointer_count}; ++i) {{
@@ -1406,29 +1469,34 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                                         self.mma_inst_delta, self.partk)
         new_obj.wmma_k_index_ = 0
         new_obj.byte_offset_ = 0
-        if not self.is_spec_32:
-            layout = new_obj.layout.python_ctor(new_obj.layout.static_stride)
-            for i in range(self.pointer_count):
-                ref_offset = layout.get_ldm_initial_offset_fast(
-                    lane_idx,
-                    self.ldm_count,
-                    self.operand_a,
-                    permute_m_pointer_idx=i)
-                new_obj.pointer_[i] = (
-                    ptr.change_access_size(self.element_per_acc) +
-                    ref_offset // self.element_per_acc)
+        lane_idx %= self.ldm_count.prod() * 8
+        if self.minimize_regisiter_optimize:
+            new_obj.store_ptr = ptr
+            new_obj.lane_id = lane_idx
         else:
-            for i in range(self.pointer_count):
-                access_strided = lane_idx % self.ldm_num_line
-                access_contiguous = lane_idx // self.ldm_num_line + (
-                    access_strided ^ i) * self.ldm_line_size
-                new_obj.pointer_[i] = (
-                    ptr.change_access_size(self.element_per_acc) +
-                    access_contiguous +
-                    access_strided * self.static_stride_vec)
+            if not self.is_spec_32:
+                layout = new_obj.layout.python_ctor(new_obj.layout.static_stride)
+                for i in range(self.pointer_count):
+                    ref_offset = layout.get_ldm_initial_offset_fast(
+                        lane_idx,
+                        self.ldm_count,
+                        self.operand_a,
+                        permute_m_pointer_idx=i)
+                    new_obj.pointer_[i] = (
+                        ptr.change_access_size(self.element_per_acc) +
+                        ref_offset // self.element_per_acc)
+            else:
+                for i in range(self.pointer_count):
+                    access_strided = lane_idx % self.ldm_num_line
+                    access_contiguous = lane_idx // self.ldm_num_line + (
+                        access_strided ^ i) * self.ldm_line_size
+                    new_obj.pointer_[i] = (
+                        ptr.change_access_size(self.element_per_acc) +
+                        access_contiguous +
+                        access_strided * self.static_stride_vec)
 
         new_obj.add_tile_offset_python(self.num_warp_gemm_iters * warp_idx_k,
-                                       warp_idx_mn)
+                                       warp_idx_mn, self.minimize_regisiter_optimize)
 
         return new_obj
 
@@ -1447,30 +1515,48 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         code = pccm.code()
         if self.is_spec_32:
             code.raw(f"""
-            constexpr int kContigEqual = {self.layout.tile_shape[1]} * {self.layout.element_per_acc} / 2;
+            constexpr int kContigEqual = {self.layout.tile_shape[1]} * {self.layout.element_per_acc};
             // Matrix multiply 1688 pointer_[0] <=> pointer_[4] pointer_[1] <=> pointer_[5]
             //           pointer_[2] <=> pointer_[6] pointer_[3] <=> pointer_[7]
 
             """)
         else:
             code.raw(f"""
-            constexpr int kContigEqual = {self.layout.part_shape[1]} * {self.layout.element_per_acc};
+            constexpr int kContigEqual = {self.layout.warp_bfa_access_shape[0] * 8};
             """)
 
         code.raw(f"""
         int mn_offset = warp_idx_mn;
         int k_offset = warp_idx_k;
 
-        if ({self.warp_tile_shape_km[1]} == kContigEqual) {{
-          if (warp_idx_mn % 2) {{
+        if ({self.warp_tile_shape_km[1]} < kContigEqual || force_update) {{
+          constexpr int kwarp_per_crosswise = {self.layout.warp_bfa_access_shape[0] * 8 // self.warp_tile_shape_km[1]};
+          int warp_offset = warp_idx_mn & (kwarp_per_crosswise - 1);
+          mn_offset = warp_idx_mn ^ warp_offset;            // kwarp_per_crosswise is 2^a
+          if (warp_offset || force_update) {{
+        """)
+        if self.minimize_regisiter_optimize:
+            code.raw(f"""
             TV_PRAGMA_UNROLL
-            for (int i = 0; i < {self.pointer_count} / 2; ++i) {{
-              {self.const_access_pointer} tmp_pointer = pointer_[i];
-              pointer_[i] = pointer_[i + {self.pointer_count} / 2];
-              pointer_[i + {self.pointer_count} / 2] = tmp_pointer;
+            for (int i = 0; i < {self.pointer_count}; ++i) {{
+                int offset = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
+                    lane_id_ % {self.ldm_count.prod() * 8}, (i + warp_offset) % {self.real_pointer_count}, {pccm.boolean(not self.operand_a)});
+                pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ref_pointer_ + offset);
             }}
+            """)
+        else:
+            code.raw(f"""
+            {self.const_access_pointer} buffer[{self.pointer_count}];
+            TV_PRAGMA_UNROLL
+            for (int i = 0; i < {self.pointer_count}; ++i) 
+              buffer[i] = pointer_[(i + warp_offset) & (kwarp_per_crosswise - 1)];
+            
+            TV_PRAGMA_UNROLL
+            for (int i = 0; i < {self.pointer_count}; ++i) 
+              pointer_[i] = buffer[i];""")
+        
+        code.raw(f"""
           }}
-          mn_offset = (warp_idx_mn >> 1) << 1;
         }}
         """)
         if self.is_spec_32:
@@ -1483,34 +1569,47 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
             code.raw(f"""
             int offset = (k_offset * {self.ldm_count[0] * self.ldm_num_line *
                                        self.static_stride_vec *
-                                       self.layout.element_per_acc} +
+                                       self.layout.element_per_acc // self.layout.interleave} +
                         mn_offset * {self.warp_tile_shape_km[1]});
             """)
         code.raw(f"""
         add_pointer_offset(offset);
         """)
-        return code.arg("warp_idx_k, warp_idx_mn", "int")
+        return code.arg("warp_idx_k, warp_idx_mn", "int").arg("force_update", "bool", "false")
 
-    def add_tile_offset_python(self, warp_idx_k: int, warp_idx_mn: int):
+    def add_tile_offset_python(self, warp_idx_k: int, warp_idx_mn: int, force_update: bool = False):
         mn_offset = warp_idx_mn
         k_offset = warp_idx_k
         # two warp handle one swizzle part.
         # for second warp, we need to swap pointers (swizzle part for second warp)
-        if (self.warp_tile_shape_km[1] == self.layout.part_shape[1] *
-                self.layout.element_per_acc):
-            if (warp_idx_mn % 2):
-                for i in range(self.pointer_count // 2):
-                    tmp_pointer = self.pointer_[i]
-                    self.pointer_[i] = self.pointer_[i +
-                                                     self.pointer_count // 2]
-                    self.pointer_[i + self.pointer_count // 2] = tmp_pointer
-            # mn_offset: 00 22 44 66
-            # this stmt is exists because we have add offset in init function.
-            # so we skip second warp.
-            mn_offset = (warp_idx_mn >> 1) << 1
+        if (self.warp_tile_shape_km[1] < self.layout.warp_bfa_access_shape[0] * 8 or force_update):        # warp_shape < crosswise
+            kwarp_per_crosswise = self.layout.warp_bfa_access_shape[0] * 8 // self.warp_tile_shape_km[1]
+            warp_offset = warp_idx_mn % kwarp_per_crosswise
+            mn_offset = warp_idx_mn - warp_offset
+
+            pointer_offset = warp_offset#  * (self.real_pointer_count // kwarp_per_crosswise)  NOTE: in c is this, it might be wrong but havn't occur
+            if self.minimize_regisiter_optimize and (pointer_offset or force_update):
+                layout = self.layout.python_ctor(self.layout.static_stride)
+                for i in range(self.pointer_count):
+                    ref_offset = layout.get_ldm_initial_offset_fast(
+                        self.lane_id,
+                        self.ldm_count,
+                        self.operand_a,
+                        permute_m_pointer_idx= (i + pointer_offset) % self.real_pointer_count)
+                    self.pointer_[i] = (
+                        self.store_ptr.change_access_size(self.element_per_acc) +
+                        ref_offset // self.element_per_acc)
+            else:
+                self.pointer_ = self.pointer_[pointer_offset:] + self.pointer_[:pointer_offset]
+            
+            # if minimize_register_optimize. nPointer > self.ldm_iters[1], so we must recalc
+            # it force_update is set, we also re calc
+            # else we only need to repermute by python slice.
+            # note:  add_tile_offset(, !=0) can only use once
+            # mn_offset = (warp_idx_mn >> 1) << 1
         self.add_pointer_offset_python(
             (k_offset * self.ldm_count[0] * self.ldm_num_line) *
-            self.static_stride_vec * self.layout.element_per_acc +
+            self.static_stride_vec * self.layout.element_per_acc // self.layout.interleave +
             mn_offset * self.warp_tile_shape_km[1])
 
     @pccm.cuda.member_function(device=True, forceinline=True)

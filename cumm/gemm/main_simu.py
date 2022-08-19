@@ -27,7 +27,7 @@ from cumm import tensorview as tv
 from cumm.gemm import kernel
 from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
 
-VIS_IP = "127.0.0.1:50083"
+VIS_IP = "10.130.51.60:51051"
 
 GEMM_VIS_GLOBAL_SCALE = 10
 import os
@@ -130,8 +130,10 @@ def vis_area_coords(fig: vis.figure.ImageFigure,
             if offsets_per_it.size == 0:
                 continue
             coords_per_it = offset_to_coord(offsets_per_it, shape[1])[:, ::-1]
+            epa = 2
             coords_per_it_epa = coords_per_it.reshape(
                 coords_per_it.shape[0] // epa, epa, 2)[:, 0]
+            epa = 8
             texts = vis.objects.Texts2d(coords_per_it_epa * scale,
                                         [f"{it}"] * len(coords_per_it_epa),
                                         "black", 10)
@@ -188,10 +190,16 @@ def vis_gemm_input_2d(inp: np.ndarray,
         if group_id not in grouped_res:
             grouped_res[group_id] = []
         grouped_res[group_id].append(
-            (input_coords, smem_coords, warp_coords, warp_frags, tx))
+            (input_coords, smem_coords, warp_coords, warp_frags, tx))           # TODO  not good smem shape
     # smem shape to bank view
     # bank_size_element_view = 128 // inp.itemsize
     # smem_shape = [kernel.div_up(smem_shape[0] * smem_shape[1], bank_size_element_view), bank_size_element_view]
+    if name == 'A':
+        smem_shape = [64, 64]
+    elif name == 'B':
+        smem_shape = [64, 64]
+    else:
+        assert(0)
     grouped_res = OrderedDict(sorted(grouped_res.items(), key=lambda x: x[0]))
     fake_img = None
     bounds: List[List[float]] = []
@@ -363,8 +371,8 @@ def _asdv_test_simt_python(coord_input: bool = False):
                 m = 256 + 32
                 n = 256 + 40
                 k = 24
-                m = 64
-                n = 64
+                m = 32
+                n = 16
                 k = 16
                 # m = max(params.ts[0], m)
                 # n = max(params.ts[1], n)
@@ -511,9 +519,9 @@ def _asdv_test_volta_python(coord_input: bool):
             m = 256 + 32
             n = 256 + 40
             k = 32
-            m = 64
-            n = 64
-            k = 32
+            m = 32
+            n = 16
+            k = 16
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
@@ -674,7 +682,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
         main_cu = GemmMainUnitTest()
         print(len(main_cu.all_params))
 
-        for params in main_cu.all_params[:1]:
+        for params in main_cu.all_params[:]:
             ker = gen_gemm_kernels(params)
             print(ker.get_algo_name())
 
@@ -683,9 +691,9 @@ def _asdv_test_turing_python(coord_input: bool = False):
             n = 256 + 40
             k = 32
 
-            m = 32
-            n = 32
-            k = 32
+            m = 0
+            n = 0
+            k = 0
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
@@ -694,7 +702,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
                 a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
                 b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
                 dtype_c = params.dtype_c.npdtype()
-                c = (a.astype(np.float32) @ b.astype(np.float32)).astype(
+                c = -(a.astype(np.float16) @ b.astype(np.float16)).astype(
                     dtypes.get_npdtype(params.dtype_c))
 
             else:
@@ -705,7 +713,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
                 # a[:, 32:] = 0
                 # b[32:] = 0
 
-                c = (a @ b).astype(dtypes.get_npdtype(params.dtype_c))
+                c = -(a @ b).astype(dtypes.get_npdtype(params.dtype_c))
             if params.trans_a:
                 a = np.ascontiguousarray(a.transpose(1, 0))
             if params.trans_b:
@@ -738,7 +746,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
             b_tv = b.copy()
             cc_tv = np.zeros_like(c)
 
-            c_tv = np.zeros_like(c)
+            c_tv = c.copy()
             # asyncio.run(cudasim.kernel_launch)
             t = time.time()
             vis_res_per_thread, blocks, threads = main_cu.matmul_python(
@@ -785,12 +793,19 @@ def _asdv_test_turing_python(coord_input: bool = False):
                                          fig_per_group, vis_res["Output"], "O",
                                          [0, B_bound[3] + 10])
 
-            # print(TestCase().assertAllClose(c_tv, c))
+            # print(TestCase().assertAllClose(c_tv, c)) 
             # print(c_tv.reshape(-1)[:10], c.reshape(-1)[:10])
             # print(c_tv.reshape(-1)[-10:] -  c.reshape(-1)[-10:])
 
-            print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
+            print(ker.get_algo_name(), a.mean(), b.mean(), c.mean(),
                   np.linalg.norm(c_tv - c), "Time=", duration)
+            
+            print("max error is ", np.abs(c_tv).max())
+            if(np.abs(c_tv).max() < 1e-2):
+                print("PASSED")
+            else:
+                print("NOT PASS")
+                assert(0)
 
             # vis_in_relay(list(fig_per_group.values()))
 
@@ -805,6 +820,6 @@ if __name__ == "__main__":
 
     # vis_in_relay([fig])
     # unittest_python()
-    _asdv_test_simt_python(True)
-    # _asdv_test_turing_python(True)
+    # _asdv_test_simt_python(True)
+    _asdv_test_turing_python(True)
     # _asdv_test_volta_python(True)
