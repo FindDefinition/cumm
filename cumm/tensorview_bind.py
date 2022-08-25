@@ -561,6 +561,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("copy_", [](tv::Tensor& t, const tv::Tensor& other, tv::Context ctx) -> void{
       t.copy_(other, ctx);
     }, py::arg("other"), py::arg("ctx") = tv::Context())
+    .def("copy_2d_pitched_", [](tv::Tensor& t, const tv::Tensor& other, tv::Context ctx) -> void{
+      t.copy_2d_pitched_(other, ctx);
+    }, py::arg("other"), py::arg("ctx") = tv::Context())
+
     .def("cpu", py::overload_cast<tv::Context>(&tv::Tensor::cpu, py::const_), py::arg("ctx") = tv::Context())
     .def("numpy", [](const tv::Tensor& ten){
       TV_ASSERT_RT_ERR(ten.device() == -1 || (ten.device() == 0 && ten.managed()), "you need to call .cpu() before convert cuda tensor to numpy");

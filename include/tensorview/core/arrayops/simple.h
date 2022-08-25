@@ -5,6 +5,10 @@
 namespace tv {
 namespace arrayops {
 
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(const T* ptr){
+  return reinterpret_cast<const tv::array<T, N>*>(ptr)[0];
+}
 
 template <class... Ts>
 TV_HOST_DEVICE_INLINE constexpr auto create_array(Ts... vals){

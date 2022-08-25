@@ -441,8 +441,7 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE void insert_key_only(Args &&...keys) {
-    key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    const key_type_uint key_u = hash_type::encode(std::forward<Args>(keys)...);
     key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {
@@ -467,8 +466,7 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE size_type lookup_offset(Args &&...keys) {
-    key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<const key_type_uint &>(std::forward<Args>(keys))...);
+    key_type_uint key_u = hash_type::encode(std::forward<Args>(keys)...);
     key_type_uint hash_val = hash_type::hash(keys...);
     key_type_uint slot;
     if (Power2) {

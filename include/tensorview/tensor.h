@@ -174,7 +174,11 @@ public:
     }
   }
   TensorStorage(T *ptr, size_t size, int device)
-      : size_(size), ptr_(ptr), from_blob_(true), device_(device) {}
+      : size_(size), ptr_(ptr), from_blob_(true), device_(device) {
+      if (size == 0) {
+        ptr_ = nullptr;
+      }
+    }
 
   virtual ~TensorStorage() {
     if (empty()) {
@@ -568,11 +572,13 @@ constexpr size_t kTensorMaxDim = 10;
 using TensorShape = ShapeBase<kTensorMaxDim, int64_t>;
 
 struct Tensor {
-  Tensor() {}
+  // empty tensor will have float32 dtype by default.
+  Tensor(): dtype_(tv::float32) {}
   Tensor(TensorShape shape, TensorShape stride, DType dtype, int device = -1,
          bool pinned = false, bool managed = false)
       : dtype_(dtype) {
-    TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
+    
+    // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
         shape.size() * detail::sizeof_dtype(dtype), device, managed, pinned);
     shape_ = shape;
@@ -583,7 +589,7 @@ struct Tensor {
   Tensor(TensorShape shape, DType dtype, int device = -1, bool pinned = false,
          bool managed = false)
       : dtype_(dtype) {
-    TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
+    // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
         shape.size() * detail::sizeof_dtype(dtype), device, managed, pinned);
     shape_ = shape;
@@ -593,7 +599,7 @@ struct Tensor {
   Tensor(void *ptr, TensorShape shape, TensorShape stride, DType dtype,
          int device = -1)
       : dtype_(dtype) {
-    TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
+    // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
         reinterpret_cast<uint8_t *>(ptr),
         shape.size() * detail::sizeof_dtype(dtype), device);
@@ -603,7 +609,7 @@ struct Tensor {
   }
   Tensor(void *ptr, TensorShape shape, DType dtype, int device = -1)
       : dtype_(dtype) {
-    TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
+    // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
         reinterpret_cast<uint8_t *>(ptr),
         shape.size() * detail::sizeof_dtype(dtype), device);
@@ -615,7 +621,7 @@ struct Tensor {
   Tensor(const void *ptr, TensorShape shape, TensorShape stride, DType dtype,
          int device = -1)
       : dtype_(dtype), writeable_(false) {
-    TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
+    // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
         reinterpret_cast<uint8_t *>(const_cast<void *>(ptr)),
         shape.size() * detail::sizeof_dtype(dtype), device);
@@ -625,7 +631,7 @@ struct Tensor {
   }
   Tensor(const void *ptr, TensorShape shape, DType dtype, int device = -1)
       : dtype_(dtype), writeable_(false) {
-    TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
+    // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
         reinterpret_cast<uint8_t *>(const_cast<void *>(ptr)),
         shape.size() * detail::sizeof_dtype(dtype), device);
@@ -782,7 +788,7 @@ struct Tensor {
     return view(shape_.unsqueeze(axis));
   }
 
-  bool pinned() const { return storage_->pinned(); }
+  bool pinned() const { return storage_ ? storage_->pinned() : false; }
 
   Tensor slice_first_axis(int64_t start, int64_t end) const {
     return slice(0, start, end, 1, false, false);
@@ -913,6 +919,7 @@ private:
 public:
   Tensor as_strided(TensorShape shape, TensorShape stride,
                     int64_t storage_byte_offset) const {
+    TV_ASSERT_INVALID_ARG(!empty(), "tensor must not empty");
     // pytorch/c10/core/TensorImpl.h
     // pytorch/aten/native/Resize.h
     // TV_ASSERT_INVALID_ARG(contiguous_, "only support contiguous for now");
@@ -1024,7 +1031,7 @@ public:
 
   bool empty() const { return !storage_ || storage_->empty(); }
   DType dtype() const { return dtype_; }
-  int device() const { return storage_->device(); }
+  int device() const { return storage_ ? storage_->device(): -1; }
   size_t ndim() const { return shape_.ndim(); }
 
   const TensorShape &shape() const { return shape_; }
@@ -1065,11 +1072,11 @@ public:
   size_t size() const { return shape_.size(); }
   size_t numel() const { return shape_.size(); }
   size_t size(int64_t idx) const { return dim(idx); }
-  size_t storage_size() const { return storage_->size(); }
+  size_t storage_size() const { return storage_ ? storage_->size() : 0; }
 
   size_t itemsize() const { return detail::sizeof_dtype(dtype_); }
   size_t byte_offset() const { return offset_; }
-  bool is_cpu() const { return storage_->is_cpu(); }
+  bool is_cpu() const { return storage_ ? storage_->is_cpu() : true; }
   bool is_readonly() const { return !writeable_; }
   Tensor get_readonly() const {
     // used for cumm inliner, we can capture const tensor
@@ -1079,6 +1086,9 @@ public:
     return res;
   }
   Tensor &zero_(Context ctx = Context()) {
+    if (empty()) {
+      return *this;
+    }
     writable_check();
     storage_->zero_(byte_offset(), raw_size(), ctx);
     return *this;
@@ -1192,7 +1202,7 @@ public:
   const void *data_ptr() const {
     return reinterpret_cast<const void *>(raw_data());
   }
-  bool managed() const { return storage_->managed(); }
+  bool managed() const { return storage_ ? storage_->managed(): false; }
   void copy_(const Tensor &tensor, Context ctx = Context()) {
     writable_check();
     TV_ASSERT_INVALID_ARG(contiguous_, "only support contiguous for now");
@@ -1252,7 +1262,64 @@ public:
         dev2dev(raw_data(), tensor.raw_data(),
                 size() * detail::sizeof_dtype(dtype_));
       }
+    }
+#endif
+    else {
+      TV_THROW_RT_ERR("only support cpu tensor");
+    }
+  }
 
+  void copy_2d_pitched_(const Tensor &tensor, Context ctx = Context()) {
+    writable_check();
+    TV_ASSERT_RT_ERR(!this->empty() && !tensor.empty(), "must not empty");
+    TV_ASSERT_RT_ERR(this->dtype() == tensor.dtype(), "must have same dtype",
+                     dtype_str(this->dtype()), dtype_str(tensor.dtype()));
+    TV_ASSERT_RT_ERR(this->ndim() == 2 && tensor.ndim() == 2, "must be 2d tensor");
+    TV_ASSERT_RT_ERR(this->stride(1) == 1 && tensor.stride(1) == 1, "stride[1] must be 1");
+    auto w = this->dim(1) * detail::sizeof_dtype(dtype_);
+    auto h = this->dim(0);
+    auto sw = tensor.dim(1) * detail::sizeof_dtype(dtype_);
+    auto sh = tensor.dim(0);
+    TV_ASSERT_RT_ERR(w == sw && h == sh, "shape must be same");
+    if (this->contiguous_ && tensor.contiguous_){
+      return copy_(tensor, ctx);
+    }
+    auto dst = this->raw_data();
+    auto src = tensor.const_raw_data();
+    auto dst_pitch = this->stride(0) * detail::sizeof_dtype(dtype_);
+    auto src_pitch = tensor.stride(0) * detail::sizeof_dtype(dtype_);
+    if (this->device() == -1 && tensor.device() == -1) {
+#ifdef TV_CUDA
+      checkCudaErrors(cudaMemcpy2D(dst, dst_pitch, src, src_pitch, w, h, cudaMemcpyHostToHost));
+#else
+      TV_THROW_INVALID_ARG("not implemented for cpu tensor")
+#endif
+    }
+#ifdef TV_CUDA
+    else if (device() >= 0 && tensor.device() == -1) {
+      if (ctx.has_cuda_stream()) {
+        checkCudaErrors(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, 
+          w, h, cudaMemcpyHostToDevice, ctx.cuda_stream()));
+      } else {
+        checkCudaErrors(cudaMemcpy2D(dst, dst_pitch, src, src_pitch, 
+          w, h, cudaMemcpyHostToDevice));
+      }
+    } else if (device() == -1 && tensor.device() >= 0) {
+      if (ctx.has_cuda_stream()) {
+        checkCudaErrors(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, 
+          w, h, cudaMemcpyDeviceToHost, ctx.cuda_stream()));
+      } else {
+        checkCudaErrors(cudaMemcpy2D(dst, dst_pitch, src, src_pitch, 
+          w, h, cudaMemcpyDeviceToHost));
+      }
+    } else if (device() >= 0 && tensor.device() >= 0) {
+      if (ctx.has_cuda_stream()) {
+        checkCudaErrors(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, 
+          w, h, cudaMemcpyDeviceToDevice, ctx.cuda_stream()));
+      } else {
+        checkCudaErrors(cudaMemcpy2D(dst, dst_pitch, src, src_pitch, 
+          w, h, cudaMemcpyDeviceToDevice));
+      }
     }
 #endif
     else {
@@ -1279,6 +1346,9 @@ public:
   }
 
   Tensor cpu(Context ctx = Context()) const {
+    if (empty()){
+      return Tensor();
+    }
     if (storage_->device() == -1) {
       // cpu() should always copy tensor.
       return clone();
@@ -1290,6 +1360,9 @@ public:
 
 #ifdef TV_CUDA
   Tensor cuda(Context ctx = Context()) const {
+    if (empty()){
+      return Tensor();
+    }
     if (storage_->device() >= 0) {
       // cuda() should always copy tensor.
       return clone();
