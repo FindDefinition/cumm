@@ -139,7 +139,6 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
                 elif (major, minor) < (12, 0):
                     _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
                 else:
-                    # remove sm5x support in CUDA 12.
                     _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     for named_arch, archval in named_arches.items():
@@ -536,3 +535,10 @@ class TslRobinMap(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("tensorview/thirdparty/tsl/robin_map.h")
+
+class CppTimer(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/profile/cuda_profiler.h")
+        self.build_meta.add_public_cflags("g++,clang++,nvcc", "-DTV_USE_LIBRT")
+        self.build_meta.add_libraries("rt")
