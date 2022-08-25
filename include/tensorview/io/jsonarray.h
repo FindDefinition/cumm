@@ -51,6 +51,42 @@ inline json json_idx(size_t i) {
   return res;
 }
 
+struct JsonArrayProxy {
+  json& data;
+  std::vector<tv::Tensor>& tensors;
+  void assign(std::string name, tv::Tensor ten){
+    data[name] = json_idx(tensors.size());
+    tensors.push_back(ten);
+  }
+
+  void assign(std::string name, std::vector<tv::Tensor> tens){
+    std::vector<json> is_idxes;
+    for (auto& t : tens){
+      is_idxes.push_back(json_idx(tensors.size()));
+      tensors.push_back(t);
+    }
+    data[name] = is_idxes;
+
+  }
+
+  void assign(std::string name, std::unordered_map<std::string, tv::Tensor> ten_map){
+    std::unordered_map<std::string, json> is_idxes;
+    for (auto& p : ten_map){
+      is_idxes[p.first] = json_idx(tensors.size());
+      tensors.push_back(p.second);
+    }
+    data[name] = is_idxes;
+  }
+
+  JsonArrayProxy operator[](std::string key){
+    return JsonArrayProxy{data[key], tensors};
+  }
+
+  JsonArrayProxy operator[](int64_t key){
+    return JsonArrayProxy{data[key], tensors};
+  }
+};
+
 struct JsonArray {
   json data;
   std::vector<tv::Tensor> tensors;
@@ -76,6 +112,14 @@ struct JsonArray {
       tensors.push_back(p.second);
     }
     data[name] = is_idxes;
+  }
+
+  JsonArrayProxy operator[](std::string key){
+    return JsonArrayProxy{data[key], tensors};
+  }
+
+  JsonArrayProxy operator[](int64_t key){
+    return JsonArrayProxy{data[key], tensors};
   }
 
 };
@@ -122,14 +166,17 @@ inline JsonArray decode(const uint8_t* buffer_ptr, size_t size) {
     auto shape = array_meta["shape"].template get<std::vector<int64_t>>();
     auto dtype = array_meta["dtype"].template get<int64_t>();
     auto offset = array_meta["offset"].template get<int64_t>();
-    TV_ASSERT_RT_ERR(shape.size() <= tv::TensorShape::kMaxDim, "error");
+    TV_ASSERT_RT_ERR(shape.size() <= tv::kTensorMaxDim, "error");
     auto tv_dtype = tv::DType(dtype);
     tv::TensorShape shape_tensor;
     for (auto &c : shape) {
       shape_tensor.push_back(c);
     }
-    tv::Tensor tensor =
-        tv::from_blob(buffer_ptr + offset, shape_tensor, tv_dtype, -1);
+    tv::Tensor tensor;
+    if (shape_tensor.size() > 0){
+      tensor =
+          tv::from_blob(buffer_ptr + offset, shape_tensor, tv_dtype, -1);
+    }
     res_tensors.push_back(tensor.clone());
   }
   return {data_skeleton, res_tensors};
@@ -139,6 +186,7 @@ inline JsonArray decode(const uint8_t* buffer_ptr, size_t size) {
 inline JsonArray decode(const std::vector<uint8_t> &buffer) {
   return decode(buffer.data(), buffer.size());
 }
+
 
 inline std::vector<uint8_t> encode(const std::vector<tv::Tensor> tensors,
                           const json &data_json) {
@@ -170,7 +218,6 @@ inline std::vector<uint8_t> encode(const std::vector<tv::Tensor> tensors,
   auto res_data = &res[0];
   *(reinterpret_cast<int64_t *>(res_data)) = start;
   *(reinterpret_cast<int64_t *>(res_data + 8)) = total_length;
-
   for (size_t i = 0; i < tensors.size(); ++i) {
     auto &tensor = tensors[i];
     auto offset = offsets[i];

@@ -72,7 +72,7 @@ from cumm import dtypes, tensorview as tv
 from cumm.common import TensorViewNVRTC, GemmBasic
 from cumm.gemm.codeops import div_up
 from cumm.tensorview import nullcontext
-_TORCH_DTYPE_TO_TV = {}
+_TORCH_DTYPE_TO_TV: Dict[Any, int] = {}
 TORCH_TENSOR_NAME = "torch.Tensor"
 
 
@@ -241,8 +241,8 @@ class NVRTCInlineBuilder(InlineBuilder):
             build_root: Optional[Path] = None,
             build_kwargs: Optional[Dict[str, Any]] = None,
             param_deps: Optional[List[pccm.ParameterizedClass]] = None,
-            measure_build_time: bool = False
-    ) -> None:
+            measure_build_time: bool = False,
+            reload_when_code_change: bool = False):
         if plugins is None:
             plugins = _DEFAULT_KERNEL_PLUGINS
         deps.extend([TensorViewNVRTC, GemmBasic])
@@ -253,15 +253,16 @@ class NVRTCInlineBuilder(InlineBuilder):
                          build_kwargs=build_kwargs,
                          root=root,
                          build_root=build_root,
-                         param_deps=param_deps)
+                         param_deps=param_deps,
+                         reload_when_code_change=reload_when_code_change)
         self.index_name = index_name
-        self.maximum_1d_threads = 256
+        self.maximum_1d_threads = 512
         self.measure_build_time = measure_build_time
 
     def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
-        for k, v in self.module_functions.items():
+        for k, v in self.modules.items():
             if name == k[1]:
-                return v
+                return v.func
         return None
 
     def get_save_root(self,
@@ -373,7 +374,7 @@ class NVRTCInlineBuilder(InlineBuilder):
 
 def main():
     import torch
-    INLINE = NVRTCInlineBuilder([])
+    INLINE = NVRTCInlineBuilder([], reload_when_code_change=True)
     from cumm import tensorview as tv
     print(1)
     a = tv.zeros([2], tv.float32, 0)
@@ -384,17 +385,18 @@ def main():
     b = tv.zeros([1000, 3], tv.float32, 0)
     bbb = torch.rand(1000, 3).float().cuda()
     t = np.eye(4)
-    INLINE.kernel_1d(
-        "hahaha2", a.dim(0), 0, f"""
-    auto bb = $bbb + i * 3;
-    auto x = bb[0] * $t[0][0] + bb[1] * $t[0][1] + bb[2] * $t[0][1] + $t[0][3];
-    auto y = bb[0] * $t[1][0] + bb[1] * $t[1][1] + bb[2] * $t[1][1] + $t[1][3];
-    auto z = bb[0] * $t[2][0] + bb[1] * $t[2][1] + bb[2] * $t[2][1] + $t[2][3];
+    for i in range(10):
+        INLINE.kernel_1d(
+            "hahaha2", a.dim(0), 0, f"""
+        auto bb = $bbb + i * 3;
+        auto x = bb[0] * $t[0][0] + bb[1] * $t[0][1] + bb[2] * $t[0][1] + $t[0][3];
+        auto y = bb[0] * $t[1][0] + bb[1] * $t[1][1] + bb[2] * $t[1][1] + $t[1][3];
+        auto z = bb[0] * $t[2][0] + bb[1] * $t[2][1] + bb[2] * $t[2][1] + $t[2][3];
 
-    bb[0] = x;
-    bb[1] = y;
-    bb[2] = z;
-    """)
+        bb[0] = x;
+        bb[1] = y;
+        bb[2] = z;
+        """)
 
     print(a.cpu().numpy())
 

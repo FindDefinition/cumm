@@ -271,6 +271,11 @@ class CUDALibs(pccm.Class):
         self.build_meta.libraries.extend(["cudart"])
         self.build_meta.libpaths.append(lib64)
 
+class TensorViewHeader(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.build_meta.add_public_includes(TENSORVIEW_INCLUDE_PATH)
+
 class TensorViewCPU(pccm.Class):
     def __init__(self):
         super().__init__()
@@ -437,6 +442,7 @@ class TensorViewNVRTC(pccm.Class):
 class TensorViewCore(pccm.Class):
     def __init__(self):
         super().__init__()
+        self.add_dependency(TensorViewHeader)
         self.add_include("tensorview/core/all.h")
         self.add_include("tensorview/core/arrayops/simple.h")
 
