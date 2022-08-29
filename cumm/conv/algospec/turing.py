@@ -80,6 +80,11 @@ class InputTuring(bases.Input):
                 0] = constants.WARP_SIZE // warp_shape_raked_a[1]
         else:
             warp_shape_raked_a = seq(4, 8)
+            if warp_shape_raked_a[1] * (access_size_bits // dtype_a.bitsize()) > tile_shape[0]:             # for low channel m
+                warp_shape_raked_a[1] = tile_shape[0] // (access_size_bits // dtype_a.bitsize())
+                warp_shape_raked_a[0] = constants.WARP_SIZE // warp_shape_raked_a[1]
+                assert(warp_shape_raked_a.prod() == constants.WARP_SIZE)
+
         if trans_b:
             warp_shape_raked_b = seq(
                 1, tile_shape[2] // (access_size_bits // dtype_b.bitsize()))
@@ -87,6 +92,10 @@ class InputTuring(bases.Input):
                 0] = constants.WARP_SIZE // warp_shape_raked_b[1]
         else:
             warp_shape_raked_b = seq(4, 8)
+            if warp_shape_raked_b[1] * (access_size_bits // dtype_b.bitsize()) > tile_shape[1]:             #for low chanel n
+                warp_shape_raked_b[1] = tile_shape[1] // (access_size_bits // dtype_b.bitsize())
+                warp_shape_raked_b[0] = constants.WARP_SIZE // warp_shape_raked_b[1]
+                assert(warp_shape_raked_b.prod() == constants.WARP_SIZE)
         self.tmap_a = thread_map.PitchLinearWarpRaked(
             self.input_tile_shape_a, self.input_sub_tile_shape_a,
             warp_shape_raked_a, self.num_threads)
