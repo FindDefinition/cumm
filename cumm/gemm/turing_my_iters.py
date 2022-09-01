@@ -1408,6 +1408,12 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
         self.real_pointer_count = self.pointer_count
         self.minimize_regisiter_optimize = False
+        if self.is_spec_32 and self.pointer_count > self.ldm_iters[1] * self.ldm_count[1]:
+            self.pointer_count = self.ldm_iters[1] * self.ldm_count[1]
+            self.minimize_regisiter_optimize = True
+            self.add_member("ref_pointer_", self.pointer + "&")
+            self.add_member("lane_id_", "const int&", "0")
+        
         if self.pointer_count > self.ldm_iters[1] and not self.is_spec_32:       # to much pointer,  we need to do something to reduce register cnt
             self.pointer_count = min(self.pointer_count, self.ldm_iters[1])
             self.minimize_regisiter_optimize = True
@@ -1444,21 +1450,21 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         if self.minimize_regisiter_optimize:
             code.ctor_init("ref_pointer_", "ptr")
             code.ctor_init("lane_id_", "lane_idx")
+        if self.minimize_regisiter_optimize:
+            code.raw(f"""
+                add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn, true);
+            """)
+            return code
         if not self.is_spec_32:
-            if self.minimize_regisiter_optimize:
-                code.raw(f"""
-            add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn, true);
-                """)
-            else:
-                code.raw(f"""
-                TV_PRAGMA_UNROLL
-                for (int i = 0; i < {self.pointer_count}; ++i) {{
-                    int offset = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
-                        lane_idx, i, {pccm.boolean(not self.operand_a)});
-                    pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ptr + offset);
-                }}
-                add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn);
-                """)
+            code.raw(f"""
+            TV_PRAGMA_UNROLL
+            for (int i = 0; i < {self.pointer_count}; ++i) {{
+                int offset = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
+                    lane_idx, i, {pccm.boolean(not self.operand_a)});
+                pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ptr + offset);
+            }}
+            add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn);
+            """)
         else:
             code.raw(f"""
             for (int i = 0; i < {self.pointer_count}; ++i) {{
@@ -1540,14 +1546,25 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
           if (warp_offset || force_update) {{
         """)
         if self.minimize_regisiter_optimize:
-            code.raw(f"""
-            TV_PRAGMA_UNROLL
-            for (int i = 0; i < {self.pointer_count}; ++i) {{
-                int offset = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
-                    lane_id_ % {self.ldm_count.prod() * 8}, (i + warp_offset) % {self.real_pointer_count}, {pccm.boolean(not self.operand_a)});
-                pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ref_pointer_ + offset);
-            }}
-            """)
+            if not self.is_spec_32:
+                code.raw(f"""
+                TV_PRAGMA_UNROLL
+                for (int i = 0; i < {self.pointer_count}; ++i) {{
+                    int offset = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
+                        lane_id_ % {self.ldm_count.prod() * 8}, (i + warp_offset) % {self.real_pointer_count}, {pccm.boolean(not self.operand_a)});
+                    pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ref_pointer_ + offset);
+                }}
+                """)
+            else:
+                code.raw(f"""
+                TV_PRAGMA_UNROLL
+                for (int i = 0; i < {self.pointer_count}; ++i) {{
+                    int access_strided = lane_id_ % {self.ldm_num_line};
+                    int access_contiguous = (lane_id_ / {self.ldm_num_line}) +
+                                            (access_strided ^ ((i + warp_offset) % {self.real_pointer_count})) * {self.ldm_line_size};
+                    pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ref_pointer_) +
+                                    access_contiguous + access_strided * {self.static_stride};
+                }}""")
         else:
             code.raw(f"""
             {self.const_access_pointer} buffer[{self.pointer_count}];
@@ -1583,16 +1600,26 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
             pointer_offset = warp_offset * (self.real_pointer_count // kwarp_per_crosswise) #  NOTE: fix once
             if self.minimize_regisiter_optimize and (pointer_offset or force_update):
-                layout = self.layout.python_ctor(self.layout.static_stride)
-                for i in range(self.pointer_count):
-                    ref_offset = layout.get_ldm_initial_offset_fast(
-                        self.lane_id,
-                        self.ldm_count,
-                        self.operand_a,
-                        permute_m_pointer_idx= (i + pointer_offset) % self.real_pointer_count)
-                    self.pointer_[i] = (
-                        self.store_ptr.change_access_size(self.element_per_acc) +
-                        ref_offset // self.element_per_acc)
+                if self.is_spec_32:
+                    for i in range(self.pointer_count):
+                        access_strided = self.lane_id % self.ldm_num_line
+                        access_contiguous = self.lane_id // self.ldm_num_line + (
+                            access_strided ^ ((i + pointer_offset) % self.real_pointer_count)) * self.ldm_line_size
+                        self.pointer_[i] = (
+                            self.store_ptr.change_access_size(self.element_per_acc) +
+                            access_contiguous +
+                            access_strided * self.static_stride)
+                else:
+                    layout = self.layout.python_ctor(self.layout.static_stride)
+                    for i in range(self.pointer_count):
+                        ref_offset = layout.get_ldm_initial_offset_fast(
+                            self.lane_id,
+                            self.ldm_count,
+                            self.operand_a,
+                            permute_m_pointer_idx= (i + pointer_offset) % self.real_pointer_count)
+                        self.pointer_[i] = (
+                            self.store_ptr.change_access_size(self.element_per_acc) +
+                            ref_offset // self.element_per_acc)
             else:
                 self.pointer_ = self.pointer_[pointer_offset:] + self.pointer_[:pointer_offset]
             
@@ -1756,7 +1783,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                             source_ptr = (
                                 pointer_part + self.layout.sw_shape[1] *
                                 self.layout.element_per_acc * (access_contig //
-                                self.pointer_count) +
+                                self.real_pointer_count) +
                                 access_stride * self.static_stride)
                             source_byte_ptr = source_ptr.change_access_byte_size(
                                 1) + byte_offset + self.byte_offset_
