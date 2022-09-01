@@ -5,7 +5,6 @@ import sys
 from pathlib import Path, PureWindowsPath
 
 import pccm
-from codeai.distributed.example.file import upload_file
 
 from cumm import dtypes
 from cumm import tensorview as tv
@@ -25,8 +24,8 @@ class CutlassLib(pccm.Class):
         self.add_include("cutlass/cutlass.h")
         self.add_include("cutlass/gemm/device/gemm.h")
         self.add_include("random")
-        self.build_meta.includes.append(CUTLASS_ROOT / "include")
-        self.build_meta.includes.append(CUTLASS_ROOT / "tools/util/include")
+        self.build_meta.add_public_includes(CUTLASS_ROOT / "include")
+        self.build_meta.add_public_includes(CUTLASS_ROOT / "tools/util/include")
         if cudasim.enable_debug():
             self.build_meta.add_cflags("nvcc", f"-DCUMM_DEBUG_TX={cudasim.debug_tx()}")
 

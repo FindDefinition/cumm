@@ -22,7 +22,124 @@
 #include <string>
 #include <tensorview/tensor.h>
 #include <unordered_map>
+#ifdef TV_USE_LIBRT
+#include <time.h>
+#endif
+
 namespace tv {
+
+
+#ifdef TV_USE_LIBRT
+#define SEC_TO_MS 1000
+
+/* To microseconds (10^-6) */
+#define MS_TO_US 1000
+#define SEC_TO_US (SEC_TO_MS * MS_TO_US)
+
+/* To nanoseconds (10^-9) */
+#define US_TO_NS 1000
+#define MS_TO_NS (MS_TO_US * US_TO_NS)
+#define SEC_TO_NS (SEC_TO_MS * MS_TO_NS)
+
+/* Conversion from nanoseconds */
+#define NS_TO_MS (1000 * 1000)
+#define NS_TO_US (1000)
+
+#define _PyTime_MIN INT64_MIN
+#define _PyTime_MAX INT64_MAX
+
+#define CODEAI_EXPORT
+#define CODEAI_INIT_EXPORT
+
+using _PyTime_t = int64_t;
+#define _PyTime_check_mul_overflow(a, b)                                       \
+  (assert(b > 0), (_PyTime_t)(a) < _PyTime_MIN / (_PyTime_t)(b) ||             \
+                      _PyTime_MAX / (_PyTime_t)(b) < (_PyTime_t)(a))
+
+inline int pytime_fromtimespec(_PyTime_t &tp, const timespec &ts) {
+  int res = 0;
+  _PyTime_t t = ts.tv_sec;
+  _PyTime_t nsec;
+  if (_PyTime_check_mul_overflow(t, SEC_TO_NS)) {
+    res = -1;
+    t = (t > 0) ? _PyTime_MAX : _PyTime_MIN;
+  } else {
+    t = t * SEC_TO_NS;
+  }
+
+  nsec = ts.tv_nsec;
+  /* The following test is written for positive only nsec */
+  assert(nsec >= 0);
+  if (t > _PyTime_MAX - nsec) {
+    res = -1;
+    t = _PyTime_MAX;
+  } else {
+    t += nsec;
+  }
+  tp = t;
+  return res;
+}
+
+inline int pygettimeofday(_PyTime_t &tp) {
+  // adapted from cpython pytime.c
+  struct timespec ts;
+  auto err = clock_gettime(CLOCK_REALTIME, &ts);
+  if (err) {
+    return -1;
+  }
+  return pytime_fromtimespec(tp, ts);
+}
+
+
+#endif
+
+class CPUEvent {
+private:
+#ifdef TV_USE_LIBRT
+  _PyTime_t cur_time_;
+#else 
+  std::chrono::time_point<std::chrono::steady_clock> cur_time_;
+#endif
+
+public:
+  std::string name;
+
+  CPUEvent(std::string name = "") : name(name) {}
+
+  CPUEvent& record(std::uintptr_t stream = 0) {
+#ifdef TV_USE_LIBRT
+    pygettimeofday(cur_time_);
+#else 
+    cur_time_ = std::chrono::steady_clock::now();
+#endif
+    return *this;
+  }
+
+  CPUEvent& stream_wait_me(std::uintptr_t stream, int flag = 0) {
+    return *this;
+  }
+
+  void sync() {}
+
+  static float duration(CPUEvent start, CPUEvent stop) {
+#ifdef TV_USE_LIBRT
+    float ms = (stop.cur_time_ - start.cur_time_) /
+               1000.0f;
+
+#else 
+    float ms = std::chrono::duration_cast<std::chrono::microseconds>(
+                   stop.cur_time_ - start.cur_time_)
+                   .count() /
+               1000.0f;
+#endif
+    return ms;
+  }
+
+  static float sync_and_duration(CPUEvent start, CPUEvent stop) {
+    return duration(start, stop);
+  }
+
+};
 
 #ifdef TV_CUDA
 
@@ -98,39 +215,9 @@ public:
 };
 #else
 
-class CUDAEvent {
-private:
-  std::chrono::time_point<std::chrono::steady_clock> cur_time_;
-
+class CUDAEvent: public CPUEvent {
 public:
-  std::string name;
-
-  CUDAEvent(std::string name = "") : name(name) {}
-
-  CUDAEvent& record(std::uintptr_t stream = 0) {
-    cur_time_ = std::chrono::steady_clock::now();
-    return *this;
-  }
-
-  CUDAEvent& stream_wait_me(std::uintptr_t stream, int flag = 0) {
-    return *this;
-  }
-
-  void sync() {}
-
-  static float duration(CUDAEvent start, CUDAEvent stop) {
-    float ms = std::chrono::duration_cast<std::chrono::microseconds>(
-                   stop.cur_time_ - start.cur_time_)
-                   .count() /
-               1000.0f;
-    return ms;
-  }
-
-  static float sync_and_duration(CUDAEvent start, CUDAEvent stop) {
-    
-    return duration(start, stop);
-  }
-
+  CUDAEvent(std::string name = "") : CPUEvent(name) {}
 };
 #endif
 

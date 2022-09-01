@@ -43,21 +43,42 @@ class CUDAEvent:
     def __init__(self, name: str = "") -> None:
         ...
 
-    def record(self, stream: int = 0) -> None:
+    def record(self, stream: int = 0) -> "CUDAEvent":
         ...
 
-    def stream_wait_me(self, stream: int, flag: int = 0) -> None:
+    def stream_wait_me(self, stream: int, flag: int = 0) -> "CUDAEvent":
         ...
 
     def sync(self) -> None:
         ...
 
     @staticmethod
-    def duration(start: "CUDAEvent", stop: "CUDAEvent") -> str:
+    def duration(start: "CUDAEvent", stop: "CUDAEvent") -> float:
         ...
 
     @staticmethod
-    def sync_and_duration(start: "CUDAEvent", stop: "CUDAEvent") -> str:
+    def sync_and_duration(start: "CUDAEvent", stop: "CUDAEvent") -> float:
+        ...
+
+class CPUEvent:
+    def __init__(self, name: str = "") -> None:
+        ...
+
+    def record(self, stream: int = 0) -> "CPUEvent":
+        ...
+
+    def stream_wait_me(self, stream: int, flag: int = 0) -> "CPUEvent":
+        ...
+
+    def sync(self) -> None:
+        ...
+
+    @staticmethod
+    def duration(start: "CUDAEvent", stop: "CUDAEvent") -> float:
+        ...
+
+    @staticmethod
+    def sync_and_duration(start: "CUDAEvent", stop: "CUDAEvent") -> float:
         ...
 
 class CUDAKernelTimer:
