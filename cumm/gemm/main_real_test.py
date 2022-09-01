@@ -182,9 +182,9 @@ def _asdv_test_regular_gemm():
     algo_cls = tv.gemm.GemmAlgoDesp
     nvrtc_mode = NVRTCMode.ConstantMemory
     params = main_cu.all_params[0]
-    m = 16000000 
-    n = 16
-    k = 64
+    m = 1600000 
+    n = 256
+    k = 256
     # m = max(params.ts[0], m)
     # n = max(params.ts[1], n)
     # k = max(params.ts[2], k)

@@ -177,10 +177,12 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
         else:
             self.sw_shape = metaseq(4, 8)
             self.subsw_shape = metaseq(4, 8)
+            self.subsw_count = self.sw_shape // self.subsw_shape
             self.tile_shape = self.sw_shape
             self.part_shape = self.subsw_shape
             self.interleave = 1
             self.num_smem_pointers = 1
+            self.warp_bfa_access_shape = metaseq(8, 1)
 
         self.static_stride = base_stride * self.interleave * stage_count[1]
         self.static_stride_vec = self.static_stride // self.element_per_acc
@@ -235,34 +237,45 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
         code = pccm.code()
         shape_before_interleave = self.sw_shape[1] // self.interleave
         assert self.subsw_count[0] == 1 or self.subsw_count[0] == 2
-        code.raw(f"""
-        int vc = ec / {self.element_per_acc};
-        int interleaved_s = s / {self.interleave};
-        int idx_in_interleave_s = s % {self.interleave};
-        // shape_before_interleave = {self.sw_shape[1]} // {self.interleave}
-        // int sw_idx_s = interleaved_s / {self.sw_shape[0]};
-        int sw_idx_c = vc / {shape_before_interleave};
-        int idx_in_sw_c = vc % {shape_before_interleave} + idx_in_interleave_s * {shape_before_interleave};
-        int idx_in_sw_s = interleaved_s % {self.sw_shape[0]};
+        if self.is_spec_32:
+            code.raw(f"""
+                int tc = ec / 32;
+                int ts = s / 4;
+                int c = (ec % 32) / {self.element_per_acc};
+                s = s % 4;
+                return ((c ^ (2 * s)) * {self.element_per_acc} +
+                        s * {self.static_stride} + tc * 32 +
+                        ts * {self.static_stride} * 4 + (ec % 4));
+            """)
+        else:
+            code.raw(f"""
+            int vc = ec / {self.element_per_acc};
+            int interleaved_s = s / {self.interleave};
+            int idx_in_interleave_s = s % {self.interleave};
+            // shape_before_interleave = {self.sw_shape[1]} // {self.interleave}
+            // int sw_idx_s = interleaved_s / {self.sw_shape[0]};
+            int sw_idx_c = vc / {shape_before_interleave};
+            int idx_in_sw_c = vc % {shape_before_interleave} + idx_in_interleave_s * {shape_before_interleave};
+            int idx_in_sw_s = interleaved_s % {self.sw_shape[0]};
 
-        int subsw_idx_s = idx_in_sw_s / {self.subsw_shape[0]};
-        int subsw_idx_c = idx_in_sw_c / {self.subsw_shape[1]};
-        int idx_in_subsw_s = idx_in_sw_s % {self.subsw_shape[0]};
-        int idx_in_subsw_c = idx_in_sw_c % {self.subsw_shape[1]};
-        
-        // if subsw_idx_s == 0, permuted_subsw_idx_c = 0/1 = subsw_idx_c
-        // else permuted_subsw_idx_c = 1/0
-        int permuted_subsw_idx_c = subsw_idx_c;
-        if ({self.subsw_count[0]} > 1){{
-            permuted_subsw_idx_c = subsw_idx_c ^ (subsw_idx_s % 2);
-        }}
-        int premuted_idx_in_subsw_c = idx_in_subsw_c ^ (idx_in_subsw_s % {self.subsw_length});
-        int final_c = sw_idx_c * {self.sw_shape[1]} + permuted_subsw_idx_c * {self.subsw_shape[1]} + premuted_idx_in_subsw_c;
-        // if ec % epa != 0
-        int final_ec = final_c * {self.element_per_acc} + ec % {self.element_per_acc};
-        int final_s = interleaved_s * {self.static_stride};
-        return final_ec + final_s;
-        """)
+            int subsw_idx_s = idx_in_sw_s / {self.subsw_shape[0]};
+            int subsw_idx_c = idx_in_sw_c / {self.subsw_shape[1]};
+            int idx_in_subsw_s = idx_in_sw_s % {self.subsw_shape[0]};
+            int idx_in_subsw_c = idx_in_sw_c % {self.subsw_shape[1]};
+            
+            // if subsw_idx_s == 0, permuted_subsw_idx_c = 0/1 = subsw_idx_c
+            // else permuted_subsw_idx_c = 1/0
+            int permuted_subsw_idx_c = subsw_idx_c;
+            if ({self.subsw_count[0]} > 1){{
+                permuted_subsw_idx_c = subsw_idx_c ^ (subsw_idx_s % 2);
+            }}
+            int premuted_idx_in_subsw_c = idx_in_subsw_c ^ (idx_in_subsw_s % {self.subsw_length});
+            int final_c = sw_idx_c * {self.sw_shape[1]} + permuted_subsw_idx_c * {self.subsw_shape[1]} + premuted_idx_in_subsw_c;
+            // if ec % epa != 0
+            int final_ec = final_c * {self.element_per_acc} + ec % {self.element_per_acc};
+            int final_s = interleaved_s * {self.static_stride};
+            return final_ec + final_s;
+            """)
         code.arg("s,ec", self.index_t)
         return code.ret(self.long_index_t)
 
@@ -380,10 +393,7 @@ class MyTensorOpLayout(pccm.ParameterizedClass):
         x & 0b100 == 0000 1111 0000 1111
         x & 0b11  == 0123 0123 0123 0123
         x + 8 == x ^ 0b1000 when x < 8
-        0000 1111 0000 1111 == (x & 0b111) >> 2 == (x & 0b100) >> 2
-
-        for PermuteM iters, permute_m_pointer_idx may larger than 0, and 
-        interleave must be 1 (TODO actually interleave can > 1).
+        0000 1111 0000 1111 == (x & 0b111) >> 2 == (x & 0b100) >> 2.
         """
         # if permute_m_pointer_idx > 0:
         #     assert self.interleave == 1   
@@ -1118,7 +1128,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             lane_idx = lane_idx % ({self.ldm_count.prod()} * {self.ldm_num_line});
         #endif
         int offset_e = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
-            lane_idx, 0, {pccm.boolean(self.operand_a)});
+            lane_idx, 0, {pccm.boolean(not self.operand_a)});
         byte_offset_ = offset_e * {self.dtype.bitsize()} / 8;
         add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn);
         """)
@@ -1356,6 +1366,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
         self.layout = my_layout
         self.static_stride_vec = my_layout.static_stride // my_layout.element_per_acc
+        self.static_stride = my_layout.static_stride
         self.ldm_line_size = self.layout.element_per_acc
         self.ldm_num_line = arch.ldmatrix.LdMatrix.NumLinePerMatrix
         self.add_param_class("layout", self.layout, "TensorOpLayout")
@@ -1397,7 +1408,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
         self.real_pointer_count = self.pointer_count
         self.minimize_regisiter_optimize = False
-        if self.pointer_count > self.ldm_iters[1]:       # to much pointer,  we need to do something to reduce register cnt
+        if self.pointer_count > self.ldm_iters[1] and not self.is_spec_32:       # to much pointer,  we need to do something to reduce register cnt
             self.pointer_count = min(self.pointer_count, self.ldm_iters[1])
             self.minimize_regisiter_optimize = True
             self.add_member("ref_pointer_", self.pointer + "&")
@@ -1428,7 +1439,8 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         code.arg("warp_idx_k, warp_idx_mn, lane_idx", "int")
         code.ctor_init("wmma_k_index_", "0")
         code.ctor_init("byte_offset_", "0")
-        code.raw(f"lane_idx %= {self.ldm_count.prod() * 8};")
+        if not self.is_spec_32:
+            code.raw(f"lane_idx %= {self.ldm_count.prod() * 8};")
         if self.minimize_regisiter_optimize:
             code.ctor_init("ref_pointer_", "ptr")
             code.ctor_init("lane_id_", "lane_idx")
@@ -1452,9 +1464,9 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
             for (int i = 0; i < {self.pointer_count}; ++i) {{
                 int access_strided = lane_idx % {self.ldm_num_line};
                 int access_contiguous = (lane_idx / {self.ldm_num_line}) +
-                                        (access_strided ^ i) * {self.lds_op_outer};
+                                        (access_strided ^ i) * {self.ldm_line_size};
                 pointer_[i] = reinterpret_cast<{self.const_access_pointer} >(ptr) +
-                                access_contiguous + access_strided * {self.static_stride_vec};
+                                access_contiguous + access_strided * {self.static_stride};
             }}
             add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn);
             """)
@@ -1469,7 +1481,8 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                                         self.mma_inst_delta, self.partk)
         new_obj.wmma_k_index_ = 0
         new_obj.byte_offset_ = 0
-        lane_idx %= self.ldm_count.prod() * 8
+        if not self.is_spec_32:
+            lane_idx %= self.ldm_count.prod() * 8
         if self.minimize_regisiter_optimize:
             new_obj.store_ptr = ptr
             new_obj.lane_id = lane_idx
@@ -1493,7 +1506,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                     new_obj.pointer_[i] = (
                         ptr.change_access_size(self.element_per_acc) +
                         access_contiguous +
-                        access_strided * self.static_stride_vec)
+                        access_strided * self.static_stride)
 
         new_obj.add_tile_offset_python(self.num_warp_gemm_iters * warp_idx_k,
                                        warp_idx_mn, self.minimize_regisiter_optimize)
@@ -1513,26 +1526,17 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
     @pccm.cuda.member_function(device=True, forceinline=True)
     def add_tile_offset(self):
         code = pccm.code()
-        if self.is_spec_32:
-            code.raw(f"""
-            constexpr int kContigEqual = {self.layout.tile_shape[1]} * {self.layout.element_per_acc};
-            // Matrix multiply 1688 pointer_[0] <=> pointer_[4] pointer_[1] <=> pointer_[5]
-            //           pointer_[2] <=> pointer_[6] pointer_[3] <=> pointer_[7]
-
-            """)
-        else:
-            code.raw(f"""
-            constexpr int kContigEqual = {self.layout.warp_bfa_access_shape[0] * 8};
-            """)
-
         code.raw(f"""
+            constexpr int kContigEqual = {self.layout.warp_bfa_access_shape[0] * (16 // self.dtype.itemsize())};
+
         int mn_offset = warp_idx_mn;
         int k_offset = warp_idx_k;
 
         if ({self.warp_tile_shape_km[1]} < kContigEqual || force_update) {{
-          constexpr int kwarp_per_crosswise = {self.layout.warp_bfa_access_shape[0] * 8 // self.warp_tile_shape_km[1]};
+          constexpr int kwarp_per_crosswise = {self.layout.warp_bfa_access_shape[0] * (16 // self.dtype.itemsize()) // self.warp_tile_shape_km[1]};
           int warp_offset = warp_idx_mn & (kwarp_per_crosswise - 1);
           mn_offset = warp_idx_mn ^ warp_offset;            // kwarp_per_crosswise is 2^a
+          warp_offset *= {self.real_pointer_count} / kwarp_per_crosswise;
           if (warp_offset || force_update) {{
         """)
         if self.minimize_regisiter_optimize:
@@ -1549,7 +1553,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
             {self.const_access_pointer} buffer[{self.pointer_count}];
             TV_PRAGMA_UNROLL
             for (int i = 0; i < {self.pointer_count}; ++i) 
-              buffer[i] = pointer_[(i + warp_offset) & (kwarp_per_crosswise - 1)];
+              buffer[i] = pointer_[(i + warp_offset) % {self.pointer_count}];
             
             TV_PRAGMA_UNROLL
             for (int i = 0; i < {self.pointer_count}; ++i) 
@@ -1558,21 +1562,11 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         code.raw(f"""
           }}
         }}
-        """)
-        if self.is_spec_32:
-            code.raw(f"""
-            int offset = (k_offset * {self.inst_shape_km[0]}) *
-                            {self.static_stride_vec}  +
-                        mn_offset * {self.warp_tile_shape_km[1]});
-            """)
-        else:
-            code.raw(f"""
-            int offset = (k_offset * {self.ldm_count[0] * self.ldm_num_line *
-                                       self.static_stride_vec *
-                                       self.layout.element_per_acc // self.layout.interleave} +
-                        mn_offset * {self.warp_tile_shape_km[1]});
-            """)
-        code.raw(f"""
+        
+        int offset = (k_offset * {self.ldm_count[0] * self.ldm_num_line *
+                                    self.static_stride_vec *
+                                    self.layout.element_per_acc // self.layout.interleave} +
+                    mn_offset * {self.warp_tile_shape_km[1]});
         add_pointer_offset(offset);
         """)
         return code.arg("warp_idx_k, warp_idx_mn", "int").arg("force_update", "bool", "false")
@@ -1582,12 +1576,12 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
         k_offset = warp_idx_k
         # two warp handle one swizzle part.
         # for second warp, we need to swap pointers (swizzle part for second warp)
-        if (self.warp_tile_shape_km[1] < self.layout.warp_bfa_access_shape[0] * 8 or force_update):        # warp_shape < crosswise
-            kwarp_per_crosswise = self.layout.warp_bfa_access_shape[0] * 8 // self.warp_tile_shape_km[1]
+        if (self.warp_tile_shape_km[1] < self.layout.warp_bfa_access_shape[0] * (16 // self.dtype.itemsize()) or force_update):        # warp_shape < crosswise
+            kwarp_per_crosswise = self.layout.warp_bfa_access_shape[0] * (16 // self.dtype.itemsize()) // self.warp_tile_shape_km[1]
             warp_offset = warp_idx_mn % kwarp_per_crosswise
             mn_offset = warp_idx_mn - warp_offset
 
-            pointer_offset = warp_offset#  * (self.real_pointer_count // kwarp_per_crosswise)  NOTE: in c is this, it might be wrong but havn't occur
+            pointer_offset = warp_offset * (self.real_pointer_count // kwarp_per_crosswise) #  NOTE: fix once
             if self.minimize_regisiter_optimize and (pointer_offset or force_update):
                 layout = self.layout.python_ctor(self.layout.static_stride)
                 for i in range(self.pointer_count):
@@ -1701,7 +1695,7 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
                                 pointer_[access_idx_contiguous % {self.pointer_count}] +
                                 {self.layout.tile_shape[1]} * {self.layout.element_per_acc} *
                                     (access_idx_contiguous / {self.pointer_count}) +
-                                access_idx_strided * {self.static_stride_vec};
+                                access_idx_strided * {self.static_stride};
 
                             char const *source_byte_ptr =
                                 reinterpret_cast<char const *>(source_ptr) + byte_offset +
@@ -1761,9 +1755,9 @@ class WarpIteratorCongruous(bases.GemmWarpIterator):
 
                             source_ptr = (
                                 pointer_part + self.layout.sw_shape[1] *
-                                self.layout.element_per_acc * access_contig //
-                                self.pointer_count +
-                                access_stride * self.static_stride_vec)
+                                self.layout.element_per_acc * (access_contig //
+                                self.pointer_count) +
+                                access_stride * self.static_stride)
                             source_byte_ptr = source_ptr.change_access_byte_size(
                                 1) + byte_offset + self.byte_offset_
                             fetch_ptr[

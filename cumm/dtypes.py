@@ -101,6 +101,9 @@ bfloat16 = DType("tv::bfloat16_t", 2 * 8, "bf16", 12, RegDType.BF16,
                  "cutlass::bfloat16_t")
 tf32 = DType("tv::tfloat32_t", 4 * 8, "tf32", 13, RegDType.TF32,
              "cutlass::tfloat32_t")  # float32 with last 13 bit removed.
+# special dtypes for tensor op only.
+int4 = DType("", 1 * 4, "s4", -1, RegDType.S8)
+uint4 = DType("", 1 * 4, "u4", -1, RegDType.S8)
 
 ALL_DTYPES = (float16, float32, float64, int8, int16, int32, int64, uint8,
               uint16, uint32, uint64, bfloat16, tf32)
@@ -119,6 +122,7 @@ DTYPE_TO_NPDTYPE = {
     uint16: np.dtype(np.uint16),
     uint32: np.dtype(np.uint32),
     uint64: np.dtype(np.uint64),
+    tf32: np.dtype(np.float32),
 }  # type: Dict[DType, np.dtype]
 
 TVDTYPE_TO_NPDTYPE = {
@@ -133,6 +137,7 @@ TVDTYPE_TO_NPDTYPE = {
     uint16.tv_dtype: np.dtype(np.uint16),
     uint32.tv_dtype: np.dtype(np.uint32),
     uint64.tv_dtype: np.dtype(np.uint64),
+    tf32.tv_dtype: np.dtype(np.float32)
 }  # type: Dict[int, np.dtype]
 
 TVDTYPE_TO_DTYPE = {x.tv_dtype: x for x in ALL_DTYPES}

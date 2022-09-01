@@ -690,10 +690,10 @@ def _asdv_test_turing_python(coord_input: bool = False):
             m = 256 + 32
             n = 256 + 40
             k = 32
-
-            m = 0
-            n = 0
-            k = 0
+            m, n, k = 0, 0, 0
+            # m = 80
+            # n = 80
+            # k = 160
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
@@ -810,6 +810,17 @@ def _asdv_test_turing_python(coord_input: bool = False):
             # vis_in_relay(list(fig_per_group.values()))
 
 
+def _dummy_get(b, lid):
+    ret = []
+    lid %= 16
+    for i in range(2):
+        strided = lid % 4 + i * 8
+        contiguous = lid // 4
+        ret.append(b[(strided, strided + 4, strided, strided + 4) * 2, 
+                (contiguous, contiguous, contiguous + 8, contiguous + 8, contiguous + 16, contiguous + 16, contiguous + 24, contiguous + 24)])
+    
+    return ret
+
 if __name__ == "__main__":
     # fig = vis.figure.PointCloudFigure(0, np.zeros((1, 3)))
     # with fig.layer("WTF") as layer:
@@ -823,3 +834,6 @@ if __name__ == "__main__":
     # _asdv_test_simt_python(True)
     _asdv_test_turing_python(True)
     # _asdv_test_volta_python(True)
+
+
+

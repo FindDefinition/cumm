@@ -531,7 +531,7 @@ def _asdv_test_regular_gemm():
             [ker],
             # cudadevrt_path="/usr/local/cuda/lib64/libcudadevrt.a",
             verbose=False,
-            verbose_path= "out.cu",
+            verbose_path= "OutCPP",
             custom_names=custom_names)
         # print(mod.get_ptx())
 
@@ -540,12 +540,7 @@ def _asdv_test_regular_gemm():
         print("RTC COMPILE TIME", time.time() - t)
         # print(mod.kernels)
         # breakpoint()
-        m = 256 + 32
-        n = 256 + 40
-        k = 136
-        m *= 2
-        n *= 2
-        k *= 2
+        m, n, k = 0, 0, 0
         m = 160
         n = 160
         k = 160
