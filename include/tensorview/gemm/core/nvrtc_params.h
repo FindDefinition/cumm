@@ -14,7 +14,7 @@
 #pragma once
 
 #include <tensorview/core/all.h>
-
+#include "constants.h"
 #define CUMM_MAXIMUM_NVRTC_CONV_NDIM 3
 
 namespace tv {
@@ -26,8 +26,11 @@ public:
   const void *ptr_A, *ptr_B, *ptr_D;
   void *ptr_C;
   int64_t stride_A, stride_B, stride_C, stride_D;
-  const int *indiceA, *indiceBorC;
+  const int *indiceA, *indiceBorC, *indiceD;
   float alpha, beta;
+  float act_alpha;
+  float act_beta;
+  int act_type;
   int split_k_slices;
   void *workspace;
 };
@@ -37,6 +40,9 @@ public:
   const void *ptr_A, *ptr_B, *ptr_D;
   void *ptr_C;
   float alpha, beta;
+  float act_alpha;
+  float act_beta;
+  int act_type;
   int split_k_slices;
   void *workspace;
 
@@ -53,6 +59,7 @@ public:
   int kernel_volume;
   int mode;
   int groups;
+  bool d_is_bias;
 };
 
 struct ConvNVRTCParams {
@@ -60,6 +67,9 @@ public:
   const void *ptr_A, *ptr_B, *ptr_D;
   void *ptr_C;
   float alpha, beta;
+  float act_alpha;
+  float act_beta;
+  int act_type;
   int split_k_slices;
   void *workspace;
 
@@ -69,6 +79,7 @@ public:
   int kernel_volume;
   int mode;
   int groups;
+  bool d_is_bias;
 };
 
 } // namespace gemm

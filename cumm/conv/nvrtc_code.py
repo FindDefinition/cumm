@@ -33,6 +33,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     auto& input = params.input;
     auto& weight = params.weight;
     auto& output = params.output;
+    auto& bias = params.bias;
 
     auto& indices = params.indices;
     auto& mask = params.mask;
@@ -72,10 +73,15 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     kernel_params.ptr_A = a_ten.const_raw_data();
     kernel_params.ptr_B = b_ten.const_raw_data();
     kernel_params.ptr_C = c_ten.raw_data();
-    kernel_params.ptr_D = c_ten.raw_data();
+    kernel_params.ptr_D = bias.empty() ? c_ten.raw_data() : bias.raw_data();
     kernel_params.alpha = params.alpha;
     kernel_params.beta = params.beta;
     kernel_params.ndim = ndim;
+    kernel_params.d_is_bias = !bias.empty();
+    kernel_params.act_alpha = params.act_alpha;
+    kernel_params.act_beta = params.act_beta;
+    kernel_params.act_type = static_cast<int>(params.act_type);
+
 
     sp_kernel_params.ptr_A = kernel_params.ptr_A;
     sp_kernel_params.ptr_B = kernel_params.ptr_B;
@@ -84,6 +90,11 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     sp_kernel_params.alpha = kernel_params.alpha;
     sp_kernel_params.beta = kernel_params.beta;
     sp_kernel_params.ndim = kernel_params.ndim;
+    sp_kernel_params.d_is_bias = !bias.empty();
+    sp_kernel_params.act_alpha = kernel_params.act_alpha;
+    sp_kernel_params.act_beta = kernel_params.act_beta;
+    sp_kernel_params.act_type = kernel_params.act_type;
+
     constexpr int int_max = std::numeric_limits<int32_t>::max();
 
     if (algo_desp.mask_sparse){{
@@ -115,7 +126,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
         }}
         mnk = tv::gemm::implicit_gemm_mnk(tv::gemm::ConvOpType(algo_desp.op_type), N, C, K, kernel_volume, -1, -1, true);
     }}else{{
-        TV_ASSERT_RT_ERR(algo_desp.ndim <= {CUMM_MAXIMUM_NVRTC_CONV_NDIM}, "ndim too large");
+        TV_ASSERT_RT_ERR(algo_desp.ndim <= {CUMM_MAXIMUM_NVRTC_CONV_NDIM}, "ndim too large for nvrtc");
         tv::array<int, {CUMM_MAXIMUM_NVRTC_CONV_NDIM}> ksize, padding_arr, stride_arr, dilation_arr, input_dims, output_dims;
         TV_ASSERT_RT_ERR(ndim == padding.size() && ndim == stride.size() && ndim == dilation.size(), "error");
         for (int i = dim_start; i < dim_start + ndim; ++i){{
@@ -214,8 +225,6 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
         if (evtimer.enable()){{
             algo_name = algo_desp.__repr__();
         }}
-
-
         auto kernel = nvrtc_params.cumodule->kernel(nvrtc_params.kernel_name);
         auto& driver = nvrtc_params.cumodule->get_driver_wrapper();
         cudaError_t result;
@@ -294,7 +303,6 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
                 TV_ASSERT_RT_ERR(temp_data.nbytes() >= nvrtc_params.param_size, "your params storage too small");
             }}
             void* temp_data_ptr = temp_data.raw_data();
-
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
                 std::vector<void*> args{{kernel_params_ptr, &temp_data_ptr}};
@@ -309,7 +317,6 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
                 TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
                     nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, nullptr, 0));
             }}
-
         }}else{{
             TV_THROW_RT_ERR("not implemented");
         }}

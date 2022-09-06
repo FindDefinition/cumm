@@ -673,7 +673,6 @@ def _asdv_test_turing_python(coord_input: bool = False):
     with cudasim.enter_debug_context(True, 3):
         main_cu = GemmMainUnitTest()
         print(len(main_cu.all_params))
-
         for params in main_cu.all_params[:1]:
             ker = gen_gemm_kernels(params)
             print(ker.get_algo_name())
@@ -686,6 +685,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
             m = 32
             n = 32
             k = 32
+            print("???")
             m = max(params.ts[0], m)
             n = max(params.ts[1], n)
             k = max(params.ts[2], k)
@@ -789,8 +789,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
             # print(c_tv.reshape(-1)[:10], c.reshape(-1)[:10])
             # print(c_tv.reshape(-1)[-10:] -  c.reshape(-1)[-10:])
 
-            print(params.get_algo_name(), a.mean(), b.mean(), c.mean(),
-                  np.linalg.norm(c_tv - c), "Time=", duration)
+            print(np.linalg.norm(c_tv - c), "Time=", duration)
 
             # vis_in_relay(list(fig_per_group.values()))
 
@@ -805,6 +804,6 @@ if __name__ == "__main__":
 
     # vis_in_relay([fig])
     # unittest_python()
-    _asdv_test_simt_python(True)
-    # _asdv_test_turing_python(True)
+    # _asdv_test_simt_python(True)
+    _asdv_test_turing_python(True)
     # _asdv_test_volta_python(True)

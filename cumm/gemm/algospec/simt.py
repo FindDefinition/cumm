@@ -402,7 +402,7 @@ class OutputSimt(bases.Output):
 
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"
-        out_unary_op_fp = gemmmath.UnaryIdentity(dtype_comp, dtype_c,
+        out_unary_op_fp = gemmmath.UnaryActivation(dtype_comp, dtype_c,
                                                  output_op_count)
         out_unary_op_i8 = gemmmath.Clamp(dtype_comp, dtype_c, output_op_count)
 

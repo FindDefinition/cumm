@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pccm
@@ -24,6 +24,306 @@ from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import constants
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 
+class MmaLayoutDespBase:
+    def __init__(self, shape: MetaArray[int], dtype_ab: dtypes.DType, dtype_c: dtypes.DType,
+                 trans_a: bool,
+                 trans_b: bool,
+                 trans_c: bool,
+                 min_sm: Tuple[int, int],
+                 num_threads: int = 32,
+                 satfinite: bool = False) -> None:
+        self.shape = shape 
+
+        self.dtype_ab = dtype_ab
+        self.dtype_c = dtype_c
+        self.trans_a = trans_a
+        self.trans_b = trans_b
+        self.trans_c = trans_c
+        self.min_sm = min_sm
+        self.num_threads = num_threads
+        self.satfinite = satfinite
+        self.lane_ids = np.arange(num_threads, dtype=np.int32)
+
+        self.mn = shape[0] * shape[1]
+        self.km = shape[2] * shape[0]
+        self.kn = shape[2] * shape[1]
+        self.shape_a = [shape[0], shape[2]]
+        # if trans_a:
+        #     self.shape_a = self.shape_a[::-1]
+        self.shape_b = [shape[2], shape[1]]
+        # if trans_b:
+        #     self.shape_b = self.shape_b[::-1]
+        self.shape_c = [shape[0], shape[1]]
+        # if trans_c:
+        #     self.shape_c = self.shape_c[::-1]
+
+        self.fragment_c_count = self.mn // self.num_threads
+        self.fragment_a_count = self.km // self.num_threads
+        self.fragment_b_count = self.kn // self.num_threads
+
+        self._map_a = np.zeros((self.fragment_a_count, self.num_threads, 2), dtype=np.int32)
+        self._map_b = np.zeros((self.fragment_b_count, self.num_threads, 2), dtype=np.int32)
+        self._map_c = np.zeros((self.fragment_c_count, self.num_threads, 2), dtype=np.int32)
+        self.gid = self.lane_ids >> 2
+        self.tid_in_group = self.lane_ids % 4
+
+    def __repr__(self) -> str:
+        mma_stmt = f"mma.sync.aligned.m{self.shape[0]}n{self.shape[1]}k{self.shape[2]}"
+        layout_a = "col" if self.trans_a else "row"
+        layout_b = "col" if self.trans_b else "row"
+        mma_stmt += f".{layout_a}.{layout_b}"
+        if self.satfinite:
+            mma_stmt += ".satfinite"
+        mma_stmt += f".{self.dtype_c.shortcut()}.{self.dtype_ab.shortcut()}.{self.dtype_ab.shortcut()}.{self.dtype_c.shortcut()}"
+
+        return mma_stmt
+
+    def short_repr(self) -> str:
+        mma_stmt = f"m{self.shape[0]}n{self.shape[1]}k{self.shape[2]}"
+        layout_a = "col" if self.trans_a else "row"
+        layout_b = "col" if self.trans_b else "row"
+        mma_stmt += f".{layout_a}.{layout_b}"
+        if self.satfinite:
+            mma_stmt += ".satfinite"
+        mma_stmt += f".{self.dtype_c.shortcut()}.{self.dtype_ab.shortcut()}.{self.dtype_ab.shortcut()}.{self.dtype_c.shortcut()}"
+
+        return mma_stmt
+
+
+    def a_map(self):
+        return self._map_a
+
+    def b_map(self):
+        return self._map_b
+
+    def c_map(self):
+        return self._map_c
+
+    def a_sim_dtype(self):
+        return self.dtype_ab.npdtype()
+
+    def b_sim_dtype(self):
+        return self.dtype_ab.npdtype()
+
+    def c_sim_dtype(self):
+        return self.dtype_c.npdtype()
+
+    def get_empty_a(self):
+        return np.zeros((self.shape[0], self.shape[2]), dtype=self.a_sim_dtype())
+
+    def get_empty_b(self):
+        return np.zeros((self.shape[2], self.shape[1]), dtype=self.b_sim_dtype())
+    
+    def get_empty_c(self):
+        return np.zeros((self.shape[0], self.shape[1]), dtype=self.c_sim_dtype())
+
+
+class MmaM8N8KX(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-884-f64
+    def __init__(self, k: int, dtype_ab: dtypes.DType, dtype_c: dtypes.DType, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(8, 8, k), dtype_ab, dtype_c, False, True, False, min_sm)
+        self._map_a[:, :, 0] = self.gid
+        self._map_b[:, :, 1] = self.gid
+        for i in range(k // 4):
+            self._map_a[i, :, 1] = self.tid_in_group * (k // 4) + i
+            self._map_b[i, :, 0] = self.tid_in_group * (k // 4) + i
+        self._map_c[:, :, 0] = self.gid 
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + i
+
+
+class MmaM16N8K4(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-1684
+    def __init__(self, dtype_ab: dtypes.DType, dtype_c: dtypes.DType) -> None:
+        super().__init__(seq(16, 8, 4), dtype_ab, dtype_c, False, True, False, (8, 0))
+        
+        self._map_a[0, :, 0] = self.gid
+        self._map_a[1, :, 0] = self.gid + 8
+        self._map_a[:, :, 1] = self.tid_in_group
+
+        self._map_b[:, :, 0] = self.tid_in_group
+        self._map_b[:, :, 1] = self.gid
+
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+
+    def a_sim_dtype(self):
+        return np.float32
+
+    def b_sim_dtype(self):
+        return np.float32
+
+class MmaM16N8K8F16(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-1688
+    def __init__(self, dtype_ab: dtypes.DType, dtype_c: dtypes.DType, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(16, 8, 8), dtype_ab, dtype_c, False, True, False, min_sm)
+        for i in range(self.fragment_a_count):
+            self._map_a[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_a[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+        for i in range(self.fragment_b_count):
+            self._map_b[i, :, 0] = self.tid_in_group * 2 + i
+        self._map_b[:, :, 1] = self.gid
+
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+    def a_sim_dtype(self):
+        return np.float16
+
+    def b_sim_dtype(self):
+        return np.float16
+
+class MmaM16N8K8F32(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-1688
+    def __init__(self, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(16, 8, 8), dtypes.tf32, dtypes.float32, False, True, False, min_sm)
+        for i in range(self.fragment_a_count):
+            self._map_a[i, :, 0] = self.gid + 8 * (i & 0x1)
+            self._map_a[i, :, 1] = self.tid_in_group + 4 * (i >> 1)
+        for i in range(self.fragment_b_count):
+            self._map_b[i, :, 0] = self.tid_in_group + 4 * i
+        self._map_b[:, :, 1] = self.gid
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+            
+    def a_sim_dtype(self):
+        return np.float32
+
+    def b_sim_dtype(self):
+        return np.float32
+
+class MmaM16N8K16F16(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-1688
+    def __init__(self, dtype_ab: dtypes.DType, dtype_c: dtypes.DType, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(16, 8, 16), dtype_ab, dtype_c, False, True, False, min_sm)
+        for i in range(self.fragment_a_count):
+            self._map_a[i, :, 0] = self.gid + 8 * ((i >> 1) & 0x1)
+            self._map_a[i, :, 1] = self.tid_in_group * 2 + (i & 0x1) + 8 * (i >> 2)
+        
+        for i in range(self.fragment_b_count):
+            self._map_b[i, :, 0] = self.tid_in_group * 2 + (i & 0x1) + 8 * (i >> 1)
+        self._map_b[:, :, 1] = self.gid
+
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+    def a_sim_dtype(self):
+        return np.float16
+
+    def b_sim_dtype(self):
+        return np.float16
+
+class MmaM16N8K16I8(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-i8
+    def __init__(self, dtype_ab: dtypes.DType, dtype_c: dtypes.DType, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(16, 8, 16), dtype_ab, dtype_c, False, True, False, min_sm)
+        for i in range(self.fragment_a_count):
+            self._map_a[i, :, 0] = self.gid + 8 * (i >> 2)
+            self._map_a[i, :, 1] = self.tid_in_group * 4 + (i & 0x3)
+        
+        for i in range(self.fragment_b_count):
+            self._map_b[i, :, 0] = self.tid_in_group * 4 + i
+        self._map_b[:, :, 1] = self.gid
+
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+
+class MmaM16N8K32I4(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-i8
+    def __init__(self, dtype_ab: dtypes.DType, dtype_c: dtypes.DType, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(16, 8, 32), dtype_ab, dtype_c, False, True, False, min_sm)
+        for i in range(self.fragment_a_count):
+            self._map_a[i, :, 0] = self.gid + 8 * (i >> 3)
+            self._map_a[i, :, 1] = self.tid_in_group * 8 + (i & 0x7)
+        
+        for i in range(self.fragment_b_count):
+            self._map_b[i, :, 0] = self.tid_in_group * 8 + (i & 0x7)
+        self._map_b[:, :, 1] = self.gid
+
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+
+class MmaM16N8K32I8(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-i8
+    def __init__(self, dtype_ab: dtypes.DType, dtype_c: dtypes.DType, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(16, 8, 32), dtype_ab, dtype_c, False, True, False, min_sm)
+        for i in range(self.fragment_a_count):
+            self._map_a[i, :, 0] = self.gid + 8 * ((i >> 2) & 0x1)
+            self._map_a[i, :, 1] = self.tid_in_group * 4 + (i & 0x3) + 16 * (i >> 3)
+        
+        for i in range(self.fragment_b_count):
+            self._map_b[i, :, 0] = self.tid_in_group * 4 + (i & 0x3) + 16 * (i >> 2)
+        self._map_b[:, :, 1] = self.gid
+
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+
+class MmaM16N8K64I4(MmaLayoutDespBase):
+    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16864
+    def __init__(self, dtype_ab: dtypes.DType, dtype_c: dtypes.DType, min_sm: Tuple[int, int]) -> None:
+        super().__init__(seq(16, 8, 64), dtype_ab, dtype_c, False, True, False, min_sm)
+        for i in range(self.fragment_a_count):
+            self._map_a[i, :, 0] = self.gid + 8 * ((i >> 3) & 0x1)
+            self._map_a[i, :, 1] = self.tid_in_group * 8 + (i & 0x7) + 32 * (i >> 4)
+        
+        for i in range(self.fragment_b_count):
+            self._map_b[i, :, 0] = self.tid_in_group * 8 + (i & 0x7) + 32 * (i >> 3)
+        self._map_b[:, :, 1] = self.gid
+
+        for i in range(self.fragment_c_count):
+            self._map_c[i, :, 0] = self.gid + 8 * (i >> 1)
+            self._map_c[i, :, 1] = self.tid_in_group * 2 + (i & 0x1)
+
+ALL_TENSOR_OP_MAP: Dict[Tuple[Tuple[int, int, int], dtypes.DType, dtypes.DType], MmaLayoutDespBase] = {
+    ((8, 8, 4), dtypes.float64, dtypes.float64): MmaM8N8KX(4, dtypes.float64, dtypes.float64, (8, 0)),
+    ((8, 8, 16), dtypes.int8, dtypes.int32): MmaM8N8KX(16, dtypes.int8, dtypes.int32, (7, 5)),
+    ((8, 8, 16), dtypes.uint8, dtypes.int32): MmaM8N8KX(16, dtypes.uint8, dtypes.int32, (7, 5)),
+    ((8, 8, 32), dtypes.int8, dtypes.int32): MmaM8N8KX(32, dtypes.int8, dtypes.int32, (7, 5)),
+    ((8, 8, 32), dtypes.uint8, dtypes.int32): MmaM8N8KX(32, dtypes.uint8, dtypes.int32, (7, 5)),
+
+    # ((16, 8, 4), dtypes.float32, dtypes.float32): MmaM16N8K4(dtypes.float32, dtypes.float32),
+    ((16, 8, 4), dtypes.tf32, dtypes.float32): MmaM16N8K4(dtypes.tf32, dtypes.float32),
+
+    ((16, 8, 8), dtypes.float16, dtypes.float16): MmaM16N8K8F16(dtypes.float16, dtypes.float16, (7, 5)),
+    ((16, 8, 8), dtypes.float16, dtypes.float32): MmaM16N8K8F16(dtypes.float16, dtypes.float32, (7, 5)),
+
+    ((16, 8, 8), dtypes.bfloat16, dtypes.float16): MmaM16N8K8F16(dtypes.bfloat16, dtypes.float16, (8, 0)),
+    ((16, 8, 8), dtypes.bfloat16, dtypes.float32): MmaM16N8K8F16(dtypes.bfloat16, dtypes.float32, (8, 0)),
+
+    # ((16, 8, 8), dtypes.float32, dtypes.float32): MmaM16N8K8F32((8, 0)),
+    ((16, 8, 8), dtypes.tf32, dtypes.float32): MmaM16N8K8F32((8, 0)),
+
+    ((16, 8, 16), dtypes.float16, dtypes.float16): MmaM16N8K16F16(dtypes.float16, dtypes.float16, (7, 5)),
+    ((16, 8, 16), dtypes.float16, dtypes.float32): MmaM16N8K16F16(dtypes.float16, dtypes.float32, (7, 5)),
+
+    ((16, 8, 16), dtypes.bfloat16, dtypes.float16): MmaM16N8K16F16(dtypes.bfloat16, dtypes.float16, (8, 0)),
+    ((16, 8, 16), dtypes.bfloat16, dtypes.float32): MmaM16N8K16F16(dtypes.bfloat16, dtypes.float32, (8, 0)),
+    
+    ((16, 8, 16), dtypes.int8, dtypes.int32): MmaM16N8K16I8(dtypes.int8, dtypes.int32, (7, 5)),
+    ((16, 8, 16), dtypes.uint8, dtypes.int32): MmaM16N8K16I8(dtypes.uint8, dtypes.int32, (7, 5)),
+
+    ((16, 8, 32), dtypes.int4, dtypes.int32): MmaM16N8K32I4(dtypes.int4, dtypes.int32, (7, 5)),
+    ((16, 8, 32), dtypes.uint4, dtypes.int32): MmaM16N8K32I4(dtypes.uint4, dtypes.int32, (7, 5)),
+    
+    ((16, 8, 64), dtypes.int4, dtypes.int32): MmaM16N8K64I4(dtypes.int4, dtypes.int32, (7, 5)),
+    ((16, 8, 64), dtypes.uint4, dtypes.int32): MmaM16N8K64I4(dtypes.uint4, dtypes.int32, (7, 5)),
+}
+
+def get_tensorop_desp(shape: MetaArray[int], dtype_ab: dtypes.DType, dtype_c: dtypes.DType):
+    shape_tuple = (shape[0], shape[1], shape[2])
+    return ALL_TENSOR_OP_MAP[(shape_tuple, dtype_ab, dtype_c)]
 
 class MmaSync(pccm.ParameterizedClass):
     """
@@ -82,6 +382,10 @@ class MmaSync(pccm.ParameterizedClass):
         self.fragment_a_t = array_type(str(dtype_a), self.fragment_a_count)
         self.fragment_b_t = array_type(str(dtype_b), self.fragment_b_count)
         self.fragment_c_t = array_type(str(dtype_c), self.fragment_c_count)
+        if num_threads == 8:
+            self.tensorop_desp = None # no volta support
+        else:
+            self.tensorop_desp = get_tensorop_desp(shape, dtype_a, dtype_c)
 
     def python_ctor(self):
         return self
@@ -335,304 +639,31 @@ class MmaSync(pccm.ParameterizedClass):
                                 row = lane_id_mma % 4 + 4
                                 col = i
                                 Ds[lane_id_mma][i] = D_qp_res[row, col]
-            elif self.shape == (16, 8, 8):
-                if dab == (dtypes.float16, dtypes.float16):
-                    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-1688
-                    mma_A = np.zeros((16, 8), dtype=np.float16)
-                    mma_B = np.zeros((8, 8), dtype=np.float16)
-                    mma_C = np.zeros((16, 8), dtype=self.dtype_c.npdtype())
-
-                    for aid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if aid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (aid & 0x1)
-                            mma_A[row, col] = As[lane_id_mma][aid]
-                            mma_C[row, col] = Cs[lane_id_mma][aid]
-
-                    for bid in range(2):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            row = tid_in_group * 2 + bid
-                            col = group_id
-                            mma_B[row, col] = Bs[lane_id_mma][bid]
-
-                    mma_D = mma_A @ mma_B + mma_C
-                    for aid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if aid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (aid & 0x1)
-                            Ds[lane_id_mma][aid] = mma_D[row, col]
-                elif dab == (dtypes.tf32, dtypes.tf32):
-                    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-1688
-                    mma_A = np.zeros((16, 8), dtype=np.float32)
-                    mma_B = np.zeros((8, 8), dtype=np.float32)
-                    mma_C = np.zeros((16, 8), dtype=np.float32)
-
-                    for aid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if aid < 2:
-                                row = group_id
-                                col = tid_in_group
-                            else:
-                                row = group_id + 8
-                                col = tid_in_group + 4
-                            mma_A[row, col] = As[lane_id_mma][aid]
-
-                    for bid in range(2):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if bid == 0:
-                                row = tid_in_group
-                            else:
-                                row = tid_in_group + 4
-                            col = group_id
-                            mma_B[row, col] = Bs[lane_id_mma][bid]
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            mma_C[row, col] = Cs[lane_id_mma][cid]
-
-                    mma_D = mma_A @ mma_B + mma_C
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            Ds[lane_id_mma][cid] = mma_D[row, col]
-
-                else:
-                    raise NotImplementedError
-            elif self.shape == (16, 8, 16):
-                if dab == (dtypes.float16, dtypes.float16):
-                    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-f16
-                    mma_A = np.zeros((16, 16), dtype=np.float16)
-                    mma_B = np.zeros((16, 8), dtype=np.float16)
-                    mma_C = np.zeros((16, 8), dtype=self.dtype_c.npdtype())
-
-                    for aid in range(8):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if aid < 2 or (4 <= aid and aid < 6):
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            if aid < 4:
-                                col = (tid_in_group * 2) + (aid & 0x1)
-
-                            else:
-                                col = (tid_in_group * 2) + (aid & 0x1) + 8
-                            mma_A[row, col] = As[lane_id_mma][aid]
-
-                    for bid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if bid < 2:
-                                row = (tid_in_group * 2) + (bid & 0x1)
-                            else:
-                                row = (tid_in_group * 2) + (bid & 0x1) + 8
-                            col = group_id
-                            mma_B[row, col] = Bs[lane_id_mma][bid]
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            mma_C[row, col] = Cs[lane_id_mma][cid]
-
-                    mma_D = mma_A @ mma_B + mma_C
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            Ds[lane_id_mma][cid] = mma_D[row, col]
-                elif dab == (dtypes.int8,
-                             dtypes.int8) or dab == (dtypes.uint8,
-                                                     dtypes.uint8):
-                    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16816-i8
-                    mma_A = np.zeros((16, 16), dtype=self.dtype_a.npdtype())
-                    mma_B = np.zeros((16, 8), dtype=self.dtype_b.npdtype())
-                    mma_C = np.zeros((16, 8), dtype=self.dtype_c.npdtype())
-
-                    for aid in range(8):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if aid < 4:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = (tid_in_group * 4) + (aid & 0x3)
-                            mma_A[row, col] = As[lane_id_mma][aid]
-
-                    for bid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            row = (tid_in_group * 4) + bid
-                            col = group_id
-                            mma_B[row, col] = Bs[lane_id_mma][bid]
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            mma_C[row, col] = Cs[lane_id_mma][cid]
-
-                    mma_D = mma_A @ mma_B + mma_C
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            Ds[lane_id_mma][cid] = mma_D[row, col]
-                else:
-                    raise NotImplementedError
-            elif self.shape == (16, 8, 32):
-                if dab == (dtypes.int8, dtypes.int8) or dab == (dtypes.uint8,
-                                                                dtypes.uint8):
-                    # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-16832
-                    mma_A = np.zeros((16, 32), dtype=self.dtype_a.npdtype())
-                    mma_B = np.zeros((32, 8), dtype=self.dtype_b.npdtype())
-                    mma_C = np.zeros((16, 8), dtype=self.dtype_c.npdtype())
-                    for aid in range(16):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if aid < 4 or 8 <= aid < 12:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            if aid < 8:
-                                col = (tid_in_group * 4) + (aid & 0x3)
-                            else:
-                                col = (tid_in_group * 4) + (aid & 0x3) + 16
-                            mma_A[row, col] = As[lane_id_mma][aid]
-
-                    for bid in range(8):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if bid < 4:
-                                row = (tid_in_group * 4) + (bid & 0x3)
-                            else:
-                                row = (tid_in_group * 4) + (bid & 0x3) + 16
-                            col = group_id
-                            mma_B[row, col] = Bs[lane_id_mma][bid]
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            mma_C[row, col] = Cs[lane_id_mma][cid]
-
-                    mma_D: np.ndarray = mma_A @ mma_B + mma_C
-
-                    for cid in range(4):
-                        for lane_id_mma in range(32):
-                            group_id = lane_id_mma >> 2
-                            tid_in_group = lane_id_mma % 4
-                            if cid < 2:
-                                row = group_id
-                            else:
-                                row = group_id + 8
-                            col = tid_in_group * 2 + (cid & 0x1)
-                            Ds[lane_id_mma][cid] = mma_D[row, col]
-                else:
-                    raise NotImplementedError
-
-            elif self.shape == (8, 8, 16):
-                # s8/u8 -> s32, RCR
-                # https://docs.nvidia.com/cuda/parallel-thread-execution/index.html#warp-level-matrix-fragment-mma-8816
-                mma_A = np.zeros((8, 16), dtype=self.dtype_a.npdtype())
-                mma_B = np.zeros((16, 8), dtype=self.dtype_b.npdtype())
-                mma_C = np.zeros((8, 8), dtype=self.dtype_c.npdtype())
-                for aid in range(4):
-                    for lane_id_mma in range(32):
-                        group_id = lane_id_mma >> 2
-                        tid_in_group = lane_id_mma % 4
-                        row = group_id
-                        col = (tid_in_group * 4) + aid
-                        mma_A[row, col] = As[lane_id_mma][aid]
-                for bid in range(4):
-                    for lane_id_mma in range(32):
-                        group_id = lane_id_mma >> 2
-                        tid_in_group = lane_id_mma % 4
-                        col = group_id
-                        row = (tid_in_group * 4) + bid
-                        mma_B[row, col] = Bs[lane_id_mma][bid]
-                for cid in range(2):
-                    for lane_id_mma in range(32):
-                        group_id = lane_id_mma >> 2
-                        tid_in_group = lane_id_mma % 4
-                        row = group_id
-                        col = (tid_in_group * 2) + cid
-                        mma_C[row, col] = Cs[lane_id_mma][cid]
-                npdtype_c = self.dtype_c.npdtype()
-                mma_D = (mma_A.astype(npdtype_c) @ mma_B.astype(npdtype_c) +
-                         mma_C)
-                for cid in range(2):
-                    for lane_id_mma in range(32):
-                        group_id = lane_id_mma >> 2
-                        tid_in_group = lane_id_mma % 4
-                        row = group_id
-                        col = (tid_in_group * 2) + cid
-                        Ds[lane_id_mma][cid] = mma_D[row, col]
             else:
-                raise NotImplementedError
+                assert self.tensorop_desp is not None 
+                a_map = self.tensorop_desp.a_map()
+                b_map = self.tensorop_desp.b_map()
+                c_map = self.tensorop_desp.c_map()
+
+                mma_A = self.tensorop_desp.get_empty_a()
+                mma_B = self.tensorop_desp.get_empty_b()
+                mma_C = self.tensorop_desp.get_empty_c()
+                As_mat = np.stack(As)
+                Bs_mat = np.stack(Bs)
+                Cs_mat = np.stack(Cs)
+
+                for i in range(self.tensorop_desp.fragment_a_count):
+                    mma_A[a_map[i, :, 0], a_map[i, :, 1]] = As_mat[:, i]
+                for i in range(self.tensorop_desp.fragment_b_count):
+                    mma_B[b_map[i, :, 0], b_map[i, :, 1]] = Bs_mat[:, i]
+                for i in range(self.tensorop_desp.fragment_c_count):
+                    mma_C[c_map[i, :, 0], c_map[i, :, 1]] = Cs_mat[:, i]
+                mma_D = mma_A @ mma_B + mma_C
+                for i in range(self.tensorop_desp.fragment_c_count):
+                    for j in range(self.tensorop_desp.num_threads):
+                        Ds[j][i] = mma_D[c_map[i, j, 0], c_map[i, j, 1]]
         # wait for compute finish
         await resource.wait()
         return
+
+

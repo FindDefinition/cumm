@@ -37,6 +37,8 @@ class LinearCombination(bases.GemmOutputOp):
         super().__init__()
         self.add_param_class("unaryop", unary_op, "UnaryOp")
         self.add_include("tensorview/gemm/math/all.h")
+        self.add_include("tensorview/gemm/core/constants.h")
+
         self.dtype_out = dtype_out
         self.count = count
         self.dtype_acc = dtype_acc
@@ -48,7 +50,8 @@ class LinearCombination(bases.GemmOutputOp):
         self.fragment_acc_t = core.array_type(dtype_acc, count)
         self.fragment_comp_t = core.array_type(dtype_comp, count)
 
-        self.add_member("alpha, beta", self.dtype_comp)
+        self.add_member("alpha, beta, act_alpha, act_beta", str(self.dtype_comp))
+        self.add_member("act_type", "tv::gemm::Activation")
 
         # cudasim members
         self.alpha = -1
@@ -57,10 +60,17 @@ class LinearCombination(bases.GemmOutputOp):
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.code()
-        code.arg("alpha_", self.dtype_comp, f"{self.dtype_comp}(1)")
-        code.arg("beta_", self.dtype_comp, f"{self.dtype_comp}(0)")
-        code.ctor_init("alpha", "alpha_")
-        code.ctor_init("beta", "beta_")
+        code.arg("alpha", str(self.dtype_comp), f"{self.dtype_comp}(1)")
+        code.arg("beta", str(self.dtype_comp), f"{self.dtype_comp}(0)")
+        code.arg("act_alpha", str(self.dtype_comp), f"{self.dtype_comp}(0)")
+        code.arg("act_beta", str(self.dtype_comp), f"{self.dtype_comp}(0)")
+        code.arg("type", "tv::gemm::Activation", "tv::gemm::Activation::kNone")
+
+        code.ctor_init("alpha", "alpha")
+        code.ctor_init("beta", "beta")
+        code.ctor_init("act_alpha", "act_alpha")
+        code.ctor_init("act_beta", "act_beta")
+        code.ctor_init("act_type", "type")
 
         return code
 
@@ -125,7 +135,7 @@ class LinearCombination(bases.GemmOutputOp):
         intermediate = mul_add_accumulator(alpha, converted_accumulator,
                                         intermediate); // D = alpha * Accum + X
         UnaryOp op;
-        intermediate = op(intermediate);
+        intermediate = op(intermediate, act_type, act_alpha, act_beta);
         // Convert to destination numeric type
         {platform}::NumericArrayConverter<{self.dtype_out}, {self.dtype_comp}, {self.count}, {self.round}>
             destination_converter;
@@ -169,7 +179,7 @@ class LinearCombination(bases.GemmOutputOp):
 
         intermediate = mul_accumulator(alpha, converted_accumulator); // D = alpha * Accum + X
         UnaryOp op;
-        intermediate = op(intermediate);
+        intermediate = op(intermediate, act_type, act_alpha, act_beta);
         // Convert to destination numeric type
         {platform}::NumericArrayConverter<{self.dtype_out}, {self.dtype_comp}, {self.count}, {self.round}>
             destination_converter;

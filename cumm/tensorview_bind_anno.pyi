@@ -508,6 +508,20 @@ class ShuffleStrideType(Enum):
     ShuffleAC = 1
     ShuffleAB = 2
 
+class Activation(Enum):
+  None_ = 0
+  ReLU = 1
+  Sigmoid = 2
+  Tanh = 3
+  LeakyReLU = 4
+  ELU = 5
+  SeLU = 6
+  Softsign = 7
+  Softplus = 8
+  Clip = 9
+  HardSigmoid = 10
+  ScaledTanh = 11
+  ThresholdedReLU = 12
 
 class NVRTCParams:
     cumodule: NVRTCModule
@@ -743,6 +757,10 @@ class GemmParams:
     c_inds: Tensor = Tensor()
     alpha: float
     beta: float
+    act_alpha: float
+    act_beta: float
+    act_type: Activation
+
     stream: int
     timer: CUDAKernelTimer
     nvrtc_params: NVRTCParams
@@ -793,6 +811,17 @@ class GemmParams:
             val: 
         """
         ...
+    @property
+    def d(self) -> Tensor:
+        ...
+
+    @d.setter
+    def d(self, val: Tensor) -> None:
+        """
+        Args:
+            val: 
+        """
+        ...
 
 
 class ConvParams:
@@ -806,6 +835,10 @@ class ConvParams:
     dilation: List[int]
     alpha: float
     beta: float
+    act_alpha: float
+    act_beta: float
+    act_type: Activation
+
     mask_width: int
     mask_filter: int
     reverse_mask: bool
@@ -818,6 +851,7 @@ class ConvParams:
     mask_output: Tensor = Tensor()
     stream: int
     nvrtc_params: NVRTCParams
+    bias: Tensor = Tensor()
 
     def __init__(
         self,

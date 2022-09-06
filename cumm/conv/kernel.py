@@ -128,7 +128,8 @@ class ConvParams(pccm.ParameterizedClass):
                  out_params: out_iters.OutIteratorParams,
                  have_workspace: bool = False,
                  mask_sparse: bool = False,
-                 increment_k_first: bool = True):
+                 increment_k_first: bool = True,
+                 split_d_params: bool = False):
         super().__init__()
         self.add_dependency(TensorViewNVRTC, GemmBasic, ConvUtils,
                             GemmUtilsCPU)
@@ -143,6 +144,7 @@ class ConvParams(pccm.ParameterizedClass):
         self.layout_c = layout_c
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
+        self.split_d_params = split_d_params
 
         self.add_param_class("cp", problem, "ConvProblem")
         self.add_param_class("itera_p", itera_params, "IterAParams")
@@ -178,15 +180,18 @@ class ConvParams(pccm.ParameterizedClass):
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             self.add_member("mask_width", "int")
 
-        self.add_member("alpha, beta", f"{dtype_comp}")
+        self.add_member("alpha, beta, act_alpha, act_beta", f"{dtype_comp}")
+        self.add_member("act_type", f"tv::gemm::Activation")
+        
         self.add_member("grid_dims", f"dim3")
         self.have_workspace = have_workspace
         if have_workspace:
             self.add_member("workspace", "void*")
-
         self.add_member("itera_params_", f"IterAParams")
         self.add_member("iterb_params_", f"IterBParams")
         self.add_member("out_params_", f"OutIterParams")
+        if split_d_params:
+            self.add_member("out_params_d_", f"OutIterParams")
 
         # cudasim members
         self.problem_size_: Optional[ConvProblem] = None
@@ -280,9 +285,14 @@ class ConvParams(pccm.ParameterizedClass):
 
         code.arg("alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(1)")
         code.arg("beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
+        code.arg("act_alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
+        code.arg("act_beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
+        code.arg("act_type", f"tv::gemm::Activation", f"tv::gemm::Activation::kNone")
+
         code.arg("split_k_slices", "int", "1")
         if self.have_workspace:
             code.arg("workspace", "void*", "nullptr")
+        code.arg("d_is_bias", "bool", "false")
 
         code.ctor_init("problem", "problem")
         if self.op_type == ConvOpType.kForward:
@@ -338,8 +348,13 @@ class ConvParams(pccm.ParameterizedClass):
 
         code.ctor_init("alpha", "alpha")
         code.ctor_init("beta", "beta")
+        code.ctor_init("act_alpha", "act_alpha")
+        code.ctor_init("act_beta", "act_beta")
+        code.ctor_init("act_type", "act_type")
         if self.have_workspace:
             code.ctor_init("workspace", "workspace")
+        # code.ctor_init("d_is_bias_", "d_is_bias")
+
         optype_to_cpp = {
             ConvOpType.kForward: "tv::gemm::ConvOpType::kForward",
             ConvOpType.kBackwardWeight: "tv::gemm::ConvOpType::kBackwardWeight",
@@ -403,12 +418,19 @@ class ConvParams(pccm.ParameterizedClass):
                 itera_params_.set_inc_reset_for_inc_k_first(gemm_k_iterations);
                 iterb_params_.set_inc_reset_for_inc_k_first(gemm_k_iterations);
                 """)
+            
             code.raw("out_params_ = OutIterParams(n, mask_argsort_ptr);")
+            if self.split_d_params:
+                code.raw("out_params_d_ = d_is_bias ? OutIterParams(0, nullptr) : OutIterParams(n, mask_argsort_ptr);")
+
         else:
             # code.raw(f"""
             # TV_THROW_RT_ERR("WTF");
             # """)
             code.raw("out_params_ = OutIterParams(n);")
+            if self.split_d_params:
+                code.raw("out_params_d_ = d_is_bias ? OutIterParams(0) : OutIterParams(n);")
+
         return code
 
 
@@ -436,7 +458,8 @@ class ConvKernel(pccm.ParameterizedClass):
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
                  access_per_vector: int = 1,
-                 nvrtc_mode: NVRTCMode = NVRTCMode.Disabled):
+                 nvrtc_mode: NVRTCMode = NVRTCMode.Disabled,
+                 split_d_params: bool = True):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -475,6 +498,7 @@ class ConvKernel(pccm.ParameterizedClass):
         transpose_gemm = trans_c
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
+        self.split_d_params = split_d_params
         if transpose_gemm:
             self.dtype_a = dtype_b
             self.dtype_b = dtype_a
@@ -557,7 +581,8 @@ class ConvKernel(pccm.ParameterizedClass):
             self.input_spec.layout_a, self.input_spec.layout_b, self.layout_c,
             inp_iter_a_param, inp_iter_b_param,
             self.output_spec.out_iter.get_params(), have_workspace,
-            mask_sparse, increment_k_first)
+            mask_sparse, increment_k_first,
+            split_d_params)
         self.add_param_class("conv_params", self.gemm_params, "ConvParams")
         self.add_param_class("conv_params", self.gemm_params.problem,
                              "ConvProblem")
@@ -780,15 +805,20 @@ class ConvKernel(pccm.ParameterizedClass):
             with code.if_("!kSplitKSerial || params.gemm_k_iterations > 0"):
                 if self.mask_sparse:
                     if not self.problem.op_type == ConvOpType.kBackwardWeight:
+                        # TODO split algo requires to run output even if mask is zero for bias.
                         code.raw(f"""
-                        mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask,  params.problem.kernel_volume);
+                        // if (kmask != 0){{
+                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask,  params.problem.kernel_volume);
+                        // }}
                         """)
                     else:
                         code.raw(f"""
                         int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
-                        mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
-                            params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
-                            params.mask_width);
+                        // if (kmask != 0){{
+                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
+                                params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
+                                params.mask_width);
+                        // }}
                         """)
                 else:
                     code.raw(f"""
@@ -801,7 +831,7 @@ class ConvKernel(pccm.ParameterizedClass):
 
             code.raw(f"""
             // // C = alpha * A@B + beta * D, D can be C
-            OutputOp output_op(params.alpha, params.beta);
+            OutputOp output_op(params.alpha, params.beta, params.act_alpha, params.act_beta, params.act_type);
             """)
             if self.splitk_serial:
                 code.raw(f"""
@@ -841,11 +871,18 @@ class ConvKernel(pccm.ParameterizedClass):
                 }}
                 """)
             if self.need_source:
-                code.raw(f"""
-                ConstOutIter out_iter_D(params.out_params_, params.ptr_D, block_extent_C,
-                                    block_offset_C,
-                                    thread_idx);
-                """)
+                if not self.split_d_params:
+                    code.raw(f"""
+                    ConstOutIter out_iter_D(params.out_params_, params.ptr_D, block_extent_C,
+                                        block_offset_C,
+                                        thread_idx);
+                    """)
+                else:
+                    code.raw(f"""
+                    ConstOutIter out_iter_D(params.out_params_d_, params.ptr_D, block_extent_C,
+                                        block_offset_C,
+                                        thread_idx);
+                    """)
             code.raw(
                 f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
             )
@@ -933,11 +970,15 @@ class ConvKernel(pccm.ParameterizedClass):
             ])
             if self.problem.op_type == ConvOpType.kBackwardWeight:
                 args.append(f"{p}.mask_width")
-        args.append(
-            f"{self.dtype_comp}({p}.alpha), {self.dtype_comp}({p}.beta), {p}.split_k_slices"
-        )
+        args.extend([
+            f"{self.dtype_comp}({p}.alpha), {self.dtype_comp}({p}.beta)",
+            f"{self.dtype_comp}({p}.act_alpha), {self.dtype_comp}({p}.act_beta)",
+            f"static_cast<tv::gemm::Activation>({p}.act_type)",
+            f"{p}.split_k_slices",
+        ])
         if self.have_workspace:
             args.append(f"{p}.workspace")
+        args.append(f"{p}.d_is_bias")
         code.raw(f"""
         ConvParams params({", ".join(args)});
         """)

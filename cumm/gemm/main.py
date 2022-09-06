@@ -437,9 +437,9 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params((64, 64, 32),
                     #                  (32, 32, 32), 2, "s8,s8,s32,s32,s32",
                     #                  kernel.GemmAlgo.SimtDP4A, None),
-                    *gen_gemm_params((64, 64, 8),
-                                     (64, 64, 8), 2, "f32,f32,f32,f32,f32",
-                                     kernel.GemmAlgo.Simt, None),
+                    # *gen_gemm_params((64, 64, 8),
+                    #                  (64, 64, 8), 2, "f32,f32,f32,f32,f32",
+                    #                  kernel.GemmAlgo.Simt, None),
                     # *gen_gemm_params((128, 128, 8),
                     #                 (32, 64, 8), 2, "f32,f32,f32,f32,f32",
                     #                 kernel.GemmAlgo.Simt, None, shuffle_stride=ShuffleStrideType.ShuffleAB, splitk_serial=True),
@@ -511,7 +511,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params((64, 64, 16), (32, 32, 16), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
 
-                    # *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
@@ -1000,32 +1000,41 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                         a_ptr = a_inds.data_ptr<const int>();
                     }}
                     TV_ASSERT_RT_ERR(!c_inds.empty(), "c must not empty");
+                    // tv::ssprint(d.ndim() == 1 ? 0 : d_ten.stride(0), (d.ndim() == 1 ? nullptr : c_inds.data_ptr<const int>()) == nullptr, "WTF");
                     {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
-                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
-                        a_ptr, c_inds.data_ptr<const int>(),
-                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        c_ten.data_ptr<{ker.dtype_c}>(), d_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0), 
+                        a_ptr, c_inds.data_ptr<const int>(), d.ndim() == 1 ? nullptr : c_inds.data_ptr<const int>(), 
+                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), 
+                        {ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta),
+                        params.act_type,
+                        split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
                 elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
                     {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
-                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
+                        c_ten.data_ptr<{ker.dtype_c}>(), d_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0), 
                         a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(),
-                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), 
+                        {ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta),
+                        params.act_type,
+                        split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
                 else:
                     code.raw(f"""
                     {param_type_str} kernel_params(
                         m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
-                        c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0), 
-                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        c_ten.data_ptr<{ker.dtype_c}>(), d_ten.data_ptr<{ker.dtype_c}>(), 
+                        a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0), 
+                        {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), 
+                        {ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta),
+                        params.act_type,
+                        split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
                     """)
-
                 code.raw(f"""
                 tv::cuda::Launch launcher(kernel_params.grid_dims, dim3({ker.num_threads}),
                                             {ker.smem_size}, reinterpret_cast<cudaStream_t>(params.stream));

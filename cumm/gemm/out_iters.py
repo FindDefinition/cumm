@@ -521,11 +521,8 @@ class OutIterator(GemmOutputIterator):
 
                         int row_offset =
                             row * {self.delta[3]} + group * {self.delta[2]} + cluster * {self.delta[1]};
-                        bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
-                        if (row_guard)
-                            indices_[idx] = 
-                                int64_t(params_.indice_ptr_[row_offset + thread_start_row_]) * int64_t(params.stride);
-
+                        bool row_guard = ((row_offset + thread_start_row_) < extent_row_ && params_.indice_ptr_ != nullptr);
+                        indices_[idx] = row_guard ? int64_t(params_.indice_ptr_[row_offset + thread_start_row_]) * int64_t(params_.stride) : 0;
                         """)
             code.raw(f"""
             pointer_ = ptr + thread_offset[1];
@@ -801,14 +798,10 @@ class OutIterator(GemmOutputIterator):
                         code.raw(f"""
                         int idx =
                             (row +  {self.iterations[3]} * (group +  {self.iterations[2]} * cluster));
-
                         int row_offset =
                             row * {self.delta[3]} + group * {self.delta[2]} + cluster * {self.delta[1]};
-                        bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
-                        if (row_guard)
-                            indices_[idx] = 
-                                int64_t(params_.indice_ptr_[row_offset + thread_start_row_]) * int64_t(params_.stride);
-
+                        bool row_guard = ((row_offset + thread_start_row_) < extent_row_ && params_.indice_ptr_ != nullptr);
+                        indices_[idx] = row_guard ? int64_t(params_.indice_ptr_[row_offset + thread_start_row_]) * int64_t(params_.stride) : 0;
                         """)
         code.raw("return *this;")
         return code.ret(f"{self.class_name}&")

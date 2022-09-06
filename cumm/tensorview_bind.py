@@ -130,6 +130,21 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             .value("NoShuffle", tv::gemm::ShuffleStrideType::kNoShuffle)
             .value("ShuffleAC", tv::gemm::ShuffleStrideType::kShuffleAC)
             .value("ShuffleAB", tv::gemm::ShuffleStrideType::kShuffleAB);
+        py::enum_<tv::gemm::Activation>(module_, "Activation")
+            .value("None_", tv::gemm::Activation::kNone)
+            .value("ReLU", tv::gemm::Activation::kReLU)
+            .value("Sigmoid", tv::gemm::Activation::kSigmoid)
+            .value("Tanh", tv::gemm::Activation::kTanh)
+            .value("LeakyReLU", tv::gemm::Activation::kLeakyReLU)
+            .value("ELU", tv::gemm::Activation::kELU)
+            .value("SeLU", tv::gemm::Activation::kSeLU)
+            .value("Softsign", tv::gemm::Activation::kSoftsign)
+            .value("Softplus", tv::gemm::Activation::kSoftplus)
+            .value("Clip", tv::gemm::Activation::kClip)
+            .value("HardSigmoid", tv::gemm::Activation::kHardSigmoid)
+            .value("ScaledTanh", tv::gemm::Activation::kScaledTanh)
+            .value("ThresholdedReLU", tv::gemm::Activation::kThresholdedReLU);
+
         """)
         return code
 
@@ -316,6 +331,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("dilation", &tv::gemm::ConvParams::dilation);
         m_cls.def_readwrite("alpha", &tv::gemm::ConvParams::alpha);
         m_cls.def_readwrite("beta", &tv::gemm::ConvParams::beta);
+        m_cls.def_readwrite("act_alpha", &tv::gemm::ConvParams::act_alpha);
+        m_cls.def_readwrite("act_beta", &tv::gemm::ConvParams::act_beta);
+        m_cls.def_readwrite("act_type", &tv::gemm::ConvParams::act_type);
+
         m_cls.def_readwrite("mask_width", &tv::gemm::ConvParams::mask_width);
         m_cls.def_readwrite("mask_filter", &tv::gemm::ConvParams::mask_filter);
         m_cls.def_readwrite("reverse_mask", &tv::gemm::ConvParams::reverse_mask);
@@ -328,6 +347,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("mask_output", &tv::gemm::ConvParams::mask_output);
         m_cls.def_readwrite("stream", &tv::gemm::ConvParams::stream);
         m_cls.def_readwrite("nvrtc_params", &tv::gemm::ConvParams::nvrtc_params);
+        m_cls.def_readwrite("bias", &tv::gemm::ConvParams::bias);
+
         """)
         return code
 
@@ -350,6 +371,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_property("c", &tv::gemm::GemmParams::c_get,
                           &tv::gemm::GemmParams::c_set,
                           pybind11::return_value_policy::automatic);
+        m_cls.def_property("d", &tv::gemm::GemmParams::d_get,
+                          &tv::gemm::GemmParams::d_set,
+                          pybind11::return_value_policy::automatic);
+
         m_cls.def_readwrite("algo_desp", &tv::gemm::GemmParams::algo_desp);
         m_cls.def_readwrite("split_k_slices",
                             &tv::gemm::GemmParams::split_k_slices);
@@ -359,10 +384,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("c_inds", &tv::gemm::GemmParams::c_inds);
         m_cls.def_readwrite("alpha", &tv::gemm::GemmParams::alpha);
         m_cls.def_readwrite("beta", &tv::gemm::GemmParams::beta);
+        m_cls.def_readwrite("act_alpha", &tv::gemm::GemmParams::act_alpha);
+        m_cls.def_readwrite("act_beta", &tv::gemm::GemmParams::act_beta);
+        m_cls.def_readwrite("act_type", &tv::gemm::GemmParams::act_type);
         m_cls.def_readwrite("stream", &tv::gemm::GemmParams::stream);
         m_cls.def_readwrite("timer", &tv::gemm::GemmParams::timer);
         m_cls.def_readwrite("nvrtc_params", &tv::gemm::GemmParams::nvrtc_params);
-
         """)
         return code
 

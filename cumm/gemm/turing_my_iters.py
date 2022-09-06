@@ -1073,7 +1073,7 @@ class WarpIteratorCrosswise(bases.GemmWarpIterator):
             lane_idx = lane_idx % ({self.ldm_count.prod()} * {self.ldm_num_line});
         #endif
         int offset_e = TensorOpLayout::get_ldm_initial_offset<{self.ldm_count[0]}, {self.ldm_count[1]}>(
-            lane_idx, 0, {pccm.boolean(self.operand_a)});
+            lane_idx, 0, {pccm.boolean(not self.operand_a)});
         byte_offset_ = offset_e * {self.dtype.bitsize()} / 8;
         add_tile_offset({self.num_warp_gemm_iters} * warp_idx_k, warp_idx_mn);
         """)

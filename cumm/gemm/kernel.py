@@ -82,7 +82,8 @@ class GemmParams(pccm.ParameterizedClass):
             iterb_params: mask_iters.MaskTileIteratorParams,
             out_params: out_iters.OutIteratorParams,
             have_workspace: bool = False,
-            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
+            shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
+            split_d_params: bool = False):
         super().__init__()
 
         self.add_dependency(TensorViewNVRTC, GemmBasic, GemmUtilsCPU)
@@ -121,7 +122,9 @@ class GemmParams(pccm.ParameterizedClass):
         self.add_member("stride_C", f"int64_t")
         self.add_member("stride_D", f"int64_t")
 
-        self.add_member("alpha, beta", f"{dtype_comp}")
+        self.add_member("alpha, beta, act_alpha, act_beta", f"{dtype_comp}")
+        self.add_member("act_type", f"tv::gemm::Activation")
+
         self.add_member("grid_dims", f"dim3")
         self.have_workspace = have_workspace
         if have_workspace:
@@ -138,8 +141,11 @@ class GemmParams(pccm.ParameterizedClass):
             self.add_member("params_D",
                             f"Epilogue::OutputTileIterator::Params")
         else:
+            # TODO reduce output register usage
             self.add_member("out_params_", f"OutIterParams")
-
+            if split_d_params:
+                self.add_member("out_params_d_", f"OutIterParams")
+        self.split_d_params = split_d_params
         # cudasim members
         self.m = 0
         self.n = 0
@@ -306,7 +312,14 @@ class GemmParams(pccm.ParameterizedClass):
                 code.raw("out_params_ = OutIterParams(stride_C, IndiceC);")
             else:
                 code.raw("out_params_ = OutIterParams(stride_C);")
+            if self.split_d_params:
+                # D don't support 
+                if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
+                    code.raw("out_params_d_ = OutIterParams(stride_D, IndiceD);")
+                else:
+                    code.raw("out_params_d_ = OutIterParams(stride_D);")
 
+            
         code.arg("m, n, k", "int")
         code.arg("A", f"const {self.dtype_a}*")
         code.arg("B", f"const {self.dtype_b}*")
@@ -317,12 +330,17 @@ class GemmParams(pccm.ParameterizedClass):
         if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
             code.arg("IndiceA", f"const int*")
             code.arg("IndiceC", f"const int*")
+            code.arg("IndiceD", f"const int*")
         elif self.shuffle_stride == ShuffleStrideType.ShuffleAB:
             code.arg("IndiceA", f"const int*")
             code.arg("IndiceB", f"const int*")
 
         code.arg("alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(1)")
         code.arg("beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
+        code.arg("act_alpha", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
+        code.arg("act_beta", f"{self.dtype_comp}", f"{self.dtype_comp}(0)")
+        code.arg("act_type", f"tv::gemm::Activation", f"tv::gemm::Activation::kNone")
+
         code.arg("split_k_slices", "int", "1")
         if self.have_workspace:
             code.arg("workspace", "void*", "nullptr")
@@ -340,6 +358,10 @@ class GemmParams(pccm.ParameterizedClass):
 
         code.ctor_init("alpha", "alpha")
         code.ctor_init("beta", "beta")
+        code.ctor_init("act_alpha", "act_alpha")
+        code.ctor_init("act_beta", "act_beta")
+        code.ctor_init("act_type", "act_type")
+
         if self.have_workspace:
             code.ctor_init("workspace", "workspace")
         return code
@@ -367,7 +389,8 @@ class GemmKernel(pccm.ParameterizedClass):
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
             access_per_vector: int = 1,
             nvrtc_mode: NVRTCMode = NVRTCMode.Disabled,
-            async_kernel: bool = False):
+            async_kernel: bool = False,
+            split_d_params: bool = True):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -392,6 +415,7 @@ class GemmKernel(pccm.ParameterizedClass):
         self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
         self.nvrtc_mode = nvrtc_mode
         self.async_kernel = async_kernel
+        self.split_d_params = split_d_params
         transpose_gemm = trans_c
         if transpose_gemm:
             self.dtype_a = dtype_b
@@ -471,7 +495,8 @@ class GemmKernel(pccm.ParameterizedClass):
                                       dtype_comp, trans_a, trans_b, trans_c,
                                       inp_iter_a_param, inp_iter_b_param,
                                       self.output_spec.out_iter.get_params(),
-                                      have_workspace, shuffle_stride)
+                                      have_workspace, shuffle_stride,
+                                      split_d_params)
         self.add_dependency(GemmNVRTCParams)
         self.add_param_class("gemm_params", self.gemm_params, "GemmParams")
         self.add_code_before_class(f"""
@@ -775,7 +800,7 @@ class GemmKernel(pccm.ParameterizedClass):
                 // tv::printf2_once("HERE 0", threadIdx.x, blockIdx.x, blockIdx.y, blockIdx.z);
 
                 // // C = alpha * A@B + beta * D, D can be C
-                OutputOp output_op(params.alpha, params.beta);
+                OutputOp output_op(params.alpha, params.beta, params.act_alpha, params.act_beta, params.act_type);
                 """)
                 if self.splitk_serial:
                     code.raw(f"""
@@ -807,11 +832,18 @@ class GemmKernel(pccm.ParameterizedClass):
                     }}
                     """)
                 if self.need_source:
-                    code.raw(f"""
-                    ConstOutIter out_iter_D(params.out_params_, params.ptr_D, {{params.m, params.n}},
-                                        {{block_offset_C[0], block_offset_C[1]}},
-                                        thread_idx);
-                    """)
+                    if self.split_d_params:
+                        code.raw(f"""
+                        ConstOutIter out_iter_D(params.out_params_d_, params.ptr_D, {{params.m, params.n}},
+                                            {{block_offset_C[0], block_offset_C[1]}},
+                                            thread_idx);
+                        """)
+                    else:
+                        code.raw(f"""
+                        ConstOutIter out_iter_D(params.out_params_, params.ptr_D, {{params.m, params.n}},
+                                            {{block_offset_C[0], block_offset_C[1]}},
+                                            thread_idx);
+                        """)
                 code.raw(
                     f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
                 )
@@ -875,9 +907,15 @@ class GemmKernel(pccm.ParameterizedClass):
             f"{p}.stride_A, {p}.stride_B, {p}.stride_C, {p}.stride_D", 
         ]
         if self.shuffle_stride != ShuffleStrideType.NoShuffle:
-            args.append(f"{p}.IndiceA, {p}.IndiceBorC")
+            if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
+                args.append(f"{p}.IndiceA, {p}.IndiceBorC, {p}.IndiceD")
+            else:
+                args.append(f"{p}.IndiceA, {p}.IndiceBorC")
+
         args.extend([ 
             f"{self.dtype_comp}({p}.alpha), {self.dtype_comp}({p}.beta)",
+            f"{self.dtype_comp}({p}.act_alpha), {self.dtype_comp}({p}.act_beta)",
+            f"static_cast<tv::gemm::Activation>({p}.act_type)",
             f"{p}.split_k_slices"
         ])
         if self.have_workspace:

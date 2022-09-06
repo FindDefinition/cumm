@@ -41,6 +41,10 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
     auto a = params.a;
     auto b = params.b;
     auto c = params.c;
+    auto d = params.d;
+    if (d.empty()){{
+        d = c; // TODO fix this
+    }}
     auto ta = algo_desp.trans_a();
     auto tb = algo_desp.trans_b();
     auto tc = algo_desp.trans_c();
@@ -51,6 +55,7 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
     tv::Tensor a_ten = a;
     tv::Tensor b_ten = b;
     tv::Tensor c_ten = c;
+    tv::Tensor d_ten = d;
     auto trans_a = ta;
     auto trans_b = tb;
     auto trans_c = tc;
@@ -66,7 +71,6 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
     auto c_inds = params.c_inds;
     auto b_inds = params.b_inds;
     auto& evtimer = params.timer;
-
     if (!(algo_desp.split_k_serial() || algo_desp.split_k_parallel()) && split_k_slices > 1){{
         TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
 
@@ -119,6 +123,9 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
     }}
     TV_ASSERT_INVALID_ARG(algo_desp.supported(m, n, k), "this m, n, k isn't supported due to misaligned contiguous dim.")
     TV_ASSERT_INVALID_ARG(k == k2, "error");
+    if (d.ndim() == 1){{
+        TV_ASSERT_RT_ERR(d.dim(0) == n, "d must be a valid bias");
+    }}
     int workspace_size = algo_desp.query_workspace_size(m, n, k, split_k_slices);
     auto ctx = tv::Context();
     ctx.set_cuda_stream(reinterpret_cast<cudaStream_t>(params.stream));
@@ -147,25 +154,36 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
                 a_ptr = a_inds.data_ptr<const int>();
             }}
             TV_ASSERT_RT_ERR(!c_inds.empty(), "c must not empty");
+            auto indice_ptr = c_inds.data_ptr<const int>();
             kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.const_raw_data(),  b_ten.const_raw_data(),  
-                c_ten.raw_data(), c_ten.raw_data(), 
-                a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
-                a_ptr, c_inds.data_ptr<const int>(), float(params.alpha), float(params.beta), 
+                c_ten.raw_data(), d_ten.raw_data(), 
+                a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0),
+                a_ptr, indice_ptr, d.ndim() == 1 ? nullptr : indice_ptr, 
+                float(params.alpha), float(params.beta), 
+                float(params.act_alpha), float(params.act_beta), 
+                static_cast<int>(params.act_type),
                 split_k_slices, workspace_ptr}};
+
         }}else if (algo_desp.shuffle_type == tv::gemm::ShuffleStrideType::kShuffleAB){{
             TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
             kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.const_raw_data(),  b_ten.const_raw_data(),  
-                c_ten.raw_data(), c_ten.raw_data(), 
-                a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
-                a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(), 
-                float(params.alpha), float(params.beta), split_k_slices, workspace_ptr}};
+                c_ten.raw_data(), d_ten.raw_data(), 
+                a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0),
+                a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(), nullptr,
+                float(params.alpha), float(params.beta), 
+                float(params.act_alpha), float(params.act_beta), 
+                static_cast<int>(params.act_type),
+                split_k_slices, workspace_ptr}};
 
         }}else{{
             kernel_params = tv::gemm::GemmNVRTCParams{{m, n, k, a_ten.const_raw_data(),  b_ten.const_raw_data(),  
                 c_ten.raw_data(), c_ten.raw_data(), 
-                a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), c_ten.stride(0),
-                nullptr, nullptr, 
-                float(params.alpha), float(params.beta), split_k_slices, workspace_ptr}};
+                a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0),
+                nullptr, nullptr, nullptr,
+                float(params.alpha), float(params.beta), 
+                float(params.act_alpha), float(params.act_beta), 
+                static_cast<int>(params.act_type),
+                split_k_slices, workspace_ptr}};
         }}
         std::string algo_name;
         if (evtimer.enable()){{

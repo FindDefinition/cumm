@@ -467,7 +467,12 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
             code.raw(f"""
             // {ker.get_algo_name()}
             found = true;
+            bool d_is_bias = !bias.empty();
             """)
+            if not ker.split_d_params:
+                code.raw(f"""
+                TV_ASSERT_RT_ERR(bias.empty(), "bias must be empty if split_d_params not enable");
+                """)
             if p.mask_sparse:
                 if p.op_type == ConvOpType.kBackwardWeight:
                     code.raw(f"""
@@ -480,7 +485,6 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                 int kernel_volume = weight.dim({dim_start});
                 tv::check_shape(indices, {{kernel_volume, -1}});
                 N = indices.dim(1);
-
                 {param_cls_ns}::ConvProblem problem(N, C, K, kernel_volume, 
                     tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
                 """)
@@ -525,31 +529,73 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                 {param_cls_ns}::ConvProblem problem(N, C, K, input_dims, output_dims, ksize, padding_arr, stride_arr, dilation_arr, 
                     tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
                 """)
+            params_str = [
+                "problem", 
+                f"a_ten.data_ptr<const {ker.dtype_a}>()",
+                f"b_ten.data_ptr<const {ker.dtype_b}>()",
+                f"c_ten.data_ptr<{ker.dtype_c}>()",
+                f"bias.empty() ? c_ten.data_ptr<const {ker.dtype_c}>() : bias.data_ptr<const {ker.dtype_c}>()",
+            ]
             if p.mask_sparse:
-                mask_out_ptr = "mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>(), "
-                if p.op_type != ConvOpType.kForward:
-                    mask_out_ptr = ""
+                # mask_out_ptr = "mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>(), "
+                # if p.op_type != ConvOpType.kForward:
+                #     mask_out_ptr = ""
 
-                mask_width_str = "mask_width,"
-                if p.op_type != ConvOpType.kBackwardWeight:
-                    mask_width_str = ""
-
-                code.raw(f"""
-                {param_type_str} ker_params(
-                    problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
-                    c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(),
-                    mask.data_ptr<const uint32_t>(), mask_argsort.data_ptr<const int32_t>(),
-                    indices.data_ptr<const int32_t>(), {mask_out_ptr} params.mask_filter, 
-                    params.reverse_mask, {mask_width_str} 
-                    {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
-                """)
+                # mask_width_str = "mask_width,"
+                # if p.op_type != ConvOpType.kBackwardWeight:
+                #     mask_width_str = ""
+                params_str.extend([
+                    "mask.data_ptr<const uint32_t>()",
+                    "mask_argsort.data_ptr<const int32_t>()",
+                    "indices.data_ptr<const int32_t>()",
+                ])
+                if p.op_type == ConvOpType.kForward:
+                    params_str.append(f"mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>()")
+                params_str.extend([
+                    "params.mask_filter",
+                    "params.reverse_mask",
+                ])
+                if p.op_type == ConvOpType.kBackwardWeight:
+                    params_str.append("mask_width")
+                
+            params_str.extend([
+                f"{ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta)",
+                f"{ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta)",
+                "params.act_type",
+            ])
+            if ker.support_splitk():
+                params_str.append(f"split_k_slices")
+                if ker.have_workspace:
+                    params_str.append(f"workspace.raw_data()")
             else:
-                code.raw(f"""
-                {param_type_str} ker_params(
-                    problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
-                    c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
-                    {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
-                """)
+                params_str.append(f"1")
+                if ker.have_workspace:
+                    params_str.append(f"nullptr")
+            params_str.append("d_is_bias")
+            param_str = ", ".join(params_str)
+            code.raw(f"""
+            {param_type_str} ker_params({param_str});
+            """)
+                # code.raw(f"""
+                # {param_type_str} ker_params(
+                #     problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
+                #     c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(),
+                #     mask.data_ptr<const uint32_t>(), mask_argsort.data_ptr<const int32_t>(),
+                #     indices.data_ptr<const int32_t>(), {mask_out_ptr} params.mask_filter, 
+                #     params.reverse_mask, {mask_width_str} 
+                #     {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
+                # """)
+            # else:
+            #     params_str.extend([
+            #         f"{ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta)",
+            #     ])
+
+            #     code.raw(f"""
+            #     {param_type_str} ker_params(
+            #         problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
+            #         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+            #         {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
+            #     """)
             if p.op_type == ConvOpType.kBackwardWeight:
                 code.raw(f"""
                 int num_reduced_mask = tv::div_up(ker_params.problem.N, ker_params.mask_width);

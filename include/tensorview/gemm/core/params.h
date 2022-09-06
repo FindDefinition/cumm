@@ -17,6 +17,7 @@
 #include "utils.h"
 #include <tensorview/profile/all.h>
 #include <tensorview/tensor.h>
+#include "constants.h"
 namespace tv {
 namespace gemm {
 
@@ -321,6 +322,7 @@ struct GemmParams {
   tv::Tensor a;
   tv::Tensor b;
   tv::Tensor c;
+  tv::Tensor d = tv::Tensor();
   int split_k_slices = 1;
   tv::Tensor workspace = tv::Tensor();
   tv::Tensor a_inds = tv::Tensor();
@@ -328,6 +330,9 @@ struct GemmParams {
   tv::Tensor c_inds = tv::Tensor();
   float alpha;
   float beta;
+  float act_alpha;
+  float act_beta;
+  Activation act_type = Activation::kNone;
   std::uintptr_t stream;
   tv::CUDAKernelTimer timer = tv::CUDAKernelTimer(false);
   tv::gemm::NVRTCParams nvrtc_params = tv::gemm::NVRTCParams();
@@ -366,6 +371,12 @@ struct GemmParams {
     c = val;
     algo_desp.dtype_c = int(c.dtype());
   }
+  tv::Tensor d_get() { return d; }
+  void d_set(tv::Tensor val) {
+    TV_ASSERT_RT_ERR(c.dtype() == val.dtype(), "d dtype must equal to c");
+    d = val;
+  }
+
 };
 
 struct ConvParams {
@@ -373,12 +384,16 @@ struct ConvParams {
   tv::Tensor input;
   tv::Tensor weight;
   tv::Tensor output;
+  tv::Tensor bias = tv::Tensor();
   int split_k_slices = 1;
   std::vector<int> padding;
   std::vector<int> stride;
   std::vector<int> dilation;
   float alpha;
   float beta;
+  float act_alpha;
+  float act_beta;
+  Activation act_type = Activation::kNone;
   int mask_width;
   uint32_t mask_filter;
   bool reverse_mask;

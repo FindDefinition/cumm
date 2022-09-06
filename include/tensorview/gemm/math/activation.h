@@ -23,7 +23,7 @@ template <typename T, typename Tout, size_t N> struct Clamp {
   using argument_t = tv::array<T, N>;
   using result_t = tv::array<T, N>;
   //   static constexpr T kClamp = T(std::numeric_limits<Tout>::max());
-  TV_HOST_DEVICE_INLINE constexpr result_t operator()(const argument_t &src) {
+  TV_HOST_DEVICE_INLINE constexpr result_t operator()(const argument_t &src, T alpha = 1, T beta = 0) {
     constexpr T kClamp = T((1U << (sizeof(Tout) * 8 - 1)) - 1);
     minimum<argument_t> min_op;
     maximum<argument_t> max_op;
@@ -32,6 +32,18 @@ template <typename T, typename Tout, size_t N> struct Clamp {
     return intermediate;
   }
 };
+
+template <typename T, typename Tout, size_t N> struct ReLU {
+  using argument_t = tv::array<T, N>;
+  using result_t = tv::array<T, N>;
+  //   static constexpr T kClamp = T(std::numeric_limits<Tout>::max());
+  TV_HOST_DEVICE_INLINE constexpr result_t operator()(const argument_t &src, T alpha = 1, T beta = 0) {
+    maximum<argument_t> max_op;
+    argument_t intermediate = max_op(src, T(0));
+    return intermediate;
+  }
+};
+
 
 } // namespace math
 } // namespace tv

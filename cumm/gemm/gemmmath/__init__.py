@@ -27,9 +27,13 @@ class Clamp(pccm.ParameterizedClass):
         super().__init__()
         self.add_dependency(TensorViewNVRTC)
         self.add_include("tensorview/gemm/math/all.h")
+        self.add_include("tensorview/gemm/core/constants.h")
+
         self.dtype = dtype
+
         self.out_dtype = out_dtype
         self.num_element = num_element
+
 
     @pccm.cuda.member_function(device=True,
                                forceinline=True,
@@ -38,6 +42,10 @@ class Clamp(pccm.ParameterizedClass):
         code = pccm.code()
         argument_t = core.array_type(self.dtype, self.num_element)
         code.arg("src", f"const {argument_t} &")
+        code.arg("type", f"tv::gemm::Activation")
+        code.arg("alpha", f"float")
+        code.arg("beta", f"float")
+
         code.raw(f"""
         constexpr {self.dtype} kClamp = {self.dtype}((1U << (sizeof({self.out_dtype}) * 8 - 1)) - 1);
         tv::math::minimum<{argument_t}> min_op;
@@ -68,6 +76,8 @@ class UnaryIdentity(pccm.ParameterizedClass):
         super().__init__()
         self.add_dependency(TensorViewNVRTC)
         self.add_include("tensorview/gemm/math/all.h")
+        self.add_include("tensorview/gemm/core/constants.h")
+
         self.dtype = dtype
         self.out_dtype = out_dtype
         self.num_element = num_element
@@ -79,7 +89,55 @@ class UnaryIdentity(pccm.ParameterizedClass):
         code = pccm.code()
         argument_t = core.array_type(self.dtype, self.num_element)
         code.arg("src", f"const {argument_t} &")
+        code.arg("type", f"tv::gemm::Activation")
+        code.arg("alpha", f"float")
+        code.arg("beta", f"float")
         code.raw(f"""
+        return src;
+        """)
+        code.ret(argument_t)
+        return code
+
+    def python_ctor(self):
+        return self
+
+    def __call__(self, src: ArrayPtr):
+        return src.copy()
+
+
+class UnaryActivation(pccm.ParameterizedClass):
+    def __init__(self, dtype: dtypes.DType, out_dtype: dtypes.DType,
+                 num_element: int):
+        super().__init__()
+        self.add_dependency(TensorViewNVRTC)
+        self.add_include("tensorview/gemm/math/all.h")
+        self.add_include("tensorview/gemm/core/constants.h")
+
+        self.dtype = dtype
+        self.out_dtype = out_dtype
+        self.num_element = num_element
+
+    @pccm.cuda.member_function(device=True,
+                               forceinline=True,
+                               name="operator()")
+    def call_operator(self):
+        code = pccm.code()
+        argument_t = core.array_type(self.dtype, self.num_element)
+        code.arg("src", f"const {argument_t} &")
+        code.arg("type", f"tv::gemm::Activation")
+        code.arg("alpha", f"float")
+        code.arg("beta", f"float")
+        code.raw(f"""
+        namespace op = tv::arrayops;
+        switch (type){{
+            case tv::gemm::Activation::kNone:
+                return src;
+            case tv::gemm::Activation::kReLU:{{
+                tv::math::maximum<{argument_t}> max_op;
+                return max_op(src, {self.dtype}(0));
+            }}
+            default: return src;
+        }}
         return src;
         """)
         code.ret(argument_t)
