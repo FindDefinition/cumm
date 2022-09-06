@@ -13,3 +13,4 @@
 # limitations under the License.
 
 from .mma import BlockMmaStorage, Mma
+from .mma_multistage import MmaMultiStage

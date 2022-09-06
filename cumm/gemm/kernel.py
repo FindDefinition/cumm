@@ -31,7 +31,7 @@ from cumm.gemm import (constants, layout, mask_iters, out_iters, thread_map,
                        volta_iters, volta_out_iters, wmma)
 from cumm.gemm.algospec import GemmAlgo, TensorOp, bases, get_algo_spec
 from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
-from cumm.gemm.blockmma import BlockMmaStorage, Mma
+from cumm.gemm.blockmma import BlockMmaStorage, Mma, MmaMultiStage
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.constants import NVRTCMode
 from cumm.gemm.outputs import Output, OutputSmemStorage
@@ -489,8 +489,12 @@ class GemmKernel(pccm.ParameterizedClass):
         self.cutlass_warp_a_type = "Mma::Operator::IteratorA"
         self.cutlass_warp_b_type = "Mma::Operator::IteratorB"
 
-        self.mma_container = Mma(dtype_acc, self.partk, num_stage,
-                                 self.mma_spec, self.gemm_smem_storage)
+        if self.num_stage <= 2:
+            self.mma_container = Mma(dtype_acc, self.partk, num_stage,
+                                     self.mma_spec, self.gemm_smem_storage)
+        else:
+            self.mma_container = MmaMultiStage(dtype_acc, self.partk, num_stage,
+                                     self.mma_spec, self.gemm_smem_storage)
         self.output = Output(dtype_acc, self.warp_count_shape, self.partk,
                              self.output_spec, self.out_smem_storage)
         self.add_param_class("out_iter", self.output_spec.out_iter, "OutIter")

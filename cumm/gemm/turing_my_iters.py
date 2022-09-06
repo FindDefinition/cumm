@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from operator import truediv
+from os import access
 from typing import List
 
 import numpy as np
@@ -962,6 +963,49 @@ class SmemTileIterator(bases.GemmSmemIterator):
         code.arg("frag",
                  f"{self.fragment_t} const&").arg("byte_offset",
                                                   str(self.index_t))
+        return code
+    
+
+    def can_multistage_load(self):
+        return True
+    
+    def enumurate_get_param(self, python = False):
+        contig = 1
+        strided = 0
+        for s in range(self.tmap.iterations[strided]):
+            for c in range(self.tmap.iterations[contig]):
+                if python:
+                    yield (s, c)
+                else:
+                    yield f"{s}, {c}"
+    
+    async def store_ptr_with_param_python(self, s, c): # ret (ArrayPtr, bool: valid, ptr_addrs)
+        ptr_addrs = np.zeros((self.tmap.element_per_acc,), dtype=np.int32)
+        if self.is_sparse_input_distribute and self.is_skipped:
+            return (self.get_python(0, 0), False, ptr_addrs)
+        access_ptr = self.get_python(s, c).change_access_size(self.element_per_acc)
+        ptr_addrs[:] = np.arange(access_ptr.offset, access_ptr.offset + self.element_per_acc)
+        valid = True
+        await checkers.smem_bank_conflicit_check(access_ptr, 0)
+        assert access_ptr.length > 0
+        return (access_ptr, valid, ptr_addrs)
+    
+    @pccm.cuda.member_function(device=True, forceinline=True)
+    def store_ptr_with_param(self):
+        code = pccm.FunctionCode()
+        code.arg("s, c", "int")
+        code.arg("valid_ref", "bool&")
+        code.ret(f"{self.access_pointer}")
+        if self.is_sparse_input_distribute:
+            code.raw("""
+                if(is_skipped){
+                    valid_ref = false;
+                    return;
+                }
+            """)
+        code.raw(f"""
+            return reinterpret_cast<{self.access_pointer}>(get(s, c));
+        """)
         return code
 
     async def store_with_byte_offset_python(self, frag: ArrayPtr,
