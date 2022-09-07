@@ -1,3 +1,4 @@
+import asyncio
 from functools import partial
 import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
@@ -11,7 +12,7 @@ import inspect
 from cumm import dtypes
 from cumm.gemm.arch.tensorop import ALL_TENSOR_OP_MAP
 from cumm.gemm.core.metaarray import MetaArray, seq
-
+import pyee
 
 class WarpPanel(three.Group):
 
@@ -85,7 +86,7 @@ class GemmParams:
         self._dtypes = mui.Input("Dtype Shortcut", init="f16,f16,f16,f32,f32")
         self._trans_a = mui.Switch("TransA")
         self._trans_b = mui.Switch("TransB")
-        self._trans_c = mui.Switch("TransC")
+        # self._trans_c = mui.Switch("TransC")
 
         self._tile_shape = mui.Input("Tile Shape")
         self._warp_tile_shape = mui.Input("Warp Tile Shape")
@@ -96,15 +97,21 @@ class GemmParams:
         self._tensorop_select = mui.Select("TensorOp",
                                           [(k, k) for k in name_to_top.keys()])
 
+        self.onchange_callbacks: List[Callable[[], Coroutine]] = []
+        self.ee = pyee.AsyncIOEventEmitter()
+
     def get_layout(self):
         return {
             "ts": self._tile_shape,
             "wts": self._warp_tile_shape,
             "ta": self._trans_a,
             "tb": self._trans_b,
-            "tc": self._trans_c,
+            # "tc": self._trans_c,
             "top": self._tensorop_select,
         }
+
+    async def set_params(self):
+        pass
 
     def valid(self):
         try:
@@ -139,7 +146,7 @@ class GemmParams:
 
     @property
     def trans_c(self):
-        return self._trans_c.checked
+        return False
 
     @property 
     def tensor_op(self):
@@ -148,12 +155,17 @@ class GemmParams:
             top = self.name_to_top[self._tensorop_select.value]
         return top
 
+class WarpExtentDesigner(three.Group):
+    def __init__(self, params: GemmParams) -> None:
+        super().__init__({})
+        
+
 class TensorOpViewer(three.Group):
 
     def __init__(self, params: GemmParams) -> None:
         super().__init__({})
         self.params = params
-        self.operandA = three.Boxes2D(20000)
+        self.operandA = three.Boxes2D(10000)
         
         self.operandA.prop(color="royalblue",
                            line_color="black",
@@ -162,7 +174,7 @@ class TensorOpViewer(three.Group):
                            hover_line_color="blue",
                            hover_line_width=2)
 
-        self.operandB = three.Boxes2D(20000)
+        self.operandB = three.Boxes2D(10000)
         self.operandB.prop(color="royalblue",
                            line_color="black",
                            alpha=0.0,
@@ -170,7 +182,7 @@ class TensorOpViewer(three.Group):
                            hover_line_color="blue",
                            hover_line_width=2)
 
-        self.operandC = three.Boxes2D(20000)
+        self.operandC = three.Boxes2D(10000)
         self.operandC.prop(color="royalblue",
                            line_color="black",
                            alpha=0.0,
@@ -221,6 +233,7 @@ class TensorOpViewer(three.Group):
             "wraps":
             self.warp_panel.prop(position=(-8, 0, 0)),
         })
+        params.ee.on("changed", self.on_change)
 
     async def on_warp_select(self, enable, index):
         if self.params.tensor_op is not None:
@@ -266,9 +279,9 @@ class TensorOpViewer(three.Group):
             self.operandC.props.colors[:, 3] = 0.0
             await self.operandC.update_boxes(colors=self.operandC.props.colors)
 
-    async def on_tensorop_select(self, value: three.ValueType):
-        if value != "":
-            top = self.params.name_to_top[str(value)]
+    async def on_change(self):
+        top = self.params.tensor_op
+        if top is not None:
             scale = 0.6
             a_shape = [top.shape[0], top.shape[2]]
             b_shape = [top.shape[2], top.shape[1]]
@@ -304,7 +317,6 @@ class TensorOpViewer(three.Group):
             await self.operandC.update_boxes(centersC[:, ::-1] * scale,
                                              dimensions,
                                              colors=colorsC)
-            print(value)
 
     def is_visible_undefined(self):
         return isinstance(self.props.visible, mui.Undefined)
@@ -313,6 +325,41 @@ class TensorOpViewer(three.Group):
         await self.update_object3d(visible=visible)
         await self.html.update_object3d(visible=visible)
 
+class InputIteratorA(three.Group):
+    def __init__(self, params: GemmParams) -> None:
+        super().__init__({})
+        self.params = params
+        self.matrix = three.Boxes2D(10000)
+        self.matrix.prop(color="royalblue",
+                        line_color="black",
+                        alpha=0.0,
+                        line_width=1,
+                        hover_line_color="blue",
+                        hover_line_width=2)
+
+        params.ee.on("changed", self.on_change)
+    async def on_change(self):
+        ts = self.params.tile_shape
+
+
+class TaskItem(mui.FlexBox):
+    def __init__(self, desp: str, on_click: Callable[[], Coroutine]) -> None:
+        super().__init__()
+        self.desp = mui.Typography(desp).prop(variant="h3")
+        self.btn = mui.Button("Enter", on_click).prop(elem_color="primary")
+        self.on_click = on_click
+        self.props.align_items = "center"
+        self.add_layout({
+            "divider": mui.HDivider(),
+            "desp": self.desp,
+            "btn": self.btn,
+        })
+
+    async def set_finish(self):
+        await self.send_app_event_and_wait(self.btn.update_event(name="Done", elem_color="success"))
+
+    async def set_working(self):
+        await self.send_app_event_and_wait(self.btn.update_event(name="Enter", elem_color="primary"))
 
 
 class GemmDesigner(flowapp.EditableLayoutApp):
@@ -337,12 +384,13 @@ class GemmDesigner(flowapp.EditableLayoutApp):
             "top_viewer": self.top_viewer,
             # "tr": three.TransformControls().prop(object3d_uid="root.d3v.d3.top_viewer")
         })
+
         return {
             "d3v":
             mui.VBox({
                 "d3":
                 self.canvas,
-                "hud":
+                "params":
                 mui.VBox({
                     **self.gemm_params.get_layout(),
                     # "update": mui.Button("Box2d", self.on_box2d_update),
@@ -353,13 +401,39 @@ class GemmDesigner(flowapp.EditableLayoutApp):
                         top=0,
                         right=0,
                         z_index=5,
-                        justify_content="flex-end")
+                        justify_content="flex-end"),
+                "tasks":
+                mui.VBox({
+                    "title": mui.Typography(f"Tasks: {1}/{14}").prop(variant="h2", align_self="center"),
+                    # "update": mui.Button("Box2d", self.on_box2d_update),
+                    "viewTensorOp": TaskItem("View TensorOp", self._enter_task),
+                    "setInpARange": TaskItem("Set A Warp Range", self._enter_task),
+                    "setInpBRange": TaskItem("Set B Warp Range", self._enter_task),
+                    "assignInpATop": TaskItem("Assign A TensorOp", self._enter_task),
+                    "assignInpBTop": TaskItem("Assign B TensorOp", self._enter_task),
+
+                }).prop(position="absolute",
+                        top=0,
+                        left=0,
+                        z_index=5,
+                        justify_content="flex-start",
+                        margin="5px",
+                        border="solid gray 2px",
+                        background_color="white",
+                        max_height="50%",
+                        overflow_y="auto")
+
             }).prop(position="relative", flex=1, min_height=0),
         }
-        
+
+    async def _enter_task(self):
+        print("?2")
+        pass
+
     async def _set_gemm_params(self):
-        if self.gemm_params.valid():
-            await self.top_viewer.on_tensorop_select(self.gemm_params._tensorop_select.value)
+        self.gemm_params.ee.emit("changed")
+        # if self.gemm_params.valid():
+        #     await self.top_viewer.on_tensorop_select(self.gemm_params._tensorop_select.value)
 
     async def _select_designer(self):
         if self.top_viewer.is_visible_undefined():

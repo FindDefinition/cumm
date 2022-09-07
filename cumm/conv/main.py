@@ -257,8 +257,8 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
                     # *gen_gemm_params(ConvFwd, (64, 64, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["s8,s8,s8,s32,s32"],
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
-                    *gen_gemm_params(ConvFwd, (128, 128, 64), (64, 64, 64), 3, ConvIterAlgo.Optimized, 2, ["s8,s8,s8,s32,s32"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
+                    *gen_gemm_params(ConvFwd, (128, 128, 32), (64, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f16,f16"],
+                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8))),
 
                     # *gen_gemm_params(ConvBwdWeight, (128, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),

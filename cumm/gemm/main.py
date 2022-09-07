@@ -105,20 +105,20 @@ def gen_gemm_params(
         splitk_parallel: bool = False,
         shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
     res = []
-    # for ta in [False, True]:
-    #     for tb in [False, True]:
-    #         for tc in [False, True]:
-    #             p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc, algo, tensorop)
-    #             if not p.skipped():
-    #                 res.append(p)
-    for ta in [True]:
-        for tb in [False]:
+    for ta in [False, True]:
+        for tb in [False, True]:
             for tc in [False]:
-                p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc,
-                                   algo, tensorop, splitk_serial,
-                                   splitk_parallel, shuffle_stride)
+                p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc, algo, tensorop)
                 if not p.skipped():
                     res.append(p)
+    # for ta in [True]:
+    #     for tb in [False]:
+    #         for tc in [False]:
+    #             p = GemmAlgoParams(ts, wts, stage, dtypes_string, ta, tb, tc,
+    #                                algo, tensorop, splitk_serial,
+    #                                splitk_parallel, shuffle_stride)
+    #             if not p.skipped():
+    #                 res.append(p)
 
     return res
 
@@ -424,8 +424,7 @@ SHUFFLE_TURING_PARAMS: List[GemmAlgoParams] = [
 class GemmMainUnitTest(pccm.ParameterizedClass):
     def __init__(self, gemm_params: Optional[List[GemmAlgoParams]] = None):
         super().__init__()
-        self.add_dependency(TensorView, GemmBasic, GemmBasicHost,
-                            kernel.GemmNVRTCParams)
+        self.add_dependency(TensorView, GemmBasic, GemmBasicHost)
         if gemm_params is None:
             is_debug = os.getenv("CUMM_DEBUG", None)
             if is_debug is not None and is_debug == "1":
@@ -511,7 +510,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                     # *gen_gemm_params((64, 64, 16), (32, 32, 16), 2, "tf32,tf32,tf32,tf32,tf32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params((64, 128, 64), (32, 64, 32), 2, "f16,f16,f16,f32,f32", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
 
-                    *gen_gemm_params_rowmajor_c((64, 128, 32), (32, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
+                    *gen_gemm_params((128, 128, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((128, 256, 32), (64, 64, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((256, 128, 32), (64, 64, 32), 2, "f16,f16,f32,f32,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),
                     # *gen_gemm_params_rowmajor_c((64, 64, 32), (32, 32, 32), 2, "f16,f16,f16,f16,f16", kernel.GemmAlgo.Turing, TensorOp([16, 8, 8])),

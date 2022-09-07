@@ -272,7 +272,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
                 std::vector<void*> args{{kernel_params_ptr, &temp_data_ptr}};
-                TV_CUDA_RESULT_CHECK(driver.cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
+                TV_CUDA_RESULT_CHECK(driver.cuDrvLaunchKernel(init_kernel, 1, 1, 1, 32, 1, 1, 0, stream, args.data(), 0));
                 if (nvrtc_params.param_storage_cpu.empty()){{
                     temp_data_cpu = temp_data.cpu(ctx);
                 }}else{{
@@ -306,7 +306,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
                 std::vector<void*> args{{kernel_params_ptr, &temp_data_ptr}};
-                TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
+                TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 32, 1, 1, 0, stream, args.data(), 0));
             }}
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);

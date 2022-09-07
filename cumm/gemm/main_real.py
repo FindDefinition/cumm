@@ -483,9 +483,12 @@ def _asdv_test_regular_gemm():
             [ker],
             cudadevrt_path="/usr/local/cuda/lib64/libcudadevrt.a",
             verbose=False,
+            # verbose_path="/home/yy/Projects/cumm/build/dev_cumm",
             custom_names=custom_names)
+        # with open("/home/yy/Projects/cumm/build/dev_cumm/kernel.ptx", "w") as f:
+        #     f.write(mod.get_ptx())
         # print(mod.get_ptx())
-
+        # breakpoint()
         mod.load()
         print(mod.kernels)
         print("RTC COMPILE TIME", time.time() - t)
@@ -499,7 +502,7 @@ def _asdv_test_regular_gemm():
         k *= 2
         m = 64
         n = 64
-        k = 64
+        k = 32
         m = max(params.ts[0], m)
         n = max(params.ts[1], n)
         k = max(params.ts[2], k)
@@ -554,6 +557,7 @@ def _asdv_test_regular_gemm():
         params_cpp.a = a_tv
         params_cpp.b = b_tv
         params_cpp.c = c_tv
+        params_cpp.act_type = tv.gemm.Activation.None_
 
         nvrtc_params = tv.gemm.NVRTCParams()
         nvrtc_params.cumodule = mod.get_cpp_object()
@@ -570,7 +574,6 @@ def _asdv_test_regular_gemm():
                 "wtf::nvrtc_kernel_cpu_out")
             nvrtc_params.param_size = mod.const_values[
                 f"wtf::{NVRTCConstants.SIZEOF_KEY}"]
-
             nvrtc_params.param_storage = tv.empty([nvrtc_params.param_size],
                                                   tv.uint8, 0)
             nvrtc_params.param_storage_cpu = tv.empty(
@@ -600,8 +603,11 @@ def _asdv_test_regular_gemm():
         c_cpu = c_tv.cpu().numpy()
         print(c_cpu.reshape(-1)[-16:])
         print(c.reshape(-1)[-16:])
+        print(c_cpu.reshape(-1)[:16])
+        print(c.reshape(-1)[:16])
         
-        print(params_cpp.algo_desp, a.mean(), b.mean(), c.mean(),
+
+        print(params_cpp.algo_desp, a.mean(), b.mean(), c.mean(), c_cpu.mean(),
               np.linalg.norm(c_cpu - c))
 
 

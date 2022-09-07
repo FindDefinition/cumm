@@ -777,11 +777,14 @@ class ConvKernel(pccm.ParameterizedClass):
                             params.mask_out_ptr[tile_offset_m] = kmask;
                         }}
                         """)
-                    code.raw(f"""
-                    if (kmask == 0){{
-                        return;
-                    }}
-                    """)
+                    else:
+                        # backward input don't need to handle bias, so we can
+                        # exit early.
+                        code.raw(f"""
+                        if (kmask == 0){{
+                            return;
+                        }}
+                        """)
                     if self.problem.op_type == ConvOpType.kBackwardInput:
                         # reverse kmask
                         code.raw(f"""
@@ -806,19 +809,24 @@ class ConvKernel(pccm.ParameterizedClass):
                 if self.mask_sparse:
                     if not self.problem.op_type == ConvOpType.kBackwardWeight:
                         # TODO split algo requires to run output even if mask is zero for bias.
-                        code.raw(f"""
-                        // if (kmask != 0){{
+                        if self.problem.op_type == ConvOpType.kForward:
+                            # we can't exit early when have bias/act for forward.
+                            code.raw(f"""
+                            if (kmask != 0){{
+                                mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask,  params.problem.kernel_volume);
+                            }}
+                            """)
+                        else:
+                            code.raw(f"""
                             mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask,  params.problem.kernel_volume);
-                        // }}
-                        """)
+                            """)
+
                     else:
                         code.raw(f"""
                         int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
-                        // if (kmask != 0){{
-                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
-                                params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
-                                params.mask_width);
-                        // }}
+                        mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
+                            params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
+                            params.mask_width);
                         """)
                 else:
                     code.raw(f"""
@@ -1003,7 +1011,13 @@ class ConvKernel(pccm.ParameterizedClass):
             """)
         else:
             code.raw(f"""
-            out[0] = params;
+            auto out_ptr = reinterpret_cast<uint8_t*>(out);
+            auto param_ptr = reinterpret_cast<const uint8_t*>(&params);
+            for (auto i : tv::KernelLoopX<int>(sizeof(ConvParams))){{
+                out_ptr[i] = param_ptr[i];
+            }}
+
+            // out[0] = params;
             """)
 
         return code

@@ -25,7 +25,6 @@ if project_is_installed(PACKAGE_NAME) and project_is_editable(
         PACKAGE_NAME) and not CUMM_DISABLE_JIT:
     from cumm.csrc.arrayref import ArrayPtr
     from cumm.tensorview_bind import TensorViewBind
-
     pccm.builder.build_pybind([ArrayPtr(), TensorViewBind()],
                               PACKAGE_ROOT / "core_cc",
                               namespace_root=PACKAGE_ROOT,

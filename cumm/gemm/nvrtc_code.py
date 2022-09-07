@@ -215,11 +215,10 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
             void* raw_data_ptr;
             void* temp_data_ptr = temp_data.raw_data();
             tv::Tensor temp_data_cpu = nvrtc_params.param_storage_cpu;
-
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
                 std::vector<void*> args{{&kernel_params, &temp_data_ptr}};
-                TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
+                TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 32, 1, 1, 0, stream, args.data(), 0));
                 if (nvrtc_params.param_storage_cpu.empty()){{
                     temp_data_cpu = temp_data.cpu(ctx);
                 }}else{{
@@ -232,6 +231,8 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
                 std::vector<void*> args{{raw_data_ptr}};
+                // tv::ssprint(reinterpret_cast<tv::array<int, 4>*>(raw_data_ptr)[0]);
+                // tv::ssprint(grid_dims.x, grid_dims.y, grid_dims.z, temp_data.size(), temp_data_cpu.size());
                 TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(kernel, grid_dims.x, grid_dims.y, grid_dims.z, 
                     nvrtc_params.num_threads, 1, 1, nvrtc_params.smem_size, stream, args.data(), 0));
             }}
@@ -253,7 +254,7 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name + "/init", evtimer, stream);
                 std::vector<void*> args{{&kernel_params, &temp_data_ptr}};
-                TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 1, 1, 1, 0, stream, args.data(), 0));
+                TV_CUDA_RESULT_CHECK(nvrtc_params.cumodule->cuDrvLaunchKernel(init_kernel, 1, 1, 1, 32, 1, 1, 0, stream, args.data(), 0));
             }}
             {{
                 tv::CUDAKernelTimerGuard timerguard(algo_name, evtimer, stream);
