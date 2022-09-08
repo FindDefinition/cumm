@@ -1307,7 +1307,7 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
                 if python:
                     yield s, c
                 else:
-                    return f"{s}, {c}"
+                    yield f"{s}, {c}"
     
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_ptr_with_param(self):
