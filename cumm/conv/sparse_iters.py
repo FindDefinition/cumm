@@ -654,7 +654,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
     def can_multistage_load(self):
         return self.sub_tile_shape[0] == 1 and self.access_per_vector == 1
     
-    def enumurate_params(self, python=False):
+    def enumurate_get_param(self, python=False):
         for s in range(self.tmap.iterations[0]):
             for c in range(self.tmap.iterations[1]):
                 if python:
