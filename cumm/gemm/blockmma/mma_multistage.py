@@ -223,9 +223,15 @@ class MmaMultiStage(pccm.ParameterizedClass):
 
         self.cpasync_group: Optional[CpAsyncGroup] = None
 
-        # for debug
-        #  not use sm80 async load but frag
-        self.add_code_before_class("#define DEBUG_MMA_MS_DOWNFALL")
+        ############ for debug ########
+        #  not use sm80 async load but frag (for A or B)
+        self.add_code_before_class("#define DEBUG_MMA_MS_DOWNFALL_A")
+        self.add_code_before_class("#define DEBUG_MMA_MS_DOWNFALL_B")
+
+        # not write smem!  (A or B)
+        # self.add_code_before_class("#define DEBUG_MMA_MS_NOT_WRITE_SMEM_A")
+        self.add_code_before_class("#define DEBUG_MMA_MS_NOT_WRITE_SMEM_B")
+        
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
@@ -283,36 +289,52 @@ class MmaMultiStage(pccm.ParameterizedClass):
         code.arg("input_iter_A", f"InputIteratorA &")
         code.arg("input_iter_B", f"InputIteratorB &")
         code.arg("group_idx", "int")
-        with code.macro_if_("!defined(DEBUG_MMA_MS_DOWNFALL)"):
-            for ind in range(self.spec.num_warp_mma_iters):
-                if self.smem_clear_opt == SharedMemoryClearOption.kNone:
-                    code.raw(f"""
-                        if(group_idx == {ind}){{
-                            AsyncCopyIter_{ind}_A::do_copy(input_iter_A, smem_iter_A);
-                            AsyncCopyIter_{ind}_B::do_copy(input_iter_B, smem_iter_B);
-                            return;
-                        }}
-                    """)
-                else:
-                    code.raw(f"""
-                        if(group_idx == {ind}){{
-                            AsyncCopyIter_{ind}_A::do_copy_zfill(input_iter_A, smem_iter_A);
-                            AsyncCopyIter_{ind}_B::do_copy_zfill(input_iter_B, smem_iter_B);
-                            return;
-                        }}
-                    """)
-        with code.macro_else_():
+        with code.macro_if_("defined(DEBUG_MMA_MS_DOWNFALL_A) || defined(DEBUG_MMA_MS_DOWNFALL_B)"):
             code.raw(f"""
                 if (group_idx == {self.spec.num_warp_mma_iters - 1}){{
-                    {self.input_spec.input_iter_a.fragment_t} input_frag_A;
-                    {self.input_spec.input_iter_b.fragment_t} input_frag_B;
+#ifdef DEBUG_MMA_MS_DOWNFALL_A
+                {self.input_spec.input_iter_a.fragment_t} input_frag_A;
                     input_iter_A.load(input_frag_A);
-                    input_iter_B.load(input_frag_B);
+#ifndef DEBUG_MMA_MS_NOT_WRITE_SMEM_A
                     smem_iter_A.store(input_frag_A);
+#endif
+#endif
+#ifdef DEBUG_MMA_MS_DOWNFALL_B
+                {self.input_spec.input_iter_b.fragment_t} input_frag_B;
+                    input_iter_B.load(input_frag_B);
+#ifndef DEBUG_MMA_MS_NOT_WRITE_SMEM_B
                     smem_iter_B.store(input_frag_B);
+#endif
+#endif
                 }}
             """)
         code.macro_endif_()
+
+        for ind in range(self.spec.num_warp_mma_iters):
+            if self.smem_clear_opt == SharedMemoryClearOption.kNone:
+                code.raw(f"""
+                    if(group_idx == {ind}){{
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_A) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_A))
+                        AsyncCopyIter_{ind}_A::do_copy(input_iter_A, smem_iter_A);
+#endif
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_B) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_B))
+                        AsyncCopyIter_{ind}_B::do_copy(input_iter_B, smem_iter_B);
+#endif
+                        return;
+                    }}
+                """)
+            else:
+                code.raw(f"""
+                    if(group_idx == {ind}){{
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_A) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_A))
+                        AsyncCopyIter_{ind}_A::do_copy_zfill(input_iter_A, smem_iter_A);
+#endif
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_B) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_B))
+                        AsyncCopyIter_{ind}_B::do_copy_zfill(input_iter_B, smem_iter_B);
+#endif
+                        return;
+                    }}
+                """)
         return code
     
     def call_mask_sparse_increase_k_RS_MSTAGE(self):
@@ -344,15 +366,18 @@ class MmaMultiStage(pccm.ParameterizedClass):
             gemm_k_iterations = back_gemm_k_iterations;
             for(int i=0; i < {self.num_stage - 1}; ++i, --gemm_k_iterations){{
                 if (gemm_k_iterations > 0){{
-#ifndef DEBUG_MMA_MS_DOWNFALL
+#ifndef DEBUG_MMA_MS_DOWNFALL_A
                     GlobalAsyncCopyIter_A::do_copy_zfill(input_iter_A, smem_iter_A);
-                    GlobalAsyncCopyIter_B::do_copy_zfill(input_iter_B, smem_iter_B);
 #else
                     {self.input_spec.input_iter_a.fragment_t} input_frag_A;
-                    {self.input_spec.input_iter_b.fragment_t} input_frag_B;
                     input_iter_A.load(input_frag_A);
-                    input_iter_B.load(input_frag_B);
                     smem_iter_A.store(input_frag_A);
+#endif
+#ifndef DEBUG_MMA_MS_DOWNFALL_B
+                    GlobalAsyncCopyIter_B::do_copy_zfill(input_iter_B, smem_iter_B);
+#else
+                    {self.input_spec.input_iter_b.fragment_t} input_frag_B;
+                    input_iter_B.load(input_frag_B);
                     smem_iter_B.store(input_frag_B);
 #endif
                     input_iter_A.increment_k();
