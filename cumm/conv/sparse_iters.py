@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import contextlib
+from email import iterators
 from typing import List, Optional, Union
 
 import numpy as np
@@ -648,6 +649,42 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                     """)
         code.arg("frag", f"{self.fragment_t}&").arg("pointer_offset",
                                                     str(self.index_t))
+        return code
+    
+    def can_multistage_load(self):
+        return self.sub_tile_shape[0] == 1 and self.access_per_vector == 1
+    
+    def enumurate_params(self, python=False):
+        for s in range(self.tmap.iterations[0]):
+            for c in range(self.tmap.iterations[1]):
+                if python:
+                    yield s, c
+                else:
+                    yield f"{s}, {c}"
+    
+    @pccm.cuda.member_function(device=True, forceinline=True)
+    def load_ptr_with_param(self):
+        code = pccm.FunctionCode()
+        code.arg("s, c", "int")
+        code.arg("valid_ref", "bool&")
+        code.ret(f"{self.const_access_pointer}")
+        code.raw(f"""
+            int mask_idx = s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + 
+                c * {self.sub_tile_shape[0]} + 0;
+            auto indice_offset = get_indice_offset(s, c, 0);
+        """)
+        if self.is_wgrad_out:
+            code.raw(
+                f"valid_ref = bool(mask_[0] & (1u << mask_idx));")
+        else:
+            code.raw(
+                f"valid_ref = bool(mask_[0] & (1u << mask_idx)) && (indice_offset >= 0);"
+            )
+        code.raw(f"""
+            auto access_pointer = reinterpret_cast<{self.const_access_pointer}>(pointer_ + indice_offset + 
+                c * {self.dtype.nbytes_str(self.tmap.delta[1] * self.dtype.bitsize())}) + 0;
+            return access_pointer;
+        """)
         return code
 
     @pccm.cuda.member_function(device=True, forceinline=True)

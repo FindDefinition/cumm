@@ -246,9 +246,9 @@ class CpAsyncCopy(pccm.ParameterizedClass):
                 code.raw(f"""
                     asm volatile(
 #if CUTLASS_ENABLE_L2_PREFETCH
-                        "  @p cp.async.ca.shared.global.L2::128B [%0], [%1], %2, %3;\\n"
+                        "cp.async.ca.shared.global.L2::128B [%0], [%1], %2, %3;\\n"
 #else
-                        "  @p cp.async.ca.shared.global [%0], [%1], %2, %3;\\n"
+                        "cp.async.ca.shared.global [%0], [%1], %2, %3;\\n"
 #endif
                          ::"r"(smem_addr), "l"(src_global), "n"({self.access_size_in_byte}), "r"(real_size));
                 """)
