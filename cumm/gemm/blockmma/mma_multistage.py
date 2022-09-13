@@ -82,6 +82,8 @@ class AsyncCopyIteration(pccm.ParameterizedClass):
         code = pccm.FunctionCode()
         code.targ("InputIter").targ("SmemIter")
         code.arg("input_iter", "InputIter&").arg("smem_iter", "SmemIter&")
+        if len(list(zip(self.used_input_args, self.used_smem_args))) == 0:
+            return code.raw("///// nothing to do here /////")                       # forbid warning in compile
         code.raw("""
             bool valid;
             const void* src_ptr;
@@ -113,6 +115,8 @@ class AsyncCopyIteration(pccm.ParameterizedClass):
         code = pccm.FunctionCode()
         code.targ("InputIter").targ("SmemIter")
         code.arg("input_iter", "InputIter&").arg("smem_iter", "SmemIter&")
+        if len(list(zip(self.used_input_args, self.used_smem_args))) == 0:
+            return code.raw("///// nothing to do here /////")
         code.raw("""
             bool valid;
             const void* src_ptr;
@@ -225,12 +229,21 @@ class MmaMultiStage(pccm.ParameterizedClass):
 
         ############ for debug ########
         #  not use sm80 async load but frag (for A or B)
-        self.add_code_before_class("#define DEBUG_MMA_MS_DOWNFALL_A")
-        self.add_code_before_class("#define DEBUG_MMA_MS_DOWNFALL_B")
+        # self.add_code_before_class("#define DEBUG_MMA_MS_DOWNFALL_A")
+        # self.add_code_before_class("#define DEBUG_MMA_MS_DOWNFALL_B")
 
         # not write smem!  (A or B)
         # self.add_code_before_class("#define DEBUG_MMA_MS_NOT_WRITE_SMEM_A")
-        self.add_code_before_class("#define DEBUG_MMA_MS_NOT_WRITE_SMEM_B")
+        # self.add_code_before_class("#define DEBUG_MMA_MS_NOT_WRITE_SMEM_B")
+
+        # not read input!  (A or B)
+        # self.add_code_before_class("#define DEBUG_MMA_MS_NOT_READ_INPUT_A")
+        # self.add_code_before_class("#define DEBUG_MMA_MS_NOT_READ_INPUT_B")
+
+        # not inc iters(A and B)!
+        # self.add_code_before_class("#define DEBUG_MMA_MA_NOT_INC_FILTER")
+        # self.add_code_before_class("#define DEBUG_MMA_MA_NOT_UPDATE_INDICES_A")
+
         
 
     @pccm.cuda.constructor(device=True, forceinline=True)
@@ -288,20 +301,24 @@ class MmaMultiStage(pccm.ParameterizedClass):
         code = pccm.FunctionCode()
         code.arg("input_iter_A", f"InputIteratorA &")
         code.arg("input_iter_B", f"InputIteratorB &")
-        code.arg("group_idx", "int")
+        code.arg("group_idx", "const int &")
         with code.macro_if_("defined(DEBUG_MMA_MS_DOWNFALL_A) || defined(DEBUG_MMA_MS_DOWNFALL_B)"):
             code.raw(f"""
                 if (group_idx == {self.spec.num_warp_mma_iters - 1}){{
 #ifdef DEBUG_MMA_MS_DOWNFALL_A
                 {self.input_spec.input_iter_a.fragment_t} input_frag_A;
+#ifndef DEBUG_MMA_MS_NOT_READ_INPUT_A
                     input_iter_A.load(input_frag_A);
+#endif
 #ifndef DEBUG_MMA_MS_NOT_WRITE_SMEM_A
                     smem_iter_A.store(input_frag_A);
 #endif
 #endif
 #ifdef DEBUG_MMA_MS_DOWNFALL_B
                 {self.input_spec.input_iter_b.fragment_t} input_frag_B;
+#ifndef DEBUG_MMA_MS_NOT_READ_INPUT_B
                     input_iter_B.load(input_frag_B);
+#endif
 #ifndef DEBUG_MMA_MS_NOT_WRITE_SMEM_B
                     smem_iter_B.store(input_frag_B);
 #endif
@@ -336,6 +353,74 @@ class MmaMultiStage(pccm.ParameterizedClass):
                     }}
                 """)
         return code
+
+
+    def call_mask_dummy(self):
+        code = pccm.code()
+        code.arg("gemm_k_iterations", f"int")
+        code.arg("accumulators", f"{self.accumulator_fragment}&")
+        code.arg("input_iter_A", f"InputIteratorA &")
+        code.arg("input_iter_B", f"InputIteratorB &")
+        code.arg("src_accumulators", f"{self.accumulator_fragment} const&")
+        code.arg("mask", f"uint32_t")
+        code.arg("RS", f"int")
+        code.raw(f"""
+        accumulators = src_accumulators;
+        MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+        WarpMma warp_mma;
+        {self.input_spec.input_iter_a.fragment_t} input_frag_A;
+        {self.input_spec.input_iter_b.fragment_t} input_frag_B;
+        {self.spec.warp_iter_a.fragment_t} warp_frag_A;
+        {self.spec.warp_iter_b.fragment_t} warp_frag_B;
+        while(!mask_iter.valid()){{
+            ++mask_iter;
+            input_iter_A.increment_filter();
+            input_iter_B.increment_filter();
+        }}
+        int smem_write_stage_idx = 0;
+        while(!mask_iter.end){{
+            input_iter_A.update_indices();
+            for(int i=0; i<gemm_k_iterations; ++i){{
+                input_iter_A.load(input_frag_A);
+                input_iter_B.load(input_frag_B);
+                smem_iter_A.store(input_frag_A);
+                smem_iter_B.store(input_frag_B);
+                __syncthreads();
+                ++smem_iter_A;
+                ++smem_iter_B;
+                for (int j=0; j<{self.spec.num_warp_mma_iters}; ++j){{
+                    warp_iter_A.load(warp_frag_A);
+                    warp_iter_B.load(warp_frag_B);
+                    ++warp_iter_A;
+                    ++warp_iter_B;
+                    warp_mma(accumulators, warp_frag_A, warp_frag_B, accumulators);
+                }}
+                if (smem_write_stage_idx == {self.num_stage - 1}){{
+                    smem_iter_A.tile_increment({-self.num_stage});
+                    smem_iter_B.tile_increment({-self.num_stage});
+                    warp_iter_A.tile_increment({-self.num_stage * self.spec.num_warp_mma_iters});
+                    warp_iter_B.tile_increment({-self.num_stage * self.spec.num_warp_mma_iters});
+                    
+                    smem_write_stage_idx = 0;
+                }} else
+                    ++smem_write_stage_idx;
+                input_iter_A.increment_k();
+                input_iter_B.increment_k();
+            }}
+            
+            input_iter_A.reset_k();
+            input_iter_B.reset_k();
+            ++mask_iter;
+            input_iter_A.increment_filter();
+            input_iter_B.increment_filter();
+            while(!mask_iter.valid() && !mask_iter.end){{
+                ++mask_iter;
+                input_iter_A.increment_filter();
+                input_iter_B.increment_filter();
+            }}
+        }}
+        """)
+        return code
     
     def call_mask_sparse_increase_k_RS_MSTAGE(self):
         code = pccm.code()
@@ -357,28 +442,41 @@ class MmaMultiStage(pccm.ParameterizedClass):
         MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
         while(!mask_iter.valid()){{
             ++mask_iter;
+#ifndef DEBUG_MMA_MA_NOT_INC_FILTER
             input_iter_A.increment_filter();
             input_iter_B.increment_filter();
+#endif
         }}
         int back_gemm_k_iterations = gemm_k_iterations;
         while(!mask_iter.end){{
+#ifndef DEBUG_MMA_MA_NOT_UPDATE_INDICES_A
             input_iter_A.update_indices();
+#endif
             gemm_k_iterations = back_gemm_k_iterations;
+            TV_PRAGMA_UNROLL
             for(int i=0; i < {self.num_stage - 1}; ++i, --gemm_k_iterations){{
                 if (gemm_k_iterations > 0){{
 #ifndef DEBUG_MMA_MS_DOWNFALL_A
                     GlobalAsyncCopyIter_A::do_copy_zfill(input_iter_A, smem_iter_A);
 #else
                     {self.input_spec.input_iter_a.fragment_t} input_frag_A;
+#ifndef DEBUG_MMA_MS_NOT_READ_INPUT_A
                     input_iter_A.load(input_frag_A);
+#endif
+#ifndef DEBUG_MMA_MS_NOT_WRITE_SMEM_A
                     smem_iter_A.store(input_frag_A);
+#endif
 #endif
 #ifndef DEBUG_MMA_MS_DOWNFALL_B
                     GlobalAsyncCopyIter_B::do_copy_zfill(input_iter_B, smem_iter_B);
 #else
                     {self.input_spec.input_iter_b.fragment_t} input_frag_B;
+#ifndef DEBUG_MMA_MS_NOT_READ_INPUT_B
                     input_iter_B.load(input_frag_B);
+#endif
+#ifndef DEBUG_MMA_MS_NOT_WRITE_SMEM_B
                     smem_iter_B.store(input_frag_B);
+#endif
 #endif
                     input_iter_A.increment_k();
                     input_iter_B.increment_k();
@@ -395,8 +493,10 @@ class MmaMultiStage(pccm.ParameterizedClass):
                 if (gemm_k_iterations == 1){{
                     input_iter_A.reset_k();
                     input_iter_B.reset_k();
+#ifndef DEBUG_MMA_MA_NOT_INC_FILTER
                     input_iter_A.increment_filter();
                     input_iter_B.increment_filter();
+#endif
                     ++mask_iter;
                     while (!mask_iter.valid() && !mask_iter.end){{
                         input_iter_A.increment_filter();
@@ -417,6 +517,7 @@ class MmaMultiStage(pccm.ParameterizedClass):
             ++warp_iter_B;
 
             for (; gemm_k_iterations > {-self.num_stage + 1}; ){{
+                TV_PRAGMA_UNROLL
                 for (int warp_mma_k = 0; warp_mma_k < {self.spec.num_warp_mma_iters}; ++warp_mma_k){{
                     warp_iter_A.set_kgroup_index((warp_mma_k + 1) % {self.spec.num_warp_mma_iters});
                     warp_iter_B.set_kgroup_index((warp_mma_k + 1) % {self.spec.num_warp_mma_iters});
@@ -468,12 +569,16 @@ class MmaMultiStage(pccm.ParameterizedClass):
                         if (gemm_k_iterations == 0){{
                             input_iter_A.reset_k();
                             input_iter_B.reset_k();
+#ifndef DEBUG_MMA_MA_NOT_INC_FILTER
                             input_iter_A.increment_filter();
                             input_iter_B.increment_filter();
+#endif
                             ++mask_iter;
                             while (!mask_iter.valid() && !mask_iter.end){{
+#ifndef DEBUG_MMA_MA_NOT_INC_FILTER
                                 input_iter_A.increment_filter();
                                 input_iter_B.increment_filter();
+#endif
                                 ++mask_iter;
                             }}
                         }}
@@ -482,17 +587,26 @@ class MmaMultiStage(pccm.ParameterizedClass):
 
             }}
             CpAsyncGroup::wait_all();
-            warp_iter_A.tile_increment(smem_read_stage_idx * {-self.partk * self.spec.num_warp_mma_iters});
-            warp_iter_B.tile_increment(smem_read_stage_idx * {-self.partk * self.spec.num_warp_mma_iters});
-            smem_iter_A.tile_increment(-smem_write_stage_idx);
-            smem_iter_B.tile_increment(-smem_write_stage_idx);
-            smem_read_stage_idx = smem_write_stage_idx =0 ;
-            /*
+            
+            TV_PRAGMA_UNROLL
+            for(int i=0; i <{self.spec.num_warp_mma_iters - 1}; ++i){{
+                ++warp_iter_A;
+                ++warp_iter_B;
+            }}
+            if (smem_read_stage_idx == {self.num_stage - 1}) {{
+                warp_iter_A.tile_increment(-{self.num_stage * self.partk} *
+                                        {self.spec.num_warp_mma_iters});
+                warp_iter_B.tile_increment(-{self.num_stage * self.partk} *
+                                        {self.spec.num_warp_mma_iters});
+                smem_read_stage_idx = 0;
+            }} else
+                ++smem_read_stage_idx;
+
             if (smem_read_stage_idx != smem_write_stage_idx){{
                 smem_iter_A.tile_increment(smem_read_stage_idx - smem_write_stage_idx);
                 smem_iter_B.tile_increment(smem_read_stage_idx - smem_write_stage_idx);
                 smem_write_stage_idx = smem_read_stage_idx;
-            }}*/
+            }}
             
             __syncthreads();
         }}
