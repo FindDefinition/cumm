@@ -155,7 +155,6 @@ class MmaMultiStage(pccm.ParameterizedClass):
                  smem_clear_opt = SharedMemoryClearOption.kNone):
         super().__init__()
         assert smem_clear_opt in [SharedMemoryClearOption.kZfill, SharedMemoryClearOption.kNone], "Not Implemented"
-        assert not is_sparse_wgrad, "Not Impl"
         if mask_sparse:
             assert increment_k_first, "not impl"
             assert smem_clear_opt == SharedMemoryClearOption.kZfill, "I think it is"
@@ -455,9 +454,8 @@ class MmaMultiStage(pccm.ParameterizedClass):
         TV_PRAGMA_UNROLL
         for (int stage=0; stage < {self.num_stage - 1}; ++stage, --gemm_k_iterations){{
             while (!(mask & filter_offset_mask) && (gemm_k_iterations > 0)){{
-                ++skip_cnt;
                 k_idx += split_k_slices;
-                mask_idx = k_idx / mask_with_rate;
+                mask_idx = k_idx / mask_width_rate;
                 mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
                 --gemm_k_iterations;
                 input_iter_A.increment_no_clear_mask();
@@ -474,13 +472,16 @@ class MmaMultiStage(pccm.ParameterizedClass):
             ++input_iter_B;
             ++smem_iter_A;
             ++smem_iter_B;
+            k_idx += split_k_slices;
+            mask_idx = k_idx / mask_width_rate;
+            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
         }}
         int smem_write_stage_idx = {self.num_stage - 1};
         int smem_read_stage_idx = 0;
 
         while (!(mask & filter_offset_mask) && (gemm_k_iterations > 0)){{
             k_idx += split_k_slices;
-            mask_idx = k_idx / mask_with_rate;
+            mask_idx = k_idx / mask_width_rate;
             mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
             --gemm_k_iterations;
             input_iter_A.increment_no_clear_mask();
@@ -531,6 +532,8 @@ class MmaMultiStage(pccm.ParameterizedClass):
                     ++input_iter_A;
                     ++input_iter_B;
 
+                    CpAsyncGroup::wait_final_group();
+                    __syncthreads();
 
                     //do some chores before async wait
 
@@ -542,7 +545,7 @@ class MmaMultiStage(pccm.ParameterizedClass):
                     --gemm_k_iterations;
                     while (!(mask & filter_offset_mask) && (gemm_k_iterations > 0)){{
                         k_idx += split_k_slices;
-                        mask_idx = k_idx / mask_with_rate;
+                        mask_idx = k_idx / mask_width_rate;
                         mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
                         --gemm_k_iterations;
                         input_iter_A.increment_no_clear_mask();
@@ -569,8 +572,6 @@ class MmaMultiStage(pccm.ParameterizedClass):
                     }} else
                         ++smem_read_stage_idx;
 
-                    CpAsyncGroup::wait_final_group();
-                    __syncthreads();
                 }}
             }}
         }}
