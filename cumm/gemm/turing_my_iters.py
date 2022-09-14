@@ -1000,7 +1000,7 @@ class SmemTileIterator(bases.GemmSmemIterator):
             code.raw("""
                 if(is_skipped){
                     valid_ref = false;
-                    return;
+                    return nullptr;
                 }
             """)
         code.raw(f"""
