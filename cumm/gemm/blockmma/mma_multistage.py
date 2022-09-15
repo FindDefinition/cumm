@@ -243,6 +243,9 @@ class MmaMultiStage(pccm.ParameterizedClass):
         # self.add_code_before_class("#define DEBUG_MMA_MA_NOT_INC_FILTER")
         # self.add_code_before_class("#define DEBUG_MMA_MA_NOT_UPDATE_INDICES_A")
 
+
+        self.add_code_before_class("#define MMA_MA_OPTIMIZE_LESS_LOAD")
+
         
 
     @pccm.cuda.constructor(device=True, forceinline=True)
@@ -455,8 +458,15 @@ class MmaMultiStage(pccm.ParameterizedClass):
         for (int stage=0; stage < {self.num_stage - 1}; ++stage, --gemm_k_iterations){{
             while (!(mask & filter_offset_mask) && (gemm_k_iterations > 0)){{
                 k_idx += split_k_slices;
+#ifndef MMA_MA_OPTIMIZE_LESS_LOAD
                 mask_idx = k_idx / mask_width_rate;
                 mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+#else
+                if ((1 + mask_idx) * mask_width_rate <= k_idx){{
+                    mask_idx = k_idx / mask_width_rate;
+                    mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+                }}
+#endif
                 --gemm_k_iterations;
                 input_iter_A.increment_no_clear_mask();
                 input_iter_B.increment_no_clear_mask();
@@ -473,16 +483,30 @@ class MmaMultiStage(pccm.ParameterizedClass):
             ++smem_iter_A;
             ++smem_iter_B;
             k_idx += split_k_slices;
+#ifndef MMA_MA_OPTIMIZE_LESS_LOAD
             mask_idx = k_idx / mask_width_rate;
             mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+#else
+            if ((1 + mask_idx) * mask_width_rate <= k_idx){{
+                mask_idx = k_idx / mask_width_rate;
+                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+            }}
+#endif
         }}
         int smem_write_stage_idx = {self.num_stage - 1};
         int smem_read_stage_idx = 0;
 
         while (!(mask & filter_offset_mask) && (gemm_k_iterations > 0)){{
             k_idx += split_k_slices;
+#ifndef MMA_MA_OPTIMIZE_LESS_LOAD
             mask_idx = k_idx / mask_width_rate;
             mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+#else
+            if ((1 + mask_idx) * mask_width_rate <= k_idx){{
+                mask_idx = k_idx / mask_width_rate;
+                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+            }}
+#endif
             --gemm_k_iterations;
             input_iter_A.increment_no_clear_mask();
             input_iter_B.increment_no_clear_mask();
@@ -538,15 +562,28 @@ class MmaMultiStage(pccm.ParameterizedClass):
                     //do some chores before async wait
 
                     k_idx += split_k_slices;
+#ifndef MMA_MA_OPTIMIZE_LESS_LOAD
                     mask_idx = k_idx / mask_width_rate;
-
                     mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+#else
+                    if ((1 + mask_idx) * mask_width_rate <= k_idx){{
+                        mask_idx = k_idx / mask_width_rate;
+                        mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+                    }}
+#endif
 
                     --gemm_k_iterations;
                     while (!(mask & filter_offset_mask) && (gemm_k_iterations > 0)){{
                         k_idx += split_k_slices;
+#ifndef MMA_MA_OPTIMIZE_LESS_LOAD
                         mask_idx = k_idx / mask_width_rate;
                         mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+#else
+                        if ((1 + mask_idx) * mask_width_rate <= k_idx){{
+                            mask_idx = k_idx / mask_width_rate;
+                            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
+                        }}
+#endif
                         --gemm_k_iterations;
                         input_iter_A.increment_no_clear_mask();
                         input_iter_B.increment_no_clear_mask();
@@ -572,6 +609,138 @@ class MmaMultiStage(pccm.ParameterizedClass):
                     }} else
                         ++smem_read_stage_idx;
 
+                }}
+            }}
+        }}
+        """)
+        return code
+
+    def call_mask_sparse_increase_k_V2(self):
+        code = pccm.code()
+        code.arg("gemm_k_iterations", f"const int&")
+        code.arg("accumulators", f"{self.accumulator_fragment}&")
+        code.arg("input_iter_A", f"InputIteratorA &")
+        code.arg("input_iter_B", f"InputIteratorB &")
+        code.arg("src_accumulators", f"{self.accumulator_fragment} const&")
+        code.arg("mask", f"const uint32_t&")
+        code.arg("RS", f"const int&")
+        code.raw(f"""
+        accumulators = src_accumulators;
+        {self.spec.warp_iter_a.fragment_t} warp_frag_A[2];
+        {self.spec.warp_iter_b.fragment_t} warp_frag_B[2];
+        WarpMma warp_mma;
+        int smem_write_stage_idx = {self.num_stage - 1};
+        int smem_read_stage_idx = 0;
+        MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+        int local_gemm_k_iterations = gemm_k_iterations;
+        while(!mask_iter.valid()){{
+            ++mask_iter;
+            input_iter_A.increment_filter();
+            input_iter_B.increment_filter();
+        }}
+        input_iter_A.update_indices();
+
+        TV_PRAGMA_UNROLL
+        for (int stage=0; stage < {self.num_stage - 1}; ++stage){{
+            GlobalAsyncCopyIter_A::do_copy_zfill(input_iter_A, smem_iter_A);
+            GlobalAsyncCopyIter_B::do_copy_zfill(input_iter_B, smem_iter_B);
+            CpAsyncGroup::make_fence();
+            input_iter_A.increment_k();
+            input_iter_B.increment_k();
+            ++smem_iter_A;
+            ++smem_iter_B;
+            --local_gemm_k_iterations;
+            if (!mask_iter.end && local_gemm_k_iterations == 0){{
+                ++mask_iter;
+                input_iter_A.reset_k();
+                input_iter_B.reset_k();
+                input_iter_A.increment_filter();
+                input_iter_B.increment_filter();
+                while (!mask_iter.valid() && !mask_iter.end){{
+                    ++mask_iter;
+                    input_iter_A.increment_filter();
+                    input_iter_B.increment_filter();
+                }}
+                input_iter_A.clear_all_mask_if_pred(mask_iter.end);
+                input_iter_B.clear_all_mask_if_pred(mask_iter.end);
+                input_iter_A.update_indices();
+                local_gemm_k_iterations = gemm_k_iterations;
+            }}
+        }}
+        CpAsyncGroup::wait_final_group();
+        __syncthreads();
+        
+        warp_iter_A.set_kgroup_index(0);
+        warp_iter_B.set_kgroup_index(0);
+        warp_iter_A.load(warp_frag_A[0]);
+        warp_iter_B.load(warp_frag_B[0]);
+        ++warp_iter_A;
+        ++warp_iter_B;
+
+        while (local_gemm_k_iterations != {-self.num_stage + 1}){{
+
+            TV_PRAGMA_UNROLL
+            for (int warp_mma_k = 0; warp_mma_k < {self.spec.num_warp_mma_iters}; ++warp_mma_k){{
+                warp_iter_A.set_kgroup_index((warp_mma_k + 1) % {self.spec.num_warp_mma_iters});
+                warp_iter_B.set_kgroup_index((warp_mma_k + 1) % {self.spec.num_warp_mma_iters});
+
+                warp_iter_A.load(warp_frag_A[(warp_mma_k + 1) % 2]);
+                warp_iter_B.load(warp_frag_B[(warp_mma_k + 1) % 2]);
+
+                ++warp_iter_A;
+                ++warp_iter_B;
+
+                warp_mma(accumulators, warp_frag_A[warp_mma_k % 2],
+                    warp_frag_B[warp_mma_k % 2], accumulators);
+                
+                if (warp_mma_k < {self.spec.num_warp_mma_iters - 1})
+                    copy_tiles_and_advance(input_iter_A, input_iter_B, warp_mma_k);
+
+                if (warp_mma_k + 2 == {self.spec.num_warp_mma_iters}){{
+                    copy_tiles_and_advance(input_iter_A, input_iter_B, {self.spec.num_warp_mma_iters - 1});
+                    CpAsyncGroup::make_fence();
+
+                    // do chores before wait
+                    ++smem_iter_A;
+                    ++smem_iter_B;
+                    input_iter_A.increment_k();
+                    input_iter_B.increment_k();
+                    --local_gemm_k_iterations;
+                    if (!mask_iter.end && local_gemm_k_iterations == 0){{
+                        ++mask_iter;
+                        input_iter_A.reset_k();
+                        input_iter_B.reset_k();
+                        input_iter_A.increment_filter();
+                        input_iter_B.increment_filter();
+                        while (!mask_iter.valid() && !mask_iter.end){{
+                            ++mask_iter;
+                            input_iter_A.increment_filter();
+                            input_iter_B.increment_filter();
+                        }}
+                        input_iter_A.clear_all_mask_if_pred(mask_iter.end);
+                        input_iter_B.clear_all_mask_if_pred(mask_iter.end);
+                        input_iter_A.update_indices();
+                        local_gemm_k_iterations = gemm_k_iterations;
+                    }}
+                    if (smem_write_stage_idx == {self.num_stage - 1}) {{
+                        smem_iter_A.tile_increment(-{self.num_stage});
+                        smem_iter_B.tile_increment(-{self.num_stage});
+                        smem_write_stage_idx = 0;
+                    }} else
+                        ++smem_write_stage_idx;
+                    
+                    if (smem_read_stage_idx == {self.num_stage - 1}) {{
+                        warp_iter_A.tile_increment(-{self.num_stage * self.partk} *
+                                                {self.spec.num_warp_mma_iters});
+                        warp_iter_B.tile_increment(-{self.num_stage * self.partk} *
+                                                {self.spec.num_warp_mma_iters});
+                        smem_read_stage_idx = 0;
+                    }} else
+                        ++smem_read_stage_idx;
+                    
+                    // finish chores
+                    CpAsyncGroup::wait_final_group();
+                    __syncthreads();
                 }}
             }}
         }}
@@ -785,7 +954,7 @@ class MmaMultiStage(pccm.ParameterizedClass):
             if self.is_sparse_wgrad:
                 return self.call_mask_sparse_wgrad()
             if self.increment_k_first:
-                return self.call_mask_sparse_increase_k_RS_MSTAGE()
+                return self.call_mask_sparse_increase_k_V2()
             raise NotImplementedError
 
         code = pccm.code()
