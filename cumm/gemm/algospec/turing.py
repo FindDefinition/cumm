@@ -542,7 +542,7 @@ class AlgoSpecificTuring(object):
             tensorop: TensorOp,
             algo: GemmAlgo = GemmAlgo.Turing,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle):
-        assert algo == GemmAlgo.Turing
+        assert algo == GemmAlgo.Turing or algo == GemmAlgo.Ampere
         self.input_spec = InputTuring(tile_shape, warp_tile_shape, dtype_a,
                                       dtype_b, trans_a, trans_b, algo,
                                       shuffle_stride)

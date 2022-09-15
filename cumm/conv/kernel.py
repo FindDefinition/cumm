@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+from cumm.conv.algospec.turing import AlgoSpecificTuring
 import enum
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Type, Union
@@ -579,19 +580,7 @@ class ConvKernel(pccm.ParameterizedClass):
         # first_input_clear: for gemm, we don't need to clear frag in every input load
         # but gemm need it. gemm clear frag in iter.load, so we don't need
         # initial clear in mma.
-        if self.num_stage <= 2:
-            self.mma_container = Mma(
-                dtype_acc,
-                self.partk,
-                num_stage,
-                self.mma_spec,
-                self.gemm_smem_storage,
-                first_input_clear=False,
-                clear_mask=False,
-                mask_sparse=self.mask_sparse,
-                increment_k_first=increment_k_first,
-                is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight)
-        else:
+        if self.algo == GemmAlgo.Ampere and (self.mask_sparse == False or self.increment_k_first) and self.access_per_vector == 1:
             self.mma_container = MmaMultiStage(
                 dtype_acc,
                 self.partk,
@@ -605,6 +594,19 @@ class ConvKernel(pccm.ParameterizedClass):
                 is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight,
                 smem_clear_opt=SharedMemoryClearOption.kZfill
                 )
+        else:
+            self.mma_container = Mma(
+                dtype_acc,
+                self.partk,
+                num_stage,
+                self.mma_spec,
+                self.gemm_smem_storage,
+                first_input_clear=False,
+                clear_mask=False,
+                mask_sparse=self.mask_sparse,
+                increment_k_first=increment_k_first,
+                is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight)
+            
         self.output = Output(dtype_acc, self.warp_count_shape, self.partk,
                              self.output_spec, self.out_smem_storage)
         self.add_param_class("out_iter", self.output_spec.out_iter, "OutIter")

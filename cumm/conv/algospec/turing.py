@@ -243,7 +243,7 @@ class AlgoSpecificTuring(object):
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
                  access_per_vector: int = 1):
-        assert algo == GemmAlgo.Turing
+        assert algo == GemmAlgo.Turing or algo == GemmAlgo.Ampere
         trans_a, trans_b, trans_c = problem.get_gemm_trans_abc()
         self.input_spec = InputTuring(problem, iter_algo, tile_shape,
                                       warp_tile_shape, dtype_a, dtype_b, algo,

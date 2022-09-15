@@ -27,6 +27,7 @@ ALGO_TO_SPEC = {
     GemmAlgo.SimtDP4A: AlgoSpecificSimt,
     GemmAlgo.Volta: AlgoSpecificVolta,
     GemmAlgo.Turing: AlgoSpecificTuring,
+    GemmAlgo.Ampere: AlgoSpecificTuring
 }  # type: Dict[GemmAlgo, Union[Type[AlgoSpecificSimt], Type[AlgoSpecificVolta], Type[AlgoSpecificTuring]]]
 
 
