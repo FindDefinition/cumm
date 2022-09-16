@@ -107,15 +107,17 @@ template <typename Tarr> tv::DType get_array_tv_dtype(const Tarr &arr) {
 }
 
 template <typename Tarr> Tensor array2tensor(Tarr &arr) {
-  TV_ASSERT_INVALID_ARG(is_c_style(arr), "array must be c-contiguous array");
-  TensorShape shape;
+  // TV_ASSERT_INVALID_ARG(is_c_style(arr), "array must be c-contiguous array");
+  TensorShape shape, stride;
   for (int i = 0; i < arr.ndim(); ++i) {
     shape.push_back(arr.shape(i));
+    stride.push_back(arr.strides(i) / arr.itemsize());
+
   }
   if (arr.writeable()){
-    return tv::from_blob(arr.mutable_data(), shape, get_array_tv_dtype(arr), -1);
+    return tv::from_blob(arr.mutable_data(), shape, stride, get_array_tv_dtype(arr), -1);
   }else{
-    return tv::from_blob(arr.data(), shape, get_array_tv_dtype(arr), -1);
+    return tv::from_blob(arr.data(), shape, stride, get_array_tv_dtype(arr), -1);
   }
 }
 
