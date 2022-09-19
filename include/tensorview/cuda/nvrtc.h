@@ -214,6 +214,9 @@ public:
   }
 
   std::string ptx() const {
+    if (!ptx_.empty()){
+      return ptx_;
+    }
 #ifdef TV_CUDA
     if (prog_ == nullptr) {
       TV_ASSERT_RT_ERR(!ptx_.empty(), "PTX is empty!!!");
@@ -231,6 +234,9 @@ public:
   }
 
   tv::Tensor cubin() const {
+    if (!cubin_.empty()){
+      return cubin_;
+    }
 #ifdef TV_CUDA
     if (prog_ == nullptr) {
       TV_ASSERT_RT_ERR(!cubin_.empty(), "Cubin is empty!!!");
@@ -323,6 +329,12 @@ public:
 #ifdef TV_CUDA
     if (module_ != nullptr) {
       TV_THROW_RT_ERR("this module is already compiled");
+    }
+    auto cubin_ten = program_->cubin();
+    if (!cubin_ten.empty()){
+      TV_CUDA_RESULT_CHECK(
+          wrapper_.cuDrvModuleLoadDataEx(&module_, cubin_ten.const_raw_data(), 0, 0, 0));
+      return *this;
     }
     auto ptx = program_->ptx();
     if (!cudadevrt_path_.empty()) {

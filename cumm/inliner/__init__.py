@@ -61,7 +61,7 @@ my vscode highlight extension config:
 
 import pccm
 from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME
-from cumm.nvrtc import CummNVRTCModule
+from cumm.nvrtc import CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
 from pathlib import Path
 from cumm.common import TensorViewKernel
 import enum
@@ -242,7 +242,8 @@ class NVRTCInlineBuilder(InlineBuilder):
             build_kwargs: Optional[Dict[str, Any]] = None,
             param_deps: Optional[List[pccm.ParameterizedClass]] = None,
             measure_build_time: bool = False,
-            reload_when_code_change: bool = False):
+            reload_when_code_change: bool = False,
+            remote_addr: str = ""):
         if plugins is None:
             plugins = _DEFAULT_KERNEL_PLUGINS
         deps.extend([TensorViewNVRTC, GemmBasic])
@@ -258,6 +259,7 @@ class NVRTCInlineBuilder(InlineBuilder):
         self.index_name = index_name
         self.maximum_1d_threads = 512
         self.measure_build_time = measure_build_time
+        self._remote_addr = remote_addr
 
     def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
         for k, v in self.modules.items():
@@ -307,17 +309,26 @@ class NVRTCInlineBuilder(InlineBuilder):
         if self.measure_build_time:
             ctx = tv.measure_and_print(f"{name} nvrtc build time")
         # with tv.measure_and_print("INLINE"):
-        with ctx:
-            if verbose:
-                mod = CummNVRTCModule([pccm_cls],
-                                        verbose=verbose,
-                                        verbose_path=verbose_path)
-            else:
-                mod = CummNVRTCModule([pccm_cls])
+        params = create_nvrtc_code([pccm_cls])
+        if self._remote_addr != "":
+            # this should be used only you want to debug
+            # different cuda version.
+            import tensorpc 
+            with tensorpc.RemoteManager(self._remote_addr) as robj:
+                mod = robj.remote_call("NVRTCCompiler.compile_nvrtc", params)
+        else:
+            with ctx:
+                if verbose:
+                    mod = CummNVRTCModule([pccm_cls],
+                                            verbose=verbose,
+                                            verbose_path=verbose_path)
+                else:
+                    mod = CummNVRTCModuleBase.from_params(params)
+        
         return mod
 
     def run_func(self,
-                 func: CummNVRTCModule,
+                 func: CummNVRTCModuleBase,
                  *args,
                  user_args: Optional[_NVRTCInlineParams] = None):
         assert user_args is not None
