@@ -551,7 +551,7 @@ def _asdv_test_regular_gemm():
             a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
             b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
             dtype_c = params.dtype_c.npdtype()
-            c = (a.astype(np.float32) @ b.astype(np.float32)).astype(
+            c = -(a.astype(np.float32) @ b.astype(np.float32)).astype(
                 dtypes.get_npdtype(params.dtype_c))
         else:
             '''

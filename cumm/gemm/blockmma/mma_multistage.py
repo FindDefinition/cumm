@@ -243,8 +243,8 @@ class MmaMultiStage(pccm.ParameterizedClass):
         # self.add_code_before_class("#define DEBUG_MMA_MA_NOT_INC_FILTER")
         # self.add_code_before_class("#define DEBUG_MMA_MA_NOT_UPDATE_INDICES_A")
 
-
-        # self.add_code_before_class("#define MMA_MA_OPTIMIZE_LESS_LOAD")
+        # ----------------------------optimize or not -------------------------------
+        # self.add_code_before_class("#define MMA_MA_OPTIMIZE_LESS_LOAD")  # do it really optimized?  ## no
 
         
 
