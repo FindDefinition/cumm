@@ -330,6 +330,10 @@ class nullcontext(contextlib.AbstractContextManager):
         pass
 
 
+class _TimerMeasure:
+    def __init__(self, duration: float) -> None:
+        self.duration = duration
+
 class KernelTimer:
     def __init__(self, enable: bool = True) -> None:
         self.enable = enable and not tensorview_bind.is_cpu_only()
@@ -352,17 +356,21 @@ class KernelTimer:
             self._timer.pop()
 
     @contextlib.contextmanager
-    def _record(self, name: str, stream: int = 0, exit_handler: Optional[Callable[["CUDAKernelTimer", str], None]] = None):
+    def _record(self, name: str, stream: int = 0, exit_handler: Optional[Callable[["CUDAKernelTimer", str], None]] = None, measure_time: bool = False):
         if not self.enable:
-            yield None
+            yield _TimerMeasure(-1.0)
             return
         assert self._timer is not None
         self._timer.push(name)
         try:
+            measure = _TimerMeasure(-1.0)
             pair_name = self._timer.insert_pair("", "start", "stop")
             self._timer.record("start", stream)
-            yield self._timer
+            yield measure
             self._timer.record("stop", stream)
+            if measure_time:
+                duration = self._timer.get_pair_duration(pair_name)
+                measure.duration = duration
             if exit_handler is not None:
                 exit_handler(self._timer, pair_name)
         finally:
@@ -414,6 +422,9 @@ def get_numpy_view(ten: Tensor) -> np.ndarray:
     return np.frombuffer(buf, dtype=TENSOR_TO_NPDTYPE_MAP[ten.dtype]).reshape(
         ten.shape)
 
+def measure_duration(name: str = "CUDATimer", stream: int = 0, enable: bool = True):
+    tim = KernelTimer(enable=enable)
+    return tim._record(name, stream, measure_time=True)
 
 def numpy_view(self):
     return get_numpy_view(self)
