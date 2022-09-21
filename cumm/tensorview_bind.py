@@ -134,8 +134,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             .value("None_", tv::gemm::Activation::kNone)
             .value("ReLU", tv::gemm::Activation::kReLU)
             .value("Sigmoid", tv::gemm::Activation::kSigmoid)
+            .value("LeakyReLU", tv::gemm::Activation::kLeakyReLU);
+        """)
+        """
             .value("Tanh", tv::gemm::Activation::kTanh)
-            .value("LeakyReLU", tv::gemm::Activation::kLeakyReLU)
             .value("ELU", tv::gemm::Activation::kELU)
             .value("SeLU", tv::gemm::Activation::kSeLU)
             .value("Softsign", tv::gemm::Activation::kSoftsign)
@@ -143,9 +145,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             .value("Clip", tv::gemm::Activation::kClip)
             .value("HardSigmoid", tv::gemm::Activation::kHardSigmoid)
             .value("ScaledTanh", tv::gemm::Activation::kScaledTanh)
-            .value("ThresholdedReLU", tv::gemm::Activation::kThresholdedReLU);
-
-        """)
+            .value("ThresholdedReLU", tv::gemm::Activation::kThresholdedReLU)
+        """
         return code
 
     @pccm.static_function

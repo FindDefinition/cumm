@@ -17,6 +17,7 @@ import enum
 WARP_SIZE = 32
 OPTIM_ACCESS = 16
 OPTIM_ACCESS_BITS = OPTIM_ACCESS * 8
+SMEM_BANK_SIZE_BITS = 128 * 8
 
 class NVRTCConstants:
     SIZEOF_KEY = "kSizeOfParams"

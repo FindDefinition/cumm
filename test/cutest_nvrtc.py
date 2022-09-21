@@ -1,10 +1,9 @@
 import pickle
-from codeai.astex import lineprof
 
 from cumm import tensorview as tv
 from cumm.constants import PACKAGE_ROOT, TENSORVIEW_INCLUDE_PATH
 from cumm.inliner import NVRTCInlineBuilder
-from cumm.common import TensorViewNVRTCHashKernel, TensorViewArrayLinalg
+from cumm.common import TensorViewNVRTCHashKernel, TensorViewArrayLinalg, EigenLib
 
 # @lineprof.lineprof_wrapper_cpp
 def test_nvrtc():
@@ -120,16 +119,25 @@ def test_nvrtc3():
     a = tv.zeros([3], tv.float32, 0)
     t = np.zeros((4, 4), np.float32)
     b_out = tv.zeros([3], tv.float32, 0)
+    cc = tv.zeros([3], tv.float32, 0)
+    theta = np.radians(30)
+    c, s = np.cos(theta), np.sin(theta)
+    R = np.array(((c, -s, 0), (s, c, 0), (0, 0, 1)), np.float32)
 
     inliner.kernel_raw("wtf", inliner.get_1d_param(1), f"""
     namespace op = tv::arrayops;
 
     auto tr = $t;
+    auto tr2 = $R;
+    auto q4 = tr2.op<op::rotation_quat_matrix>();
     auto p = reinterpret_cast<tv::array<float, 3>*>($a)[0];
+    auto length = p.op<op::l2norm>();
+
     auto b = p.op<op::transform_3d>(tr);
     reinterpret_cast<tv::array<float, 3>*>($b_out)[0] = b;
+    tv::printf2_once(q4);
     """)
-    print(inliner.get_nvrtc_module("wtf").get_ptx())
+    # print(inliner.get_nvrtc_module("wtf").get_ptx())
 
     inliner.kernel_raw("wtf2", inliner.get_1d_param(1), f"""
     namespace op = tv::arrayops;
@@ -142,7 +150,7 @@ def test_nvrtc3():
     b[2] = p[0] * tr[2][0] + p[1] * tr[2][1] + p[2] * tr[2][2] + tr[2][3];
     reinterpret_cast<tv::array<float, 3>*>($b_out)[0] = b;
     """)
-    print(inliner.get_nvrtc_module("wtf2").get_ptx())
+    # print(inliner.get_nvrtc_module("wtf2").get_ptx())
     binary = pickle.dumps(inliner.get_nvrtc_module("wtf"))
     model2 = pickle.loads(binary)
     print(len(binary))

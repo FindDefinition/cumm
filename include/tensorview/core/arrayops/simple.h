@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tensorview/core/array.h>
+#include "mathbase.h"
 
 namespace tv {
 namespace arrayops {
@@ -73,6 +74,7 @@ template <typename T, size_t N, size_t Align> struct sum {
   }
 };
 
+
 template <typename T, size_t N, size_t Align> struct mean {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const array<T, N, Align> &self) {
@@ -92,6 +94,20 @@ template <typename T, size_t N, size_t Align> struct dot {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const array<T, N, Align> &self, TOther other) {
     return (self * other).template op<sum>();
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct l2norm {
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const array<T, N, Align> &self) {
+    return MathScalarOp<T>::sqrt(self.template op<dot>(self));
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct normalize {
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const array<T, N, Align> &self) {
+    return self / self.template op<l2norm>();
   }
 };
 

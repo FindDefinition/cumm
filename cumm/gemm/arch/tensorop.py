@@ -22,6 +22,7 @@ from cumm import tensorview as tv
 from cumm.common import GemmBasic, TensorViewNVRTCKernel
 from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import constants
+from cumm.gemm.algospec.core import TensorOp
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 
 class MmaLayoutDespBase:
@@ -89,6 +90,9 @@ class MmaLayoutDespBase:
 
         return mma_stmt
 
+    def get_tensor_op(self):
+        dtype_str = f"{self.dtype_ab.shortcut()},{self.dtype_ab.shortcut()},{self.dtype_c.shortcut()}"
+        return TensorOp((self.shape[0], self.shape[1], self.shape[2]), dtype_str)
 
     def a_map(self):
         return self._map_a

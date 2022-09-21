@@ -104,11 +104,13 @@ tf32 = DType("tv::tfloat32_t", 4 * 8, "tf32", 13, RegDType.TF32,
              "cutlass::tfloat32_t")  # float32 with last 13 bit removed.
 
 # special dtypes for tensor op only.
-int4 = DType("", 1 * 4, "s4", -1, RegDType.S8)
-uint4 = DType("", 1 * 4, "u4", -1, RegDType.S8)
+int4 = DType("", 1 * 4, "s4", 14, RegDType.S8)
+uint4 = DType("", 1 * 4, "u4", 15, RegDType.S8)
 
 ALL_DTYPES = (float16, float32, float64, int8, int16, int32, int64, uint8,
               uint16, uint32, uint64, bfloat16, tf32)
+
+ALL_DTYPES_FOR_GEMM = (*ALL_DTYPES, int4, uint4)
 
 SHORTCUT_TO_DTYPE = {d.shortcut(): d for d in ALL_DTYPES}
 

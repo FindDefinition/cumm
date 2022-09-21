@@ -36,6 +36,10 @@
 #define CUTLASS_ENABLE_F16C 0
 #endif
 
+#ifdef __CUDACC__
+#include <cuda_fp16.h>
+#endif
+
 #if defined(__CUDACC_RTC__)
 /* All floating-point numbers can be put in one of these categories.  */
 enum {
@@ -780,6 +784,13 @@ namespace detail {
 template <> struct TypeToDtype<half_t> {
   static constexpr DType dtype = float16;
 };
+
+#ifdef __CUDACC__
+template <>
+struct equivalent_data_type<half_t> {
+  using type = __half;
+};
+#endif
 
 } // namespace detail
 

@@ -37,24 +37,22 @@ enum class SparseConvAlgo {
   kMaskSplitImplicitGemm = 2
 };
 
-
 enum class Activation {
-  // we follow TensorRT activation here.
+  // we only support three activations here.
   kNone = 0,
   kReLU = 1,
   kSigmoid = 2,
-  kTanh = 3,
-  kLeakyReLU = 4,
-  kELU = 5,
-  kSeLU = 6,
-  kSoftsign = 7,
-  kSoftplus = 8,
-  kClip = 9,
-  kHardSigmoid = 10,
-  kScaledTanh = 11,
-  kThresholdedReLU = 12
-};
+  kLeakyReLU = 3,
+  // kELU = 5,
+  // kSeLU = 6,
+  // kSoftsign = 7,
+  // kSoftplus = 8,
+  // kClip = 9,
+  // kHardSigmoid = 10,
+  // kScaledTanh = 11,
+  // kThresholdedReLU = 12
 
+};
 
 } // namespace gemm
 } // namespace tv

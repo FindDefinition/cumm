@@ -517,16 +517,17 @@ class Activation(Enum):
   None_ = 0
   ReLU = 1
   Sigmoid = 2
-  Tanh = 3
-  LeakyReLU = 4
-  ELU = 5
-  SeLU = 6
-  Softsign = 7
-  Softplus = 8
-  Clip = 9
-  HardSigmoid = 10
-  ScaledTanh = 11
-  ThresholdedReLU = 12
+  LeakyReLU = 3
+
+#   Tanh = 3
+#   ELU = 5
+#   SeLU = 6
+#   Softsign = 7
+#   Softplus = 8
+#   Clip = 9
+#   HardSigmoid = 10
+#   ScaledTanh = 11
+#   ThresholdedReLU = 12
 
 class NVRTCParams:
     cumodule: NVRTCModule

@@ -45,7 +45,15 @@ template <> struct sizeof_bits<bool> { static int const value = 1; };
 template <class T>
 constexpr size_t sizeof_bits_v = sizeof_bits<std::decay_t<T>>::value;
 
+
+
+
 namespace detail {
+
+template <class T>
+struct equivalent_data_type {
+  using type = T;
+};
 
 template <typename T> struct sizeof_subbyte_impl {
   static_assert(sizeof_bits_v<T> % 8 == 0, "error");
@@ -53,6 +61,9 @@ template <typename T> struct sizeof_subbyte_impl {
 };
 
 } // namespace detail
+
+template <class T>
+using equivalent_data_type_t = typename detail::equivalent_data_type<T>::type;
 
 template <typename T>
 constexpr int sizeof_v = detail::sizeof_subbyte_impl<T>::value;

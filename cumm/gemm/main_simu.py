@@ -27,7 +27,7 @@ from cumm import tensorview as tv
 from cumm.gemm import kernel
 from cumm.gemm.main import GemmMainUnitTest, gen_gemm_kernels
 
-VIS_IP = "127.0.0.1:50083"
+VIS_IP = "127.0.0.1:51051"
 
 GEMM_VIS_GLOBAL_SCALE = 10
 import os
@@ -192,6 +192,10 @@ def vis_gemm_input_2d(inp: np.ndarray,
     # smem shape to bank view
     # bank_size_element_view = 128 // inp.itemsize
     # smem_shape = [kernel.div_up(smem_shape[0] * smem_shape[1], bank_size_element_view), bank_size_element_view]
+    # print(smem_shape)
+    # if smem_shape == [32, 256]:
+    #     smem_shape = [64, 128]
+    # breakpoint()
     grouped_res = OrderedDict(sorted(grouped_res.items(), key=lambda x: x[0]))
     fake_img = None
     bounds: List[List[float]] = []
@@ -791,7 +795,7 @@ def _asdv_test_turing_python(coord_input: bool = False):
 
             print(np.linalg.norm(c_tv - c), "Time=", duration)
 
-            # vis_in_relay(list(fig_per_group.values()))
+            vis_in_relay(list(fig_per_group.values()))
 
 
 if __name__ == "__main__":

@@ -39,6 +39,12 @@
 #include "half.h"
 #include <tensorview/core/all.h>
 
+#ifdef __CUDACC__
+#if (__CUDACC_VER_MAJOR__ >= 11)
+#include <cuda_bf16.h>
+#endif
+#endif
+
 namespace tv {
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -437,6 +443,15 @@ namespace detail {
 template <> struct TypeToDtype<bfloat16_t> {
   static constexpr DType dtype = bfloat16;
 };
+
+#ifdef __CUDACC__
+#if (__CUDACC_VER_MAJOR__ >= 11)
+template <>
+struct equivalent_data_type<bfloat16_t> {
+  using type = __nv_bfloat16;
+};
+#endif
+#endif
 
 } // namespace detail
 

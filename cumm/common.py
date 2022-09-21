@@ -130,16 +130,17 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
                 elif (major, minor) < (12, 0):
                     _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
                 else:
-                    # remove sm5x support in CUDA 12.
-                    _arch_list = "6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
+                    # remove sm < 70 prebuilt gemm kernels in CUDA 12.
+                    # these gemm kernels will be compiled via nvrtc.
+                    _arch_list = "7.0;7.5;8.0;8.6;9.0+PTX"
             else:
-                # TODO add more flags here.
+                # flag for non-gemm kernels, they are usually simple and small.
                 if (major, minor) < (11, 0):
-                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5"
+                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5"
                 elif (major, minor) < (12, 0):
-                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
                 else:
-                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
+                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     for named_arch, archval in named_arches.items():
         _all_arch = _all_arch.replace(named_arch, archval)
@@ -378,9 +379,10 @@ class CompileInfo(pccm.Class):
         super().__init__()
         if not CUMM_CPU_ONLY_BUILD:
             _, self.cuda_archs = _get_cuda_arch_flags()
+            _, self.gemm_cuda_archs = _get_cuda_arch_flags(True)
         else:
             self.cuda_archs = []
-
+            self.gemm_cuda_archs = []
         self.add_include("vector", "tuple")
         self.add_include("string")
 
@@ -392,6 +394,18 @@ class CompileInfo(pccm.Class):
         std::vector<std::tuple<int, int>> res;
         """)
         for ar0, ar1 in self.cuda_archs:
+            code.raw(f"res.push_back(std::make_tuple({ar0}, {ar1}));")
+        code.raw(f"return res;")
+        return code.ret("std::vector<std::tuple<int, int>>")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def get_compiled_gemm_cuda_arch(self):
+        code = pccm.code()
+        code.raw(f"""
+        std::vector<std::tuple<int, int>> res;
+        """)
+        for ar0, ar1 in self.gemm_cuda_archs:
             code.raw(f"res.push_back(std::make_tuple({ar0}, {ar1}));")
         code.raw(f"return res;")
         return code.ret("std::vector<std::tuple<int, int>>")
@@ -411,6 +425,23 @@ class CompileInfo(pccm.Class):
             """)
         code.raw(f"return false;")
         return code.ret("bool")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def arch_is_compiled_gemm(self):
+        code = pccm.code()
+        code.arg("arch", "std::tuple<int, int>")
+        code.raw(f"""
+        """)
+        for ar0, ar1 in self.gemm_cuda_archs:
+            code.raw(f"""
+            if (arch == std::make_tuple({ar0}, {ar1})){{
+                return true;
+            }}
+            """)
+        code.raw(f"return false;")
+        return code.ret("bool")
+
 
 class TensorViewKernel(pccm.Class):
     def __init__(self):
@@ -453,6 +484,15 @@ class TensorViewArrayLinalg(pccm.Class):
         self.add_dependency(TensorViewCore)
         self.add_include("tensorview/core/arrayops/linalg.h")
 
+class EigenLib(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        eigen_include = "/usr/include/eigen3/"
+        self.build_meta.add_public_includes(eigen_include)
+        self.add_include("Eigen/Core")
+        self.add_include("Eigen/Dense")
+        self.add_include("Eigen/Geometry")
+        self.add_include("Eigen/StdVector")
 
 class TensorViewNVRTCKernel(pccm.Class):
     def __init__(self):
