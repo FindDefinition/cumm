@@ -35,7 +35,7 @@ VERSION = None
 
 # What packages are required for this module to be executed?
 REQUIRED = [
-    "pccm>=0.2.21", "pybind11>=2.6.0", "fire", "numpy", 
+    "pccm<0.4.0", "ccimport<0.4.0", "pybind11>=2.6.0", "fire", "numpy", 
     "contextvars; python_version == \"3.6\"",
 ]
 
