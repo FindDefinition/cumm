@@ -69,12 +69,24 @@ __forceinline__ __device__ detail::KernelLoop<T> KernelLoopX(T count) {
                                gridDim.x * blockDim.x * NumILP, count);
 }
 
+template <typename T, int NumILP = 1>
+__forceinline__ __device__ detail::KernelLoop<T> KernelLoopX(T count, T blockIdxx, T gridDimxx) {
+  return detail::KernelLoop<T>(blockIdxx * blockDim.x + threadIdx.x,
+                               gridDimxx * blockDim.x * NumILP, count);
+}
+
 // Helper to visit indices in the range 0 <= i < count using the y-coordinate.
 // Usage: for(int i : KernelLoopY(count)) { visit(i); }
 template <typename T, int NumILP = 1>
 __forceinline__ __device__ detail::KernelLoop<T> KernelLoopY(T count) {
   return detail::KernelLoop<T>(blockIdx.y * blockDim.y + threadIdx.y,
                                gridDim.y * blockDim.y * NumILP, count);
+}
+
+template <typename T, int NumILP = 1>
+__forceinline__ __device__ detail::KernelLoop<T> KernelLoopY(T count, T blockIdxy, T gridDimxy) {
+  return detail::KernelLoop<T>(blockIdxy * blockDim.y + threadIdx.y,
+                               gridDimxy * blockDim.y * NumILP, count);
 }
 
 // Helper to visit indices in the range 0 <= i < count using the z-coordinate.
@@ -84,6 +96,13 @@ __forceinline__ __device__ detail::KernelLoop<T> KernelLoopZ(T count) {
   return detail::KernelLoop<T>(blockIdx.z * blockDim.z + threadIdx.z,
                                gridDim.z * blockDim.z * NumILP, count);
 }
+
+template <typename T, int NumILP = 1>
+__forceinline__ __device__ detail::KernelLoop<T> KernelLoopZ(T count, T blockIdxz, T gridDimxz) {
+  return detail::KernelLoop<T>(blockIdxz * blockDim.z + threadIdx.z,
+                               gridDimxz * blockDim.z * NumILP, count);
+}
+
 
 } // namespace tv
 
