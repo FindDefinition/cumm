@@ -45,7 +45,7 @@ The c++ code will be built automatically when you change c++ code in project.
 
 0. uninstall cumm installed by pip. you must ensure no "cumm" exists in ```pip list | grep cumm```
 1. install build-essential, install CUDA
-2. ```git clone https://github.com/FindDefinition/cumm```, ```cd ./cumm```, ```pip install -e .```
+2. ```git clone https://github.com/FindDefinition/cumm```, ```cd ./cumm```, ```git checkout tags/<tag_name>```, ```pip install -e .```
 3. in python, ```import cumm``` and wait for build finish.
 
 #### Windows
@@ -53,7 +53,7 @@ The c++ code will be built automatically when you change c++ code in project.
 1. install visual studio 2019 or newer. make sure C++ development component is installed. install CUDA
 2. set [powershell script execution policy](https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-7.1)
 3. start a new powershell, run ```tools/msvc_setup.ps1```
-4. ```git clone https://github.com/FindDefinition/cumm```, ```cd ./cumm```, ```pip install -e .```
+4. ```git clone https://github.com/FindDefinition/cumm```, ```cd ./cumm```, ```git checkout tags/<tag_name>```, ```pip install -e .```
 5. in python, ```import cumm``` and wait for build finish.
 
 ### Build wheel from source 
