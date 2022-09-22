@@ -454,8 +454,56 @@ def count_set_bits(v):
 from cumm.nvrtc import CummNVRTCModule
 
 
+def gen_row_hilbert_mat(m, n, dtype):
+    ret = np.zeros((m, n), dtype=dtype)
+    for i in range(m):
+        for j in range(n):
+            ret[i, j] = 1./(i + j + 1)
+    return ret.astype(dtype)
+
+def gen_row_xhilbert_mat(m, n, dtype):
+    ret = np.zeros((m, n), dtype=dtype)
+    for i in range(m):
+        for j in range(n):
+            if j > i:
+                ret[i, j] = 1. / (i + j + 1)
+            elif j < i:
+                ret[i, j] = -1./ (i + j + 1)
+            else:
+                ret[i, j] = 1
+    return ret.astype(dtype)
+
+
+def Try(m, n, k):
+    a = gen_row_xhilbert_mat(m, k, np.float16)
+    b = gen_row_xhilbert_mat(k, n, np.float16)
+    return a@b
+
+
+def gen_row_rand_mat(m, n, dtype):
+    return np.random.uniform(-1, 1, size=[m, n]).astype(dtype)
+
+
+def py_matmul(a, b, acc_type, tbk=8):
+    m = a.shape[0]
+    n = b.shape[1]
+    k = a.shape[1]
+    ret = np.zeros((m, n), dtype=acc_type)
+    for i in range(m):
+        for j in range(n):
+            acc = np.zeros([(k // tbk) + 1], dtype=acc_type)
+            for nk in range(k):
+                acc[nk // tbk] += a[i, nk] * b[nk, j]
+            accacc = np.zeros([1], dtype=acc_type)
+            for l in range(acc.shape[0]):
+                accacc[0] += acc[l]
+            ret[i, j] = accacc[0]
+    return ret
+    
+
+
 def _asdv_test_regular_gemm():
-    np.random.seed(12315)
+    np.random.seed(19260817)
     lib_object = None 
     use_nvrtc = True 
     with cudasim.enter_debug_context(True, 3):
@@ -481,7 +529,7 @@ def _asdv_test_regular_gemm():
 
         mod = CummNVRTCModule(
             [ker],
-            cudadevrt_path="/usr/local/cuda/lib64/libcudadevrt.a",
+            # cudadevrt_path="/usr/local/cuda/lib64/libcudadevrt.a",
             verbose=False,
             # verbose_path="/home/yy/Projects/cumm/build/dev_cumm",
             custom_names=custom_names)
@@ -510,9 +558,22 @@ def _asdv_test_regular_gemm():
             a = np.random.randint(-2, 2, size=[m, k]).astype(np.int8)
             b = np.random.randint(-2, 2, size=[k, n]).astype(np.int8)
             dtype_c = params.dtype_c.npdtype()
-            c = (a.astype(np.float32) @ b.astype(np.float32)).astype(
+            c = -(a.astype(np.float32) @ b.astype(np.float32)).astype(
                 dtypes.get_npdtype(params.dtype_c))
         else:
+            '''
+            a = gen_row_xhilbert_mat(m, k, dtypes.get_npdtype(params.dtype_a))
+            b = gen_row_xhilbert_mat(k, n, dtypes.get_npdtype(params.dtype_b))
+            '''
+            a = np.random.uniform(-1, 1, size=[m, k]).astype(
+                dtypes.get_npdtype(params.dtype_a))
+            b = np.random.uniform(-1, 1, size=[k, n]).astype(
+                dtypes.get_npdtype(params.dtype_b))
+            c = -py_matmul(a, b, dtypes.get_npdtype(params.dtype_c))
+            raw_a = a
+            raw_b = b
+            raw_c = c
+            '''
             a = np.random.uniform(-1, 1, size=[m, k]).astype(
                 dtypes.get_npdtype(params.dtype_a))
             b = np.random.uniform(-1, 1, size=[k, n]).astype(
@@ -521,6 +582,7 @@ def _asdv_test_regular_gemm():
             # b[32:] = 0
             c = (a.astype(np.float32) @ b.astype(np.float32)).astype(
                 dtypes.get_npdtype(params.dtype_c))
+            '''
         # print("DATA GEN FINISH")
         if params.trans_a:
             a = np.ascontiguousarray(a.transpose(1, 0))
@@ -552,11 +614,14 @@ def _asdv_test_regular_gemm():
         a_tv = tv.from_numpy(a).cuda()
         b_tv = tv.from_numpy(b).cuda()
 
-        c_tv = tv.zeros(c.shape, params.dtype_c.tv_dtype, 0)
+        d = c.copy()
+        c_tv = tv.from_numpy(d).cuda()
 
         params_cpp.a = a_tv
         params_cpp.b = b_tv
         params_cpp.c = c_tv
+        params_cpp.beta = 1.0
+        params_cpp.alpha = 1.0
         params_cpp.act_type = tv.gemm.Activation.None_
 
         nvrtc_params = tv.gemm.NVRTCParams()
@@ -593,22 +658,28 @@ def _asdv_test_regular_gemm():
                                                   tv.uint8, 0)
         else:
             raise NotImplementedError
-        
+        clock0 = time.time()
         if lib_object is not None:
             lib_object.matmul2(params_cpp)
         else:
             params_cpp.nvrtc_params = nvrtc_params
             with tv.measure_and_print():
                 tv.gemm.run_nvrtc_gemm_kernel(params_cpp)
-        c_cpu = c_tv.cpu().numpy()
-        print(c_cpu.reshape(-1)[-16:])
-        print(c.reshape(-1)[-16:])
-        print(c_cpu.reshape(-1)[:16])
-        print(c.reshape(-1)[:16])
-        
+        use_time = time.time() - clock0
 
-        print(params_cpp.algo_desp, a.mean(), b.mean(), c.mean(), c_cpu.mean(),
-              np.linalg.norm(c_cpu - c))
+        c_cpu = c_tv.cpu().numpy()
+    
+        print("MaxError:  ",np.abs(c_cpu / np.abs(c).max()).max())
+        if(np.abs(c_cpu / np.abs(c).max()).max() < 5e-3):
+            print(params_cpp.algo_desp.__str__(), "PASSED")
+        else:
+            print(params_cpp.algo_desp.__str__(), "NOT PASS")
+            assert(0)
+        # print(c_cpu.reshape(-1)[-16:])
+        # print(c.reshape(-1)[-16:])
+        
+        # print(params_cpp.algo_desp, a.mean(), b.mean(), c.mean(),
+         #      np.sum(np.abs(c_cpu - c)))
 
 
 def _asdv_test_turing():
@@ -670,7 +741,7 @@ def _asdv_test_turing():
                           algo=params.algo.value,
                           tensorop=params.tensorop.shape)
         c_cpu = c_tv.cpu().numpy()
-        print(params.get_algo_name(), np.linalg.norm(c_cpu - c))
+        print(params.get_algo_name(), np.sum(np.abs(c_cpu - c)))
 
 
 def _test_gather1():

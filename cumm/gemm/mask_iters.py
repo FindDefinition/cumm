@@ -1388,6 +1388,65 @@ class MaskTileIterator(bases.GemmInputIterator):
             "byte_offset", str(self.long_index_t))
         return code
 
+    def can_multistage_load(self):
+        return not self.transpose_load and self.sub_tile_shape[0] == 1 and self.access_per_vector == 1
+        #  must be 2 of for it
+    
+    def enumurate_get_param(self, python = False):
+        contig = 1
+        strided = 0
+        for s in range(self.thread_access_shape[strided]):
+            for c in range(self.thread_access_shape[contig]):
+                if python:
+                    yield (s, c)
+                else:
+                    yield f"{s}, {c}"
+
+    def load_ptr_with_param_python(self, s, c): # ret (ArrayPtr, bool: valid, ptr_addrs)
+        assert(self.can_multistage_load())
+        contig = 1
+        strided = 0
+        assert s < self.thread_access_shape[strided] and c < self.thread_access_shape[contig]
+        byte_ptr = self.get_python(c, 0, 0).change_access_size(self.num_sub_access)
+        valid = self.valid_python(s, c, 0, 0)
+        ptr_addrs = np.full((self.num_sub_access,), -1, dtype=np.int32)
+        ptr_addrs[:] = np.arange(byte_ptr.offset, byte_ptr.offset + self.num_sub_access)
+        ret_pack = (byte_ptr, valid, ptr_addrs)
+        if c == self.thread_access_shape[contig] - 1:  # should add inc
+            if s != self.thread_access_shape[strided] - 1:
+                self.inc_stride_python()
+            else:
+                self.end_iter_python()
+        return ret_pack
+
+    @pccm.cuda.member_function(device=True, forceinline=True)
+    def load_ptr_with_param(self):
+        code = pccm.FunctionCode()
+        contig = 1
+        strided = 0
+        code.arg("s, c", "int")
+        code.arg("valid_ref", "bool&")
+        code.ret(f"const {self.access_t}*")
+        if self.sub_tile_shape[0] == 1:
+            code.raw("auto ret_ptr = get(s, c, 0);")
+            code.raw("valid_ref = valid(s, c, 0);")
+        else:
+            code.raw("auto ret_ptr = get(s, c, 0, 0);")
+            code.raw("valid_ref = valid(s, c, 0, 0);")
+        if not self.shuffle_in_stride:
+            code.raw(f"""
+            if(c == {self.thread_access_shape[contig] - 1}){{
+                if(s != {self.thread_access_shape[strided] - 1})
+                    inc_stride();
+                else
+                    end_iter();
+                }}
+            """)
+        code.raw("""
+            return ret_ptr;
+        """)
+        return code
+
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_with_byte_offset(self):
         return self.loadstore_with_byte_offset_template(False)

@@ -1297,6 +1297,39 @@ class WeightIteratorDP4A(bases.ConvInputIterator):
         code.arg("frag", f"{self.fragment_t}&").arg("pointer_offset",
                                                     str(self.index_t))
         return code
+    
+    def can_multistage_load(self):
+        return self.sub_tile_shape[0] == 1 and self.access_per_vector == 1
+    
+    def enumurate_get_param(self, python=False):
+        for s in range(self.tmap.iterations[0]):
+            for c in range(self.tmap.iterations[1]):
+                if python:
+                    yield s, c
+                else:
+                    yield f"{s}, {c}"
+    
+    @pccm.cuda.member_function(device=True, forceinline=True)
+    def load_ptr_with_param(self):
+        code = pccm.FunctionCode()
+        code.arg("s, c", "int")
+        code.arg("valid_ref", "bool&")
+        code.ret(f"const {self.access_t}*")
+        if not self.optimized:
+            assert self.access_per_vector == 1
+            code.raw(f"""
+                auto indexes = at(s, c, 0);
+                {self.access_t} const *access_ptr = get(indexes);
+                valid_ref = valid(indexes);
+            """)
+        else:
+            code.raw(f"""
+                {self.access_t} const *access_ptr = get(s, c, 0) + 0;
+                valid_ref = valid(s, c, 0, 0);
+                if (c == {self.tmap.iterations[1] - 1} && s != {self.tmap.iterations[0] - 1})
+                    pointer_ += params_.inc_strided;
+            """)
+        return code.raw("return access_ptr;")
 
     @pccm.cuda.member_function(device=True, forceinline=True)
     def load_invalid(self):

@@ -195,11 +195,16 @@ class PitchLinearWarpRaked(InputThreadMapBase):
         self.add_dependency(TensorViewNVRTC)
         self.tile_shape = tile_shape
         self.sub_tile_shape = sub_tile_shape
-        self.num_threads = num_threads
+        self.all_threads = num_threads              # all thread we have
         self.warp_shape = warp_shape
         self.element_per_acc = sub_tile_shape[1]  # type: int
         self.warp_size = warp_shape[0] * warp_shape[1]  # type: int
-        self.num_warp = num_threads // self.warp_size
+
+        self.maximum_threads = tile_shape[0] * tile_shape[1] // self.element_per_acc     # max thread that all work
+        self.num_threads = min(self.maximum_threads, self.all_threads)     # num of string we use to read                   # thread we use
+        self.is_sparse = (self.num_threads != self.all_threads)
+        
+        self.num_warp = self.num_threads // self.warp_size
         self.thread_access_shape = metaseq(1, sub_tile_shape[1])
         self.tile_access_shape = tile_shape // self.thread_access_shape
         self.warp_access_count = self.tile_access_shape // self.warp_shape
@@ -214,6 +219,23 @@ class PitchLinearWarpRaked(InputThreadMapBase):
         self._iterations = self.warp_access_count // self.warp_count  # type: MetaArray[int]
         self._delta = metaseq(self.warp_shape[0],
                               self.warp_shape[1] * self.element_per_acc)
+
+
+    @pccm.cuda.static_function(host=True, device=True, forceinline=True)
+    def is_skipped(self):
+        code = pccm.FunctionCode()
+        code.arg('thread_id', 'int').ret('bool')
+        code.raw(rf'''
+            if(!{int(self.is_sparse)})
+                return false;
+            return thread_id >= {self.num_threads};
+        ''')
+        return code
+    
+    def is_skipped_python(self, thread_id: int) -> bool:
+        if(not self.is_sparse):
+            return False
+        return thread_id >= self.num_threads
 
     @property
     def iterations(self) -> MetaArray[int]:
@@ -241,6 +263,8 @@ class PitchLinearWarpRaked(InputThreadMapBase):
     def initial_offset(self):
         warp_dilation = self.warp_shape * self.iterations
         code = pccm.FunctionCode(f"""
+        if(is_skipped(thread_id))
+            return {{0, 0}};        // to InputIter: inefficient but convenience dummy offset.
         int warp_id = (thread_id / {self.warp_size});
         int lane_id = (thread_id % {self.warp_size});
         tv::array<int, 2> warp_offset{{warp_id / {self.warp_count[1]},
@@ -255,6 +279,8 @@ class PitchLinearWarpRaked(InputThreadMapBase):
         return code.arg("thread_id", "int").ret("tv::array<int, 2>")
 
     def initial_offset_python(self, thread_id: int):
+        if self.is_skipped_python(thread_id):
+            return seq(0, 0)
         warp_id = thread_id // self.warp_size
         lane_id = thread_id % self.warp_size
         warp_offset = seq(warp_id // self.warp_count[1],

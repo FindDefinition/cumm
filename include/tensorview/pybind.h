@@ -170,6 +170,8 @@ template <typename TDType> py::dtype tv_dtype_to_py(TDType d) {
     return py::dtype("uint64");
   case bool_:
     return py::dtype("bool_");
+  case tf32:
+    return py::dtype("float32");
   default:;
   }
   TV_THROW_INVALID_ARG("unknown dtype", d);

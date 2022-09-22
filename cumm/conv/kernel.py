@@ -38,7 +38,7 @@ from cumm.gemm import (codeops, constants, gemmmath, layout, mask_iters,
                        volta_out_iters)
 from cumm.gemm.algospec import GemmAlgo, TensorOp, bases
 from cumm.gemm.algospec.core import ShuffleStrideType, get_min_arch_of_algo
-from cumm.gemm.blockmma import BlockMmaStorage, Mma
+from cumm.gemm.blockmma import BlockMmaStorage, Mma, MmaMultiStage, SharedMemoryClearOption
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.constants import NVRTCMode
 from cumm.gemm.outputs import Output, OutputSmemStorage
@@ -604,17 +604,33 @@ class ConvKernel(pccm.ParameterizedClass):
         # first_input_clear: for gemm, we don't need to clear frag in every input load
         # but gemm need it. gemm clear frag in iter.load, so we don't need
         # initial clear in mma.
-        self.mma_container = Mma(
-            dtype_acc,
-            self.partk,
-            num_stage,
-            self.mma_spec,
-            self.gemm_smem_storage,
-            first_input_clear=False,
-            clear_mask=False,
-            mask_sparse=self.mask_sparse,
-            increment_k_first=increment_k_first,
-            is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight)
+        if self.algo == GemmAlgo.Ampere and (self.mask_sparse == False or self.increment_k_first) and self.access_per_vector == 1:
+            self.mma_container = MmaMultiStage(
+                dtype_acc,
+                self.partk,
+                num_stage,
+                self.mma_spec,
+                self.gemm_smem_storage,
+                first_input_clear=False,
+                clear_mask=False,
+                mask_sparse=self.mask_sparse,
+                increment_k_first=increment_k_first,
+                is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight,
+                smem_clear_opt=SharedMemoryClearOption.kZfill
+                )
+        else:
+            self.mma_container = Mma(
+                dtype_acc,
+                self.partk,
+                num_stage,
+                self.mma_spec,
+                self.gemm_smem_storage,
+                first_input_clear=False,
+                clear_mask=False,
+                mask_sparse=self.mask_sparse,
+                increment_k_first=increment_k_first,
+                is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight)
+            
         self.output = Output(dtype_acc, self.warp_count_shape, self.partk,
                              self.output_spec, self.out_smem_storage)
         self.add_param_class("out_iter", self.output_spec.out_iter, "OutIter")
