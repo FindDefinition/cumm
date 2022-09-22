@@ -111,7 +111,7 @@ def gen_gemm_params(op_types: List[ConvOpType],
                     wts,
                     ndim: int,
                     iter_algo: ConvIterAlgo,
-                    stage: int,
+                    stage: Union[int, List[int]],
                     dtypes_string: Union[str, List[str]],
                     li: ConvLayout,
                     lw: ConvLayout,
@@ -127,23 +127,29 @@ def gen_gemm_params(op_types: List[ConvOpType],
     res: List[ConvAlgoParams] = []
     if not isinstance(dtypes_string, list):
         dtypes_string = [dtypes_string]
+    stages: List[int] = []
+    if isinstance(stage, list):
+        stages.extend(stage)
+    else:
+        stages.append(stage)
     for dts in dtypes_string:
         for op_type in op_types:
-            if op_type == ConvOpType.kBackwardWeight:
-                p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
-                                   dts, li, lw, lo, algo, tensorop, True,
-                                   splitk_parallel, mask_sparse,
-                                   increment_k_first, access_per_vector,
-                                   is_nvrtc=is_nvrtc)
-            else:
-                p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, stage,
-                                   dts, li, lw, lo, algo, tensorop,
-                                   splitk_serial, splitk_parallel, mask_sparse,
-                                   increment_k_first, access_per_vector,
-                                   is_nvrtc=is_nvrtc)
+            for num_stage in stages:
+                if op_type == ConvOpType.kBackwardWeight:
+                    p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, num_stage,
+                                    dts, li, lw, lo, algo, tensorop, True,
+                                    splitk_parallel, mask_sparse,
+                                    increment_k_first, access_per_vector,
+                                    is_nvrtc=is_nvrtc)
+                else:
+                    p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, num_stage,
+                                    dts, li, lw, lo, algo, tensorop,
+                                    splitk_serial, splitk_parallel, mask_sparse,
+                                    increment_k_first, access_per_vector,
+                                    is_nvrtc=is_nvrtc)
 
-            if not p.skipped():
-                res.append(p)
+                if not p.skipped():
+                    res.append(p)
     return res
 
 

@@ -316,9 +316,12 @@ ALL_TENSOR_OP_MAP: Dict[Tuple[Tuple[int, int, int], dtypes.DType, dtypes.DType],
 
     ((16, 8, 32), dtypes.int4, dtypes.int32): MmaM16N8K32I4(dtypes.int4, dtypes.int32, (7, 5)),
     ((16, 8, 32), dtypes.uint4, dtypes.int32): MmaM16N8K32I4(dtypes.uint4, dtypes.int32, (7, 5)),
-    
-    ((16, 8, 64), dtypes.int4, dtypes.int32): MmaM16N8K64I4(dtypes.int4, dtypes.int32, (7, 5)),
-    ((16, 8, 64), dtypes.uint4, dtypes.int32): MmaM16N8K64I4(dtypes.uint4, dtypes.int32, (7, 5)),
+
+    ((16, 8, 32), dtypes.int8, dtypes.int32): MmaM16N8K32I8(dtypes.int8, dtypes.int32, (8, 0)),
+    ((16, 8, 32), dtypes.uint8, dtypes.int32): MmaM16N8K32I8(dtypes.uint8, dtypes.int32, (8, 0)),
+
+    ((16, 8, 64), dtypes.int4, dtypes.int32): MmaM16N8K64I4(dtypes.int4, dtypes.int32, (8, 0)),
+    ((16, 8, 64), dtypes.uint4, dtypes.int32): MmaM16N8K64I4(dtypes.uint4, dtypes.int32, (8, 0)),
 }
 
 def get_tensorop_desp(shape: MetaArray[int], dtype_ab: dtypes.DType, dtype_c: dtypes.DType):
