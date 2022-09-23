@@ -204,7 +204,8 @@ class UnaryActivation(pccm.ParameterizedClass):
                 TV_PRAGMA_UNROLL
                 for (int i = 0; i < {self.num_element}; ++i){{
                     auto x = src[i];
-                    res[i] = {self.dtype}(1) / ({self.dtype}(1) + {self.dtype}(MathOp::exp(-src_nv[i])));
+                    auto xx = MathOp::exp(-src_nv[i]);
+                    res[i] = {self.dtype}(1) / ({self.dtype}(1) + *reinterpret_cast<{self.dtype}*>( &xx ));
                 }}
                 return res;
             }}
