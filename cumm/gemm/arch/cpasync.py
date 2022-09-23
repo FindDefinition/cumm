@@ -238,11 +238,13 @@ class CpAsyncCopy(pccm.ParameterizedClass):
         code.arg("src_global", "const void*")
         code.arg("pred_guard", "bool", "true")
         code.raw(f"""
+        """)
+        with code.macro_if_("CUDA_CP_ASYNC_ACTIVATED"):
+            code.raw(f"""
             unsigned smem_addr = tv::gemm::get_smem_pointer(dest_smem);
             unsigned real_size = (pred_guard ? {self.access_size_in_byte} : 0);
-        """)
-        if self.cache_opr == CacheOperation.Always:
-            with code.macro_if_("CUDA_CP_ASYNC_ACTIVATED"):
+            """)
+            if self.cache_opr == CacheOperation.Always:
                 code.raw(f"""
                     asm volatile(
 #if CUTLASS_ENABLE_L2_PREFETCH
@@ -252,11 +254,7 @@ class CpAsyncCopy(pccm.ParameterizedClass):
 #endif
                          ::"r"(smem_addr), "l"(src_global), "n"({self.access_size_in_byte}), "r"(real_size));
                 """)
-            with code.macro_else_():
-                code.raw("assert(0);")
-            code.macro_endif_()
-        elif self.cache_opr == CacheOperation.Global:
-            with code.macro_if_("CUDA_CP_ASYNC_ACTIVATED"):
+            elif self.cache_opr == CacheOperation.Global:
                 code.raw(f"""
                     asm volatile(
 #if CUTLASS_ENABLE_L2_PREFETCH
@@ -266,11 +264,11 @@ class CpAsyncCopy(pccm.ParameterizedClass):
 #endif
                          ::"r"(smem_addr), "l"(src_global), "n"({self.access_size_in_byte}), "r"(real_size));
                 """)
-            with code.macro_else_():
-                code.raw("assert(0);")
-            code.macro_endif_()
-        else:
-            raise NotImplementedError
+            else:
+                raise NotImplementedError
+        with code.macro_else_():
+            code.raw("assert(0);")
+        code.macro_endif_()
         return code
 
     def copy_zfill_python(self, dest_ptr, src_ptr, valid, GroupArrange: CpAsyncGroup):
