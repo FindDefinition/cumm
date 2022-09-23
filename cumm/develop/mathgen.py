@@ -154,6 +154,9 @@ static T pow(T x, T n){{
 static T fmod(T x, T n){{
     return std::fmod(x, n);
 }}
+static T neg(T x) {{ 
+    return -x; 
+}}
 
 {code_cpu}
 #endif
@@ -182,6 +185,9 @@ TV_HOST_DEVICE_INLINE static float pow(float x, float n){{
 TV_HOST_DEVICE_INLINE static float fmod(float x, float n){{
     return fmodf(x, n);
 }}
+TV_HOST_DEVICE_INLINE static float neg(float x) {{ 
+    return -x; 
+}}
 
 {code_cuda_fp}
 }};
@@ -190,6 +196,15 @@ template <>
 struct MathScalarOp<__half>{{
 {code_cuda_hf}
 {code_cuda_hf2}
+  TV_HOST_DEVICE_INLINE static __half neg(__half x) {{ 
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+    return __hneg(x);
+#else
+    return __half(-(float(x)));
+#endif
+
+  }}
+
 }};
 #endif
 #if (defined(__CUDACC_VER_MAJOR__) && (__CUDACC_VER_MAJOR__ >= 11))
@@ -197,6 +212,13 @@ template <>
 struct MathScalarOp<__nv_bfloat16>{{
 {code_cuda_bf}
 {code_cuda_bf2}
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 neg(__nv_bfloat16 x) {{  
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+    return __hneg(x);
+#else
+    return __nv_bfloat16(-(float(x)));
+#endif
+  }}
 }};
 #endif
 

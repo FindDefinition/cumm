@@ -155,5 +155,38 @@ def test_nvrtc3():
     model2 = pickle.loads(binary)
     print(len(binary))
 
+def test_nvrtc_problem():
+
+    # init driver
+    a = tv.zeros([1], tv.float32, 0)
+    prog = tv.NVRTCProgram(
+        """
+    #include <tensorview/core/all.h>
+    #include <tensorview/gemm/debug.h>
+    #include <tensorview/core/arrayops/all.h>
+    #include <cuda/std/cfloat>
+    #include <tensorview/hash/linear.cu.h>
+    #include <cuda_fp16.h>
+
+    extern \"C\" __global__
+    void add(float *x, int64_t n)
+    {
+        using T = __half;
+        using MathOp = tv::arrayops::MathScalarOp<__half>;
+        tv::array<__half, 8> hs;
+        hs[0] = __half(x[0]);
+        __half a = MathOp::exp(hs[0]);
+        __half s = __half(-float(hs[0]));
+        __half e = MathOp::exp(s);
+        // auto o = T(1) / (T(1) + *reinterpret_cast<T*>( &e ));
+
+
+    }
+    """,
+        opts=["--std=c++17", "-I",
+              str(TENSORVIEW_INCLUDE_PATH), 
+              "-I", "/usr/local/cuda/include", "--gpu-architecture=sm_52"])
+    print(prog.ptx())
+
 if __name__ == "__main__":
-    test_nvrtc3()
+    test_nvrtc_problem()

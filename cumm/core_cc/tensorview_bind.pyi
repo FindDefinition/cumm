@@ -561,6 +561,7 @@ class GemmAlgoDesp:
     element_per_access_c: int
     access_per_vector: int
     is_nvrtc: bool
+    min_arch: Tuple[int, int]
 
     def __init__(self) -> None:
         ...

@@ -264,7 +264,7 @@ class CpAsyncCopy(pccm.ParameterizedClass):
 #else
                         "cp.async.cg.shared.global [%0], [%1], %2, %3;\\n"
 #endif
-                         ::"r"(smem_addr), "l"(src_global), "n"({self.access_size_in_byte}) "r"(real_size));
+                         ::"r"(smem_addr), "l"(src_global), "n"({self.access_size_in_byte}), "r"(real_size));
                 """)
             with code.macro_else_():
                 code.raw("assert(0);")

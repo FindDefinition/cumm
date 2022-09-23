@@ -87,6 +87,8 @@ template <typename T> struct MathScalarOp {
 
   static T atanh(T x) { return std::atanh(x); }
 
+  static T neg(T x) { return -x; }
+
 #endif
 };
 
@@ -164,6 +166,9 @@ template <> struct MathScalarOp<float> {
   TV_HOST_DEVICE_INLINE static float acosh(float x) { return acoshf(x); }
 
   TV_HOST_DEVICE_INLINE static float atanh(float x) { return atanhf(x); }
+
+  TV_HOST_DEVICE_INLINE static float neg(float x) { return -x; }
+
 };
 #ifdef __CUDACC__
 template <> struct MathScalarOp<__half> {
@@ -287,6 +292,16 @@ template <> struct MathScalarOp<__half> {
     return __half(fabsf(float(x)));
 #endif
   }
+
+  TV_HOST_DEVICE_INLINE static __half neg(__half x) { 
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+    return __hneg(x);
+#else
+    return __half(-(float(x)));
+#endif
+
+  }
+
 
   TV_DEVICE_INLINE static __half2 v2sqrt(__half2 x) {
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
@@ -589,6 +604,14 @@ template <> struct MathScalarOp<__nv_bfloat16> {
     return __habs(x);
 #else
     return __nv_bfloat16(fabsf(float(x)));
+#endif
+  }
+
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 neg(__nv_bfloat16 x) { 
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+    return __hneg(x);
+#else
+    return __nv_bfloat16(-(float(x)));
 #endif
   }
 
