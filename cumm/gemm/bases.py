@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import abc
-from typing import Optional, Union
+from typing import Optional, Tuple, Union
 
 import pccm
 
@@ -24,8 +24,18 @@ from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 from cumm.gemm.thread_map import PitchLinear, PitchLinearWarpRaked
 
 
+class GemmContainerBase(abc.ABC):
+    def min_arch(self) -> Optional[Tuple[int, int]]:
+        return None
+
+
 @pccm.skip_inherit
-class DTypeBase(pccm.ParameterizedClass):
+class GemmComponentBase(pccm.ParameterizedClass):
+    def min_arch(self) -> Optional[Tuple[int, int]]:
+        return None
+
+@pccm.skip_inherit
+class DTypeBase(GemmComponentBase):
     def __init__(self,
                  dtype: dtypes.DType,
                  element_per_acc: int,
@@ -257,7 +267,7 @@ class GemmOutFragIterator(GemmIterator):
 
 
 @pccm.skip_inherit
-class WarpMma(pccm.ParameterizedClass):
+class WarpMma(GemmComponentBase):
     def python_ctor(self) -> "WarpMma":
         raise NotImplementedError
 
@@ -266,8 +276,9 @@ class WarpMma(pccm.ParameterizedClass):
         raise NotImplementedError
 
 
+
 @pccm.skip_inherit
-class GemmOutputOp(pccm.ParameterizedClass):
+class GemmOutputOp(GemmComponentBase):
     def python_ctor(self, alpha: float, beta: float) -> "GemmOutputOp":
         raise NotImplementedError
 
@@ -282,7 +293,7 @@ class GemmOutputOp(pccm.ParameterizedClass):
 
 
 @pccm.skip_inherit
-class GemmApply(pccm.ParameterizedClass):
+class GemmApply(GemmComponentBase):
     def python_ctor(self) -> "GemmApply":
         raise NotImplementedError
 

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pccm
@@ -70,6 +70,9 @@ class WarpMmaVolta(bases.WarpMma):
 
     def python_ctor(self):
         return self
+
+    def min_arch(self) -> Optional[Tuple[int, int]]:
+        return self.mma.min_arch()
 
     @pccm.cuda.member_function(name="operator()",
                                device=True,

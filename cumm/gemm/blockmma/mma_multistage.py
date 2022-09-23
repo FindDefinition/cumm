@@ -180,7 +180,7 @@ class MmaMultiStage(pccm.ParameterizedClass):
         if is_sparse_wgrad:
             self.add_param_class("gl_wgrad", GlobalLoad(4), "GlobalLoad")
         self.add_param_class("mma_ns_gm", smem_storage, "GemmStorage")
-
+        self.wmma = spec.warp_mma
 
         # test stage=2
         # self.num_stage = 2
@@ -247,6 +247,16 @@ class MmaMultiStage(pccm.ParameterizedClass):
         # self.add_code_before_class("#define MMA_MA_OPTIMIZE_LESS_LOAD")  # do it really optimized?  ## no
 
         
+    def min_arch(self) -> Optional[Tuple[int, int]]:
+        min_arch = (8, 0)
+        wmma_arch = self.wmma.min_arch()
+        if wmma_arch is not None:
+            if wmma_arch < min_arch:
+                return min_arch
+            else:
+                return wmma_arch
+        else:
+            return min_arch
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):

@@ -44,6 +44,7 @@ from cumm.gemm.constants import NVRTCMode
 from cumm.gemm.outputs import Output, OutputSmemStorage
 from cumm.gemm.utils import GemmUtilsCPU
 from cumm.gemm.constants import NVRTCConstants
+from cumm.gemm.bases import GemmComponentBase
 
 def div_up(a, b):
     return (a + b - 1) // b
@@ -434,7 +435,7 @@ class ConvParams(pccm.ParameterizedClass):
         return code
 
 
-class ConvKernel(pccm.ParameterizedClass):
+class ConvKernel(GemmComponentBase):
     def __init__(self,
                  ndim: int,
                  op_type: ConvOpType,
@@ -641,6 +642,13 @@ class ConvKernel(pccm.ParameterizedClass):
         self.add_param_class("mma", self.mma_container, "Mma")
         self.add_param_class("output", self.output, "Output")
 
+    def min_arch(self) -> Tuple[int, int]:
+        arch = self.mma_container.min_arch()
+        if arch is None:
+            return (0, 0)
+        else:
+            return arch
+
     def support_splitk(self):
         return self.splitk_serial or self.splitk_parallel
 
@@ -693,7 +701,9 @@ class ConvKernel(pccm.ParameterizedClass):
         else:
             code.arg("params", "ConvParams")
 
-        min_arch = get_min_arch_of_algo(self.algo)
+        # min_arch = get_min_arch_of_algo(self.algo)
+        min_arch = self.min_arch()
+
         arch_num = min_arch[0] * 100 + min_arch[1] * 10
         # use __CUDA_ARCH__ macro to reduce binary size
         # TODO this macro can't reduce compile time

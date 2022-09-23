@@ -241,6 +241,9 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                             &tv::gemm::GemmAlgoDesp::access_per_vector);
         m_cls.def_readwrite("is_nvrtc",
                             &tv::gemm::GemmAlgoDesp::is_nvrtc);
+        m_cls.def_readwrite("min_arch",
+                            &tv::gemm::GemmAlgoDesp::min_arch);
+
         """)
         return code
 

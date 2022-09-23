@@ -72,30 +72,55 @@ def main():
             """)
 
         code_cuda_fps.append(f"""
-TV_HOST_DEVICE_INLINE static float {item.name}(float x){{
-    return {item.name}f(x);
-}}
+    TV_HOST_DEVICE_INLINE static float {item.name}(float x){{
+        return {item.name}f(x);
+    }}
         """)
         if item.f16name:
             code_cuda_hfs.append(f"""
     TV_DEVICE_INLINE static __half {item.name}(__half x){{
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
         return {item.f16name}(x);
+#else
+        return __half({item.name}f(float(x)));
+#endif
     }}
             """)
             code_cuda_bfs.append(f"""
     TV_DEVICE_INLINE static __nv_bfloat16 {item.name}(__nv_bfloat16 x){{
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
         return {item.f16name}(x);
+#else
+        return __nv_bfloat16({item.name}f(float(x)));
+#endif
     }}
             """)
         if item.f16vecname:
             code_cuda_hf2s.append(f"""
     TV_DEVICE_INLINE static __half2 v2{item.name}(__half2 x){{
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
         return {item.f16vecname}(x);
+#else
+        auto x0 = __low2float(x);
+        auto x1 = __high2float(x);
+        x0 = {item.name}f(x0);
+        x1 = {item.name}f(x1);
+        return __floats2half2_rn(x0, x1);
+#endif
+
     }}
             """)
             code_cuda_bf2s.append(f"""
     TV_DEVICE_INLINE static __nv_bfloat162 v2{item.name}(__nv_bfloat162 x){{
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
         return {item.f16vecname}(x);
+#else
+        auto x0 = __low2float(x);
+        auto x1 = __high2float(x);
+        x0 = {item.name}f(x0);
+        x1 = {item.name}f(x1);
+        return __floats2bfloat162_rn(x0, x1);
+#endif
     }}
             """)
 
@@ -160,16 +185,14 @@ TV_HOST_DEVICE_INLINE static float fmod(float x, float n){{
 
 {code_cuda_fp}
 }};
-
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+#ifdef __CUDACC__
 template <>
 struct MathScalarOp<__half>{{
 {code_cuda_hf}
 {code_cuda_hf2}
 }};
 #endif
-
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+#if (defined(__CUDACC_VER_MAJOR__) && (__CUDACC_VER_MAJOR__ >= 11))
 template <>
 struct MathScalarOp<__nv_bfloat16>{{
 {code_cuda_bf}

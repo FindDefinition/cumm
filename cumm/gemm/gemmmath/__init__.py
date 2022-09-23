@@ -181,7 +181,7 @@ class UnaryActivation(pccm.ParameterizedClass):
         code.raw(f"""
         namespace op = tv::arrayops;
         using scalar_nv_t = tv::equivalent_data_type_t<{self.dtype}>;
-        auto& src_nv = reinterpret_cast<const {nv_argument_t}&>(src);
+        {nv_argument_t2} src_nv = reinterpret_cast<const {nv_argument_t}&>(src);
         using MathOp = op::MathScalarOp<tv::equivalent_data_type_t<{self.dtype}>>;
         switch (type){{
             case tv::gemm::Activation::kNone:
@@ -199,20 +199,24 @@ class UnaryActivation(pccm.ParameterizedClass):
                 }}
                 return res;
             }}
+            default: return src;
+        }}
+        return src;
+        """)
+        """
             case tv::gemm::Activation::kSigmoid:{{
                 {argument_t} res;
                 TV_PRAGMA_UNROLL
                 for (int i = 0; i < {self.num_element}; ++i){{
                     auto x = src[i];
-                    auto xx = MathOp::exp(-src_nv[i]);
+                    {old_dtype} wtf = -src_nv[i];
+                    {old_dtype} xx = MathOp::exp(-wtf);
                     res[i] = {self.dtype}(1) / ({self.dtype}(1) + *reinterpret_cast<{self.dtype}*>( &xx ));
                 }}
                 return res;
             }}
-            default: return src;
-        }}
-        return src;
-        """)
+
+        """
         code.ret(argument_t)
         return code
 

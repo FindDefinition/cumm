@@ -73,6 +73,9 @@ class WarpMmaTuring(bases.WarpMma):
         self.add_param_class("tensorop", self.mma, "InstMma")
         self.acc_is_rowmajor = acc_is_rowmajor
 
+    def min_arch(self) -> Optional[Tuple[int, int]]:
+        return self.mma.min_arch()
+
     def array_type(self, dtype: str, count: int):
         return core.array_type(dtype, count)
 

@@ -669,6 +669,10 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
         std::vector<tv::gemm::ConvAlgoDesp> desps;
         """)
         for ker in self.all_kernels:
+            min_arch = (0, 0)
+            ker_min_arch = ker.min_arch()
+            if ker_min_arch is not None:
+                min_arch = ker_min_arch
             code.raw("{")
             code.raw(f"""
             tv::gemm::ConvAlgoDesp desp({ker.problem.ndim}, tv::gemm::ConvOpType({ker.problem.op_type.value}));
@@ -700,6 +704,7 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
             desp.element_per_access_b = {ker.input_spec.input_iter_b.element_per_acc};
             desp.element_per_access_c = {ker.output_spec.out_iter.element_per_acc};
             desp.access_per_vector = {ker.access_per_vector};
+            desp.min_arch = std::make_tuple({min_arch[0]}, {min_arch[1]});
 
             // Conv attrs
             desp.ndim = {ker.problem.ndim};

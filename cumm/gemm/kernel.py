@@ -38,6 +38,7 @@ from cumm.gemm.outputs import Output, OutputSmemStorage
 from cumm.gemm.utils import GemmUtils, GemmUtilsCPU
 from cumm.gemm.wmma.simt import WarpMmaSimt
 from cumm.gemm.constants import NVRTCConstants
+from cumm.gemm.bases import GemmComponentBase
 
 def div_up(a, b):
     return (a + b - 1) // b
@@ -373,7 +374,7 @@ class GemmParams(pccm.ParameterizedClass):
         return code
 
 
-class GemmKernel(pccm.ParameterizedClass):
+class GemmKernel(GemmComponentBase):
     def __init__(
             self,
             tile_shape: MetaArray[int],
@@ -537,6 +538,13 @@ class GemmKernel(pccm.ParameterizedClass):
         self.add_param_class("mma", self.mma_container, "Mma")
         self.add_param_class("output", self.output, "Output")
 
+    def min_arch(self) -> Tuple[int, int]:
+        arch = self.mma_container.min_arch()
+        if arch is None:
+            return (0, 0)
+        else:
+            return arch
+
     def get_algo_name(self):
         res = f"{self.algo.value}_{self.dtype_a.shortcut()}{self.dtype_b.shortcut()}{self.dtype_c.shortcut()}"
         res += f"{self.dtype_acc.shortcut()}{self.dtype_comp.shortcut()}"
@@ -586,7 +594,7 @@ class GemmKernel(pccm.ParameterizedClass):
                 """)
         else:
             code.arg("params", "GemmParams")
-        min_arch = get_min_arch_of_algo(self.algo)
+        min_arch = self.min_arch()
         arch_num = min_arch[0] * 100 + min_arch[1] * 10
         # use __CUDA_ARCH__ macro to reduce binary size
         # TODO this macro can't reduce compile time

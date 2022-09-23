@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import abc
+from typing import Optional, Tuple
 
 import numpy as np
 import pccm
@@ -23,11 +24,11 @@ from cumm.gemm.bases import (GemmApply, GemmInputIterator, GemmIterator,
                              GemmOutFragIterator, GemmOutputIterator,
                              GemmOutputOp, GemmOutSmemLoader,
                              GemmOutWarpIterator, GemmSmemIterator,
-                             GemmWarpIterator, WarpMma)
+                             GemmWarpIterator, WarpMma, GemmContainerBase)
 from cumm.gemm.core import MetaArray, metaseq, seq
 from .core import CacheOp
 
-class Input(abc.ABC):
+class Input(GemmContainerBase):
     """
     construct input iters
     Components:
@@ -87,7 +88,7 @@ class Input(abc.ABC):
         raise NotImplementedError
 
 
-class Mma(abc.ABC):
+class Mma(GemmContainerBase):
     @abc.abstractproperty
     def input_spec(self) -> Input:
         raise NotImplementedError
@@ -136,7 +137,7 @@ class Mma(abc.ABC):
     # def cache_op_b(self) -> CacheOp:
     #     raise NotImplementedError
 
-class Output(abc.ABC):
+class Output(GemmContainerBase):
     @abc.abstractproperty
     def mma_spec(self) -> Mma:
         raise NotImplementedError

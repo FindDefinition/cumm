@@ -29,7 +29,7 @@ from cumm.gemm.arch.memory import GlobalLoad
 from cumm.gemm.bases import (GemmInputIterator, GemmOutputIterator,
                              GemmOutputOp, GemmOutSmemLoader,
                              GemmOutWarpIterator, GemmSmemIterator,
-                             GemmWarpIterator)
+                             GemmWarpIterator, GemmComponentBase)
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
 
 
@@ -140,7 +140,7 @@ class MaskIGemmIterator(pccm.ParameterizedClass):
         return code.ret("bool")
 
 
-class Mma(pccm.ParameterizedClass):
+class Mma(GemmComponentBase):
     """a strange behavier exists in ptx compiler
     if we construct iterators in main kernel, compiled code is different from 
     construct them inside a class.
@@ -185,7 +185,7 @@ class Mma(pccm.ParameterizedClass):
         self.add_param_class("mma_ns_ib", self.input_spec.input_iter_b,
                              "InputIteratorB")
         self.add_param_class("mma_ns_wmma", spec.warp_mma, "WarpMma")
-
+        self.wmma = spec.warp_mma
         self.add_member("warp_iter_A", "WarpIterA")
         self.add_member("warp_iter_B", "WarpIterB")
         self.add_member("smem_iter_A", "SmemIterA")
@@ -199,6 +199,9 @@ class Mma(pccm.ParameterizedClass):
 
         self.smem_A_ptr: Optional[ArrayPtr] = None
         self.smem_B_ptr: Optional[ArrayPtr] = None
+
+    def min_arch(self) -> Optional[Tuple[int, int]]:
+        return self.wmma.min_arch()
 
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):

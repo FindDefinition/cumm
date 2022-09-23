@@ -8,7 +8,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pccm
@@ -20,6 +20,7 @@ from cumm.core_cc.csrc.arrayref import ArrayPtr
 from cumm.gemm import constants
 from cumm.gemm.algospec.core import TensorOp
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.gemm.bases import GemmComponentBase
 
 class MmaLayoutDespBase:
     def __init__(self, shape: MetaArray[int], dtype_ab: dtypes.DType, dtype_c: dtypes.DType,
@@ -311,11 +312,11 @@ ALL_TENSOR_OP_MAP: Dict[Tuple[Tuple[int, int, int], dtypes.DType, dtypes.DType],
     ((16, 8, 16), dtypes.bfloat16, dtypes.float16): MmaM16N8K16F16(dtypes.bfloat16, dtypes.float16, (8, 0)),
     ((16, 8, 16), dtypes.bfloat16, dtypes.float32): MmaM16N8K16F16(dtypes.bfloat16, dtypes.float32, (8, 0)),
     
-    ((16, 8, 16), dtypes.int8, dtypes.int32): MmaM16N8K16I8(dtypes.int8, dtypes.int32, (7, 5)),
-    ((16, 8, 16), dtypes.uint8, dtypes.int32): MmaM16N8K16I8(dtypes.uint8, dtypes.int32, (7, 5)),
+    ((16, 8, 16), dtypes.int8, dtypes.int32): MmaM16N8K16I8(dtypes.int8, dtypes.int32, (8, 0)),
+    ((16, 8, 16), dtypes.uint8, dtypes.int32): MmaM16N8K16I8(dtypes.uint8, dtypes.int32, (8, 0)),
 
-    ((16, 8, 32), dtypes.int4, dtypes.int32): MmaM16N8K32I4(dtypes.int4, dtypes.int32, (7, 5)),
-    ((16, 8, 32), dtypes.uint4, dtypes.int32): MmaM16N8K32I4(dtypes.uint4, dtypes.int32, (7, 5)),
+    ((16, 8, 32), dtypes.int4, dtypes.int32): MmaM16N8K32I4(dtypes.int4, dtypes.int32, (8, 0)),
+    ((16, 8, 32), dtypes.uint4, dtypes.int32): MmaM16N8K32I4(dtypes.uint4, dtypes.int32, (8, 0)),
 
     ((16, 8, 32), dtypes.int8, dtypes.int32): MmaM16N8K32I8(dtypes.int8, dtypes.int32, (8, 0)),
     ((16, 8, 32), dtypes.uint8, dtypes.int32): MmaM16N8K32I8(dtypes.uint8, dtypes.int32, (8, 0)),
@@ -328,7 +329,7 @@ def get_tensorop_desp(shape: MetaArray[int], dtype_ab: dtypes.DType, dtype_c: dt
     shape_tuple = (shape[0], shape[1], shape[2])
     return ALL_TENSOR_OP_MAP[(shape_tuple, dtype_ab, dtype_c)]
 
-class MmaSync(pccm.ParameterizedClass):
+class MmaSync(GemmComponentBase):
     """
     Volta: [8, 8, 4]
     Turing: tnt, [16, 8, 8] f16f16[f16|f32]
@@ -375,6 +376,7 @@ class MmaSync(pccm.ParameterizedClass):
         self.mn = shape[0] * shape[1]
         self.km = shape[2] * shape[0]
         self.kn = shape[2] * shape[1]
+        self.is_volta = shape[0] == 8 and shape[1] == 8 and shape[2] == 4 and num_threads == 8
         if num_threads == 8:
             assert shape[0] == 8 and shape[1] == 8 and shape[2] == 4
             assert self.trans_c is False
@@ -389,6 +391,13 @@ class MmaSync(pccm.ParameterizedClass):
             self.tensorop_desp = None # no volta support
         else:
             self.tensorop_desp = get_tensorop_desp(shape, dtype_a, dtype_c)
+
+    def min_arch(self) -> Optional[Tuple[int, int]]:
+        if self.is_volta:
+            return (7, 0)
+        else:
+            assert self.tensorop_desp is not None
+            return self.tensorop_desp.min_sm
 
     def python_ctor(self):
         return self

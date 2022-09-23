@@ -43,6 +43,7 @@ struct GemmAlgoDesp {
   int element_per_access_c = -1;
   int access_per_vector = 1;
   bool is_nvrtc = false;
+  std::tuple<int, int> min_arch = std::tuple<int, int>{0, 0};
   GemmAlgoDesp()
       : dtype_a(int(tv::unknown)), dtype_b(int(tv::unknown)),
         dtype_c(int(tv::unknown)), trans_a_(-1), trans_b_(-1), trans_c_(-1),
@@ -51,7 +52,7 @@ struct GemmAlgoDesp {
         tensorop({-1, -1, -1}), shuffle_type(ShuffleStrideType::kNoShuffle),
         split_k_serial_(0), split_k_parallel_(0), element_per_access_a(-1),
         element_per_access_b(-1), element_per_access_c(-1),
-        access_per_vector(1) {}
+        access_per_vector(1), min_arch({0, 0}) {}
   std::string __repr__() {
 
     check_valid();
