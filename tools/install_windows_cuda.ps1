@@ -15,14 +15,33 @@ $CUDA_KNOWN_URLS = @{
 
 # cuda_runtime.h is in nvcc <= 10.2, but cudart >= 11.0
 # @todo - make this easier to vary per CUDA version.
-$CUDA_PACKAGES_IN = @(
-    "nvcc";
-    "visual_studio_integration";
-    "curand_dev";
-    "nvrtc_dev";
-    "cudart";
-)
+# $CUDA_PACKAGES_IN = @(
+#     "nvcc";
+#     "visual_studio_integration";
+#     "curand_dev";
+#     "nvrtc_dev";
+#     "cudart";
+# )
 
+if (($CUDA_VERSION_FULL -eq "10.2") -or ($CUDA_VERSION_FULL -eq "11.0") -or ($CUDA_VERSION_FULL -eq "11.1") -or ($CUDA_VERSION_FULL -eq "11.2") -or ($CUDA_VERSION_FULL -eq "11.3")){
+    $CUDA_PACKAGES_IN = @(
+        "nvcc";
+        "visual_studio_integration";
+        "curand_dev";
+        "nvrtc_dev";
+        "cudart";
+    )
+} else {
+    # after cuda 11.4
+    $CUDA_PACKAGES_IN = @(
+        "nvcc";
+        "visual_studio_integration";
+        "curand_dev";
+        "nvrtc_dev";
+        "cudart";
+        "cuxxfilt";
+    )
+}
 
 ## -------------------
 ## Select CUDA version
