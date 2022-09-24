@@ -23,6 +23,14 @@ $CUDA_KNOWN_URLS = @{
 #     "cudart";
 # )
 
+## -------------------
+## Select CUDA version
+## -------------------
+
+# Get the cuda version from the environment as env:cuda.
+$CUDA_VERSION_FULL = $env:cuda
+# Make sure CUDA_VERSION_FULL is set and valid, otherwise error.
+
 if (($CUDA_VERSION_FULL -eq "10.2") -or ($CUDA_VERSION_FULL -eq "11.0") -or ($CUDA_VERSION_FULL -eq "11.1") -or ($CUDA_VERSION_FULL -eq "11.2") -or ($CUDA_VERSION_FULL -eq "11.3")){
     $CUDA_PACKAGES_IN = @(
         "nvcc";
@@ -42,14 +50,6 @@ if (($CUDA_VERSION_FULL -eq "10.2") -or ($CUDA_VERSION_FULL -eq "11.0") -or ($CU
         "cuxxfilt";
     )
 }
-
-## -------------------
-## Select CUDA version
-## -------------------
-
-# Get the cuda version from the environment as env:cuda.
-$CUDA_VERSION_FULL = $env:cuda
-# Make sure CUDA_VERSION_FULL is set and valid, otherwise error.
 
 # Validate CUDA version, extracting components via regex
 $cuda_ver_matched = $CUDA_VERSION_FULL -match "^(?<major>[1-9][0-9]*)\.(?<minor>[0-9]+)$"
