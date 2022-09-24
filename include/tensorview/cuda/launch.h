@@ -16,6 +16,7 @@
 // from pytorch.aten
 #include <tensorview/core/common.h>
 #include <type_traits>
+#include <cuda.h>
 namespace tv {
 namespace cuda {
 

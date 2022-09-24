@@ -15,7 +15,9 @@
 #pragma once
 #include "bfloat16.h"
 #include "common.h"
+#ifdef TV_CUDA
 #include "complex.h"
+#endif
 #include "half.h"
 #include "subint.h"
 #include "tf32.h"

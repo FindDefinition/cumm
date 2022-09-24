@@ -195,7 +195,7 @@ class ConvProblem(pccm.ParameterizedClass):
         self.split_k_slices_ = -1
         self.groups_ = -1
 
-    @pccm.cuda.constructor(device=True, host=True, forceinline=True)
+    @pccm.constructor(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def defctor(self):
         return pccm.code()
 

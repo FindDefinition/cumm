@@ -1,15 +1,15 @@
 # Changelog
 
-## [0.4.0] - 2022-9-24
+## [0.3.1] - 2022-9-25
+### Fixed
+- Fix cpu build problem
+
+## [0.3.0] - 2022-9-24
 ### Added 
 - Add Ampere support. faster fp16, faster tf32 and greatly faster int8 kernels in Ampere GPUs.
-
+* Add nvrtc support for conv kernel.
 ### Removed
 - drop python 3.6 support.
-
-## [0.3.0] - 2022-02-02
-### Added
-* Add nvrtc support for conv kernel.
 ### Changed
 * BREAKING CHANGE: change dtype enum value for some important reason.
 
