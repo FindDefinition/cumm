@@ -343,10 +343,10 @@ class MmaMultiStage(pccm.ParameterizedClass):
             if self.smem_clear_opt == SharedMemoryClearOption.kNone:
                 code.raw(f"""
                     if(group_idx == {ind}){{
-#if (!defined(DEBUG_MMA_MS_DOWNFALL_A) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_A))
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_A) && !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_A))
                         AsyncCopyIter_{ind}_A::do_copy(input_iter_A, smem_iter_A);
 #endif
-#if (!defined(DEBUG_MMA_MS_DOWNFALL_B) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_B))
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_B) && !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_B))
                         AsyncCopyIter_{ind}_B::do_copy(input_iter_B, smem_iter_B);
 #endif
                         return;
@@ -355,10 +355,10 @@ class MmaMultiStage(pccm.ParameterizedClass):
             else:
                 code.raw(f"""
                     if(group_idx == {ind}){{
-#if (!defined(DEBUG_MMA_MS_DOWNFALL_A) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_A))
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_A) && !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_A))
                         AsyncCopyIter_{ind}_A::do_copy_zfill(input_iter_A, smem_iter_A);
 #endif
-#if (!defined(DEBUG_MMA_MS_DOWNFALL_B) and !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_B))
+#if (!defined(DEBUG_MMA_MS_DOWNFALL_B) && !defined(DEBUG_MMA_MS_NOT_WRITE_SMEM_B))
                         AsyncCopyIter_{ind}_B::do_copy_zfill(input_iter_B, smem_iter_B);
 #endif
                         return;

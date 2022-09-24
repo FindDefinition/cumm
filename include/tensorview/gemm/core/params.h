@@ -82,7 +82,7 @@ struct GemmAlgoDesp {
   void split_k_parallel_set(bool val) { split_k_parallel_ = val ? 1 : 0; }
   void check_valid() {
 
-    TV_ASSERT_RT_ERR(trans_a_ != -1 && !trans_b_ != -1 && trans_c_ != -1 &&
+    TV_ASSERT_RT_ERR(trans_a_ != -1 && trans_b_ != -1 && trans_c_ != -1 &&
                          !algo.empty(),
                      "trans_a, trans_b, trans_c and algo must be set");
     for (int i = 0; i < 3; ++i) {

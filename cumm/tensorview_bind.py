@@ -404,7 +404,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         code.arg("m", "pybind11::module_")
         if not compat.InWindows:
             code.code_after_include = f"""
-#if !defined(TV_CUDA) || (CUDA_VERSION < 11400)
+#if !defined(TV_CUDA) || (CUDA_VERSION < 11040)
 #include <cxxabi.h>
 #endif
             """
@@ -733,7 +733,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             code.raw("""
             m.def("cufilt", [](std::string name){
               int status;
-              #if defined(TV_CUDA) && (CUDA_VERSION >= 11400)
+              #if defined(TV_CUDA) && (CUDA_VERSION >= 11040)
               std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
               TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
               return std::string(realname.get());
@@ -748,7 +748,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             code.raw("""
             m.def("cufilt", [](std::string name){
               int status;
-              #if defined(TV_CUDA) && (CUDA_VERSION >= 11400)
+              #if defined(TV_CUDA) && (CUDA_VERSION >= 11040)
               std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
               TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
               return std::string(realname.get());

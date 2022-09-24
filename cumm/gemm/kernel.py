@@ -931,9 +931,9 @@ class GemmKernel(GemmComponentBase):
         ]
         if self.shuffle_stride != ShuffleStrideType.NoShuffle:
             if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
-                args.append(f"{p}.IndiceA, {p}.IndiceBorC, {p}.IndiceD")
+                args.append(f"{p}.indiceA, {p}.indiceBorC, {p}.indiceD")
             else:
-                args.append(f"{p}.IndiceA, {p}.IndiceBorC")
+                args.append(f"{p}.indiceA, {p}.indiceBorC")
 
         args.extend([ 
             f"{self.dtype_comp}({p}.alpha), {self.dtype_comp}({p}.beta)",
