@@ -10,18 +10,18 @@ $CUDA_KNOWN_URLS = @{
     "11.2" = "https://developer.download.nvidia.com/compute/cuda/11.2.2/network_installers/cuda_11.2.2_win10_network.exe";
     "11.3" = "https://developer.download.nvidia.com/compute/cuda/11.3.1/network_installers/cuda_11.3.1_win10_network.exe";
     "11.4" = "https://developer.download.nvidia.com/compute/cuda/11.4.2/network_installers/cuda_11.4.2_win10_network.exe";
+    "11.7" = "https://developer.download.nvidia.com/compute/cuda/11.7.1/network_installers/cuda_11.7.1_windows_network.exe"
 }
 
 # cuda_runtime.h is in nvcc <= 10.2, but cudart >= 11.0
 # @todo - make this easier to vary per CUDA version.
-$CUDA_PACKAGES_IN = @(
-    "nvcc";
-    "visual_studio_integration";
-    "curand_dev";
-    "nvrtc_dev";
-    "cudart";
-)
-
+# $CUDA_PACKAGES_IN = @(
+#     "nvcc";
+#     "visual_studio_integration";
+#     "curand_dev";
+#     "nvrtc_dev";
+#     "cudart";
+# )
 
 ## -------------------
 ## Select CUDA version
@@ -30,6 +30,26 @@ $CUDA_PACKAGES_IN = @(
 # Get the cuda version from the environment as env:cuda.
 $CUDA_VERSION_FULL = $env:cuda
 # Make sure CUDA_VERSION_FULL is set and valid, otherwise error.
+
+if (($CUDA_VERSION_FULL -eq "10.2") -or ($CUDA_VERSION_FULL -eq "11.0") -or ($CUDA_VERSION_FULL -eq "11.1") -or ($CUDA_VERSION_FULL -eq "11.2") -or ($CUDA_VERSION_FULL -eq "11.3")){
+    $CUDA_PACKAGES_IN = @(
+        "nvcc";
+        "visual_studio_integration";
+        "curand_dev";
+        "nvrtc_dev";
+        "cudart";
+    )
+} else {
+    # after cuda 11.4
+    $CUDA_PACKAGES_IN = @(
+        "nvcc";
+        "visual_studio_integration";
+        "curand_dev";
+        "nvrtc_dev";
+        "cudart";
+        "cuxxfilt";
+    )
+}
 
 # Validate CUDA version, extracting components via regex
 $cuda_ver_matched = $CUDA_VERSION_FULL -match "^(?<major>[1-9][0-9]*)\.(?<minor>[0-9]+)$"

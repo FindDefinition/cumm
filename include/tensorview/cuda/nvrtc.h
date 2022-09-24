@@ -238,6 +238,9 @@ public:
       return cubin_;
     }
 #ifdef TV_CUDA
+#if (CUDA_VERSION < 11000)
+    TV_THROW_RT_ERR("cubin not implemented for CUDA < 11");
+#else 
     if (prog_ == nullptr) {
       TV_ASSERT_RT_ERR(!cubin_.empty(), "Cubin is empty!!!");
       return cubin_;
@@ -248,6 +251,7 @@ public:
     TV_NVRTC_SAFE_CALL(nvrtcGetCUBIN(
         prog_, reinterpret_cast<char *>(bin.data_ptr<uint8_t>())));
     return bin;
+#endif
 #else
     return tv::Tensor();
 #endif

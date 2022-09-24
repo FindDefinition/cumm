@@ -50,7 +50,8 @@ class CpAsyncGroup(pccm.ParameterizedClass):
                 #define CUDA_CP_ASYNC_ACTIVATED 0
             #endif""")
     
-    def wait_group(N):
+    @staticmethod
+    def wait_group(N: int):
         if N >= 0:
             code = pccm.FunctionCode()
             with code.macro_if_("CUDA_CP_ASYNC_ACTIVATED"):
@@ -168,9 +169,9 @@ class CpAsyncCopy(pccm.ParameterizedClass):
                 (__CUDACC_VER_MAJOR__ > 11)) &&                                  \\
                 defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750) && \\
                 ! (defined(__clang__) && defined(__CUDA__))
-                #define CUTLASS_ENABLE_L2_PREFETCH 1
+                #define CUMM_ENABLE_L2_PREFETCH 1
             #else
-                #define CUTLASS_ENABLE_L2_PREFETCH 0
+                #define CUMM_ENABLE_L2_PREFETCH 0
             #endif
         """)
 
@@ -193,7 +194,7 @@ class CpAsyncCopy(pccm.ParameterizedClass):
                         "{{\\n"
                         "  .reg .pred p;\\n"
                         "  setp.ne.b32 p, %0, 0;\\n"
-#if CUTLASS_ENABLE_L2_PREFETCH
+#if CUMM_ENABLE_L2_PREFETCH
                         "  @p cp.async.ca.shared.global.L2::128B [%1], [%2], %3;\\n"
 #else
                         "  @p cp.async.ca.shared.global [%1], [%2], %3;\\n"
@@ -210,7 +211,7 @@ class CpAsyncCopy(pccm.ParameterizedClass):
                         "{{\\n"
                         "  .reg .pred p;\\n"
                         "  setp.ne.b32 p, %0, 0;\\n"
-#if CUTLASS_ENABLE_L2_PREFETCH
+#if CUMM_ENABLE_L2_PREFETCH
                         "  @p cp.async.cg.shared.global.L2::128B [%1], [%2], %3;\\n"
 #else
                         "  @p cp.async.cg.shared.global [%1], [%2], %3;\\n"
@@ -247,7 +248,7 @@ class CpAsyncCopy(pccm.ParameterizedClass):
             if self.cache_opr == CacheOperation.Always:
                 code.raw(f"""
                     asm volatile(
-#if CUTLASS_ENABLE_L2_PREFETCH
+#if CUMM_ENABLE_L2_PREFETCH
                         "cp.async.ca.shared.global.L2::128B [%0], [%1], %2, %3;\\n"
 #else
                         "cp.async.ca.shared.global [%0], [%1], %2, %3;\\n"
@@ -257,7 +258,7 @@ class CpAsyncCopy(pccm.ParameterizedClass):
             elif self.cache_opr == CacheOperation.Global:
                 code.raw(f"""
                     asm volatile(
-#if CUTLASS_ENABLE_L2_PREFETCH
+#if CUMM_ENABLE_L2_PREFETCH
                         "cp.async.cg.shared.global.L2::128B [%0], [%1], %2, %3;\\n"
 #else
                         "cp.async.cg.shared.global [%0], [%1], %2, %3;\\n"
