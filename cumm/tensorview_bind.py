@@ -745,10 +745,11 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             }, py::arg("name")); 
             """)
         elif compat.InWindows:
+            # TODO windows CUDA contains a STATIC cufilt library which can't be used in our library.
             code.raw("""
             m.def("cufilt", [](std::string name){
               int status;
-              #if defined(TV_CUDA) && (CUDA_VERSION >= 11040)
+              #if defined(TV_CUDA) && (CUDA_VERSION >= 11040) && (false)
               std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
               TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
               return std::string(realname.get());
