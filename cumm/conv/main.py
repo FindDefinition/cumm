@@ -435,6 +435,241 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
     @pccm.pybind.mark
     @pccm.cuda.static_function
     def implicit_gemm2(self):
+        code_main = pccm.code()
+        code_main.arg("params", "tv::gemm::ConvParams", pyanno="cumm.tensorview.gemm.ConvParams")
+        code_main.add_dependency(TensorViewKernel)
+        code_main.raw(f"auto& algo_desp = params.conv_algo_desp;")
+        for kers, decl in GemmMainUnitTest.matmul_select_split(self.all_kernels, code_main):
+            code = decl.code
+            for ker in kers:
+                code.add_param_class("cp" + ker.get_algo_name(), ker.gemm_params,
+                                    "ConvParams" + ker.get_algo_name())
+                code.add_param_class(ker.get_algo_name(), ker,
+                                    "Conv" + ker.get_algo_name())
+            nvrtc_conv_template(code)
+            self.add_func_decl(decl)
+            code.arg("params", "tv::gemm::ConvParams", pyanno="cumm.tensorview.gemm.ConvParams")
+
+            for kers in self.conv_select_helper(kers, code):
+                ker = kers[0]
+                p = ker.problem
+                param_type_str = "ConvParams" + ker.get_algo_name()
+                indices = conv_iwo_012_to_abc(ker.problem.op_type)
+                inv_indices = gemm_abc_012_to_iwo(ker.problem.op_type)
+                dtypes_abc = [ker.dtype_a, ker.dtype_b, ker.dtype_c]
+                dtypes_iwo = [dtypes_abc[i] for i in indices]
+                param_cls_name = "ConvParams" + ker.get_algo_name()
+                param_cls_ns = "cp" + ker.get_algo_name()
+
+                if not ker.support_splitk():
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR("algo don't support splitk but you provide split_k_slices > 1.", split_k_slices);
+                    """)
+                # TODO if input is NCxHWx
+                # TODO if input weight and output have different layout
+                dim_start = 2 if p.layout_desp_weight.is_channel_first() else 1
+                io_ndim = 2 if p.mask_sparse else p.ndim + 2
+                weight_ndim = 3 if p.mask_sparse else p.ndim + 2
+                abc_names = ["a", "b", "c"]
+                abc_names = [abc_names[i] for i in indices]
+                input_names = ["input", "weight", "output"]
+                input_names = [input_names[i] for i in inv_indices]
+
+                code.raw(f"""
+                // {ker.get_algo_name()}
+                found = true;
+                bool d_is_bias = !bias.empty();
+                """)
+                if not ker.split_d_params:
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR(bias.empty(), "bias must be empty if split_d_params not enable");
+                    """)
+                if p.mask_sparse:
+                    if p.op_type == ConvOpType.kBackwardWeight:
+                        code.raw(f"""
+                        TV_ASSERT_RT_ERR(mask_width > 0 && mask_width % {ker.tile_shape[2]} == 0, "error");
+                        """)
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR(!indices.empty(), "error");
+                    TV_ASSERT_RT_ERR(!mask.empty(), "error");
+                    TV_ASSERT_RT_ERR(!mask_argsort.empty(), "error");
+                    int kernel_volume = weight.dim({dim_start});
+                    tv::check_shape(indices, {{kernel_volume, -1}});
+                    N = indices.dim(1);
+                    {param_cls_ns}::ConvProblem problem(N, C, K, kernel_volume, 
+                        tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
+                    """)
+                    if p.op_type == ConvOpType.kBackwardWeight:
+                        code.raw(f"""
+                        TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                        TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * {ker.dtype_b.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                            "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                        TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                            "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                        """)
+                    elif p.op_type == ConvOpType.kForward:
+                        code.raw(f"""
+                        TV_ASSERT_RT_ERR(N == output.dim(0), "error");
+                        TV_ASSERT_RT_ERR(int64_t(N) * int64_t(C) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                            "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                        """)
+                    else:
+                        code.raw(f"""
+                        TV_ASSERT_RT_ERR(int64_t(N) * int64_t(K) * {ker.dtype_a.bitsize()} / 8 < std::numeric_limits<int32_t>::max(), 
+                            "your data exceed int32 range. this will be fixed in cumm + nvrtc (spconv 2.2/2.3).");
+                        TV_ASSERT_RT_ERR(N == input.dim(0), "error");
+                        """)
+                else:
+                    code.raw(f"""
+                    tv::array<int, {p.ndim}> input_dims, output_dims;
+                    tv::array<int, {p.ndim}> ksize;
+                    TV_ASSERT_RT_ERR({p.ndim} == padding.size() && {p.ndim} == stride.size() && {p.ndim} == dilation.size(), "error");
+                    for (int i = {dim_start}; i < {dim_start + p.ndim}; ++i){{
+                        ksize[i - {dim_start}] = weight.dim(i);
+                        input_dims[i - {dim_start}] = input.dim(i);
+                        output_dims[i - {dim_start}] = output.dim(i);
+                    }}
+                    int kernel_volume = ksize.op<tv::arrayops::prod>();
+                    tv::array<int, {p.ndim}> padding_arr{{{code.unpack([f"padding[{i}]" for i in range(p.ndim)])}}};
+                    tv::array<int, {p.ndim}> stride_arr{{{code.unpack([f"stride[{i}]" for i in range(p.ndim)])}}};
+                    tv::array<int, {p.ndim}> dilation_arr{{{code.unpack([f"dilation[{i}]" for i in range(p.ndim)])}}};
+                    auto output_dims_check_again = {param_cls_ns}::ConvProblem::calc_output_dims(input_dims, ksize, padding_arr, stride_arr, dilation_arr);
+                    for (int i = 0; i < {p.ndim}; ++i){{
+                        TV_ASSERT_RT_ERR(output_dims_check_again[i] == output_dims[i], "error");
+                    }}
+                    {param_cls_ns}::ConvProblem problem(N, C, K, input_dims, output_dims, ksize, padding_arr, stride_arr, dilation_arr, 
+                        tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
+                    """)
+                params_str = [
+                    "problem", 
+                    f"a_ten.data_ptr<const {ker.dtype_a}>()",
+                    f"b_ten.data_ptr<const {ker.dtype_b}>()",
+                    f"c_ten.data_ptr<{ker.dtype_c}>()",
+                    f"bias.empty() ? c_ten.data_ptr<const {ker.dtype_c}>() : bias.data_ptr<const {ker.dtype_c}>()",
+                ]
+                if p.mask_sparse:
+                    # mask_out_ptr = "mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>(), "
+                    # if p.op_type != ConvOpType.kForward:
+                    #     mask_out_ptr = ""
+
+                    # mask_width_str = "mask_width,"
+                    # if p.op_type != ConvOpType.kBackwardWeight:
+                    #     mask_width_str = ""
+                    params_str.extend([
+                        "mask.data_ptr<const uint32_t>()",
+                        "mask_argsort.data_ptr<const int32_t>()",
+                        "indices.data_ptr<const int32_t>()",
+                    ])
+                    if p.op_type == ConvOpType.kForward:
+                        params_str.append(f"mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>()")
+                    params_str.extend([
+                        "params.mask_filter",
+                        "params.reverse_mask",
+                    ])
+                    if p.op_type == ConvOpType.kBackwardWeight:
+                        params_str.append("mask_width")
+                    
+                params_str.extend([
+                    f"{ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta)",
+                    f"{ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta)",
+                    "params.act_type",
+                ])
+                if ker.support_splitk():
+                    params_str.append(f"split_k_slices")
+                    if ker.have_workspace:
+                        params_str.append(f"workspace.raw_data()")
+                else:
+                    params_str.append(f"1")
+                    if ker.have_workspace:
+                        params_str.append(f"nullptr")
+                params_str.append("d_is_bias")
+                param_str = ", ".join(params_str)
+                code.raw(f"""
+                {param_type_str} ker_params({param_str});
+                """)
+                    # code.raw(f"""
+                    # {param_type_str} ker_params(
+                    #     problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
+                    #     c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(),
+                    #     mask.data_ptr<const uint32_t>(), mask_argsort.data_ptr<const int32_t>(),
+                    #     indices.data_ptr<const int32_t>(), {mask_out_ptr} params.mask_filter, 
+                    #     params.reverse_mask, {mask_width_str} 
+                    #     {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
+                    # """)
+                # else:
+                #     params_str.extend([
+                #         f"{ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta)",
+                #     ])
+
+                #     code.raw(f"""
+                #     {param_type_str} ker_params(
+                #         problem, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
+                #         c_ten.data_ptr<{ker.dtype_c}>(), c_ten.data_ptr<{ker.dtype_c}>(), 
+                #         {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta){", split_k_slices, workspace.raw_data()" if ker.support_splitk() else ""});
+                #     """)
+                if p.op_type == ConvOpType.kBackwardWeight:
+                    code.raw(f"""
+                    int num_reduced_mask = tv::div_up(ker_params.problem.N, ker_params.mask_width);
+                    TV_ASSERT_RT_ERR(mask.dim(0) >= num_reduced_mask, "error");
+                    """)
+                code.raw(f"""
+                tv::cuda::Launch launcher(ker_params.grid_dims, dim3({ker.num_threads}),
+                                            {ker.smem_size}, reinterpret_cast<cudaStream_t>(params.stream));
+                cudaError_t result;
+                if ({ker.smem_size} >= (48 << 10)) {{
+                    result = cudaFuncSetAttribute({ker.get_algo_name()}::conv_kernel,
+                                                    cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                    {ker.smem_size});
+                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                    result = cudaFuncSetAttribute(
+                        {ker.get_algo_name()}::conv_kernel,
+                        cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+                    TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                }}
+                """)
+                # if cudasim.enable_debug():
+                code.raw(f"""
+                auto timer = tv::CUDATimer(params.verbose);
+                // tv::ssprint("CPU Time", rtxtimer.report() / 1000.0);
+                {{
+                    tv::CUDAKernelTimerGuard timerguard(\"{ker.get_algo_name()}\", evtimer, reinterpret_cast<cudaStream_t>(params.stream));
+                    launcher({ker.get_algo_name()}::conv_kernel, ker_params);
+                }}
+                """)
+                if p.mask_sparse:
+                    code.raw(f"""
+                    TV_CHECK_CUDA_ERR_V2("{ker.get_algo_name()}", "error with params", input.shape(), weight.shape(), output.shape(), 
+                        indices.shape(), mask.shape(), mask_argsort.shape(), mask_output.shape(), mask_width);
+                    """)
+                else:
+                    code.raw(f"""
+                    TV_CHECK_CUDA_ERR_V2("{ker.get_algo_name()}", "error with params", input.shape(), weight.shape(), output.shape());
+                    """)
+
+                # if cudasim.enable_debug():
+                code.raw(f"""
+                if (params.verbose){{
+                    cudaFuncAttributes attr;
+                    checkCudaErrors(
+                        cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::conv_kernel));
+                    tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
+                }}
+
+                """)
+                code.raw(f"return;")
+            code.raw("""
+            if (!found){
+                TV_THROW_INVALID_ARG("Can't Found Algorithm for params:", algo_desp.__repr__(), tv::dtype_str(input.dtype()), 
+                    tv::dtype_str(weight.dtype()), tv::dtype_str(output.dtype()), tv::dtype_str(dacc), 
+                    tv::dtype_str(dcomp));
+            }
+            """)
+        return code_main
+
+
+    # @pccm.pybind.mark
+    # @pccm.cuda.static_function
+    def implicit_gemm2_deprecated(self):
         code = pccm.code()
         for p, ker in zip(self.all_params, self.all_kernels):
             code.add_param_class("cp" + ker.get_algo_name(), ker.gemm_params,

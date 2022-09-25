@@ -354,7 +354,9 @@ template <class... Ts, typename F> bool dispatch_noexcept(DType t, F &&f) {
   static_assert(sizeof...(Ts) > 0, "you need to provide at least one type");
   bool notFound = true;
   mp_for_each<mp_list<Ts...>>([=, &notFound, &f](auto I) {
-    if (type_v<TV_DECLTYPE(I)> == t && notFound) {
+    using T = TV_DECLTYPE(I);
+    auto type = detail::TypeToDtype<std::decay_t<T>>::dtype;
+    if (type == t && notFound) {
       std::forward<F>(f)(TV_DECLTYPE(I)());
       notFound = false;
     }

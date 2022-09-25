@@ -1147,8 +1147,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
                 with code.range_("v", self.access_per_vector,
                                  "TV_PRAGMA_UNROLL"):
                     code.raw(f"""
-                    int mask_idx = s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + 
-                        c * {self.sub_tile_shape[0]} + ss;
+                    // int mask_idx = s * {self.tmap.iterations[1] * self.sub_tile_shape[0]} + 
+                    //     c * {self.sub_tile_shape[0]} + ss;
                     int idx = s * {self.tmap.iterations[1] * self.sub_tile_shape[0] * self.access_per_vector} + 
                         c * {self.sub_tile_shape[0] * self.access_per_vector} + ss * {self.access_per_vector} + v;
                     

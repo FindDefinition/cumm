@@ -412,7 +412,7 @@ class Mma(GemmComponentBase):
         uint32_t mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx] : 0;
         // mask = 0xffffffff;
         // find first valid mask
-        int total_skip_count = 0;
+        // int total_skip_count = 0;
         int skip_cnt = 0; 
         // int gemm_k_iterations_bkp = gemm_k_iterations;
         while (!(mask & filter_offset_mask) && (gemm_k_iterations)){{

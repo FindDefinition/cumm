@@ -1,4 +1,8 @@
 # Changelog
+## [0.3.4] - 2022-9-25
+### Changed
+- Change gemm/conv main function to splited version
+
 ## [0.3.3] - 2022-9-25
 ### Fixed
 - Fix problem in CompileInfo

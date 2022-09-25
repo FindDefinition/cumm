@@ -39,6 +39,9 @@ from cumm.gemm.core.metaarray import MetaArray
 from cumm.gemm.utils import GemmUtilsCPU
 from cumm.gemm.constants import NVRTCMode
 from cumm.gemm.nvrtc_code import nvrtc_gemm_template
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from cumm.conv.main import GemmKernel as ConvKernel
 
 class GemmAlgoParams(object):
     def __init__(
@@ -748,7 +751,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         # self.add_impl_only_dependency(self.shuffle_matmul_ref, SpconvKernel)
 
     @staticmethod
-    def matmul_select_helper_base(kernels: List[Union[kernel.GemmKernel, Any]],
+    def matmul_select_helper_base(kernels: List[Union[kernel.GemmKernel, "ConvKernel"]],
                                   code: FunctionCode):
         """if based algorithm selector
         """
@@ -810,7 +813,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
 
     @staticmethod
     def matmul_select_helper_stage2(kernels: List[Union[kernel.GemmKernel,
-                                                        Any]],
+                                                        "ConvKernel"]],
                                     code: FunctionCode,
                                     has_shuffle: bool = True,
                                     is_end: bool = True):
@@ -827,66 +830,82 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
                 with code.if_(if_test):
                     top_to_kers = codeops.group_by(func3, apv_kers)
                     for top, top_kers in top_to_kers.items():
-                        algo_to_kers = codeops.group_by(
-                            lambda x: (x.algo, x.shuffle_stride), top_kers)
+                        # algo_to_kers = codeops.group_by(
+                        #     lambda x: (x.algo, x.shuffle_stride), top_kers)
 
                         if top is None:
-                            for (algo,
-                                 shuf), algo_kers in algo_to_kers.items():
+                            for ker in top_kers:
+                                algo = ker.algo
                                 assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
-                                if_test = f"algo_desp.algo == \"{algo.value}\""
-                                if has_shuffle:
-                                    if_test += f"&& static_cast<int>(algo_desp.shuffle_type) == {shuf.value}"
-                                with code.if_(if_test):
-                                    dabc_to_kers = codeops.group_by(
-                                        lambda x:
-                                        (x.dtype_a.tv_dtype, x.dtype_b.
-                                         tv_dtype, x.dtype_c.tv_dtype),
-                                        algo_kers)
-                                    for dabc, dabc_kers in dabc_to_kers.items(
-                                    ):
-                                        if is_end:
-                                            assert len(
-                                                dabc_kers
-                                            ) == 1, "find multiple kernels for one configuration"
-                                        dtype_if_tests = [
-                                            f"algo_desp.dtype_a == tv::DType({dabc[0]})",
-                                            f"algo_desp.dtype_b == tv::DType({dabc[1]})",
-                                            f"algo_desp.dtype_c == tv::DType({dabc[2]})",
-                                        ]
-                                        with code.if_(
-                                                " && ".join(dtype_if_tests)):
-                                            yield dabc_kers
+                            if is_end:
+                                assert len(
+                                    top_kers
+                                ) == 1, "find multiple kernels for one configuration"
+
+                            yield top_kers
+                            # for (algo,
+                            #      shuf), algo_kers in algo_to_kers.items():
+                            #     assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A or algo == GemmAlgo.SimtDP2A
+                            #     if_test = f"algo_desp.algo == \"{algo.value}\""
+                            #     if has_shuffle:
+                            #         if_test += f"&& static_cast<int>(algo_desp.shuffle_type) == {shuf.value}"
+                            #     with code.if_(if_test):
+                            #         dabc_to_kers = codeops.group_by(
+                            #             lambda x:
+                            #             (x.dtype_a.tv_dtype, x.dtype_b.
+                            #              tv_dtype, x.dtype_c.tv_dtype),
+                            #             algo_kers)
+                            #         for dabc, dabc_kers in dabc_to_kers.items(
+                            #         ):
+                            #             if is_end:
+                            #                 assert len(
+                            #                     dabc_kers
+                            #                 ) == 1, "find multiple kernels for one configuration"
+                            #             dtype_if_tests = [
+                            #                 f"algo_desp.dtype_a == tv::DType({dabc[0]})",
+                            #                 f"algo_desp.dtype_b == tv::DType({dabc[1]})",
+                            #                 f"algo_desp.dtype_c == tv::DType({dabc[2]})",
+                            #             ]
+                            #             with code.if_(
+                            #                     " && ".join(dtype_if_tests)):
+                            #                 yield dabc_kers
                         else:
                             with code.if_(
                                     f"algo_desp.tensorop == std::array<int, 3>{{{top[0]}, {top[1]}, {top[2]}}}"
                             ):
-                                for (algo,
-                                     shuf), algo_kers in algo_to_kers.items():
+                                if is_end:
+                                    assert len(
+                                        top_kers
+                                    ) == 1, "find multiple kernels for one configuration"
+                                for ker in top_kers:
+                                    algo = ker.algo
                                     assert algo != GemmAlgo.Simt and algo != GemmAlgo.SimtDP4A and algo != GemmAlgo.SimtDP2A
-                                    if_test = f"algo_desp.algo == \"{algo.value}\""
-                                    if has_shuffle:
-                                        if_test += f"&& static_cast<int>(algo_desp.shuffle_type) == {shuf.value}"
-                                    with code.if_(if_test):
-                                        dabc_to_kers = codeops.group_by(
-                                            lambda x:
-                                            (x.dtype_a.tv_dtype, x.dtype_b.
-                                             tv_dtype, x.dtype_c.tv_dtype),
-                                            algo_kers)
-                                        for dabc, dabc_kers in dabc_to_kers.items(
-                                        ):
-                                            if is_end:
-                                                assert len(
-                                                    dabc_kers
-                                                ) == 1, "find multiple kernels for one configuration"
-                                            dtype_if_tests = [
-                                                f"algo_desp.dtype_a == tv::DType({dabc[0]})",
-                                                f"algo_desp.dtype_b == tv::DType({dabc[1]})",
-                                                f"algo_desp.dtype_c == tv::DType({dabc[2]})",
-                                            ]
-                                            with code.if_(" && ".join(
-                                                    dtype_if_tests)):
-                                                yield dabc_kers
+                                yield top_kers
+                                # for (algo,
+                                #      shuf), algo_kers in algo_to_kers.items():
+                                #     if_test = f"algo_desp.algo == \"{algo.value}\""
+                                #     if has_shuffle:
+                                #         if_test += f"&& static_cast<int>(algo_desp.shuffle_type) == {shuf.value}"
+                                #     with code.if_(if_test):
+                                #         dabc_to_kers = codeops.group_by(
+                                #             lambda x:
+                                #             (x.dtype_a.tv_dtype, x.dtype_b.
+                                #              tv_dtype, x.dtype_c.tv_dtype),
+                                #             algo_kers)
+                                #         for dabc, dabc_kers in dabc_to_kers.items(
+                                #         ):
+                                #             if is_end:
+                                #                 assert len(
+                                #                     dabc_kers
+                                #                 ) == 1, "find multiple kernels for one configuration"
+                                #             dtype_if_tests = [
+                                #                 f"algo_desp.dtype_a == tv::DType({dabc[0]})",
+                                #                 f"algo_desp.dtype_b == tv::DType({dabc[1]})",
+                                #                 f"algo_desp.dtype_c == tv::DType({dabc[2]})",
+                                #             ]
+                                #             with code.if_(" && ".join(
+                                #                     dtype_if_tests)):
+                                #                 yield dabc_kers
 
     @pccm.pybind.mark
     @pccm.static_function
@@ -1110,9 +1129,201 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         """)
         return code.ret("std::vector<int>")
 
+    @staticmethod
+    def matmul_select_split(kernels: List[Union[kernel.GemmKernel, "ConvKernel"]],
+                                  code: FunctionCode):
+        """main function split to multiple functions to reduce code size of a single file.
+        """
+        algo_to_kers = codeops.group_by(
+            lambda x: (x.algo, x.shuffle_stride), kernels)
+        has_shuffle = True
+        for (algo, shuf), algo_kers in algo_to_kers.items():
+            if_test = f"algo_desp.algo == \"{algo.value}\""
+            if has_shuffle:
+                if_test += f"&& static_cast<int>(algo_desp.shuffle_type) == {shuf.value}"
+            with code.if_(if_test):
+                dabc_to_kers = codeops.group_by(
+                    lambda x:
+                    (x.dtype_a.tv_dtype, x.dtype_b.
+                        tv_dtype, x.dtype_c.tv_dtype),
+                    algo_kers)
+                for dabc, dabc_kers in dabc_to_kers.items(
+                ):
+                    dtype_if_tests = [
+                        f"algo_desp.dtype_a == tv::DType({dabc[0]})",
+                        f"algo_desp.dtype_b == tv::DType({dabc[1]})",
+                        f"algo_desp.dtype_c == tv::DType({dabc[2]})",
+                    ]
+                    ker = dabc_kers[0]
+                    with code.if_(
+                            " && ".join(dtype_if_tests)):
+                        code_split = pccm.code()
+                        func_name = f"matmul_split_{ker.algo.value}_{ker.dtype_a.shortcut()}{ker.dtype_b.shortcut()}{ker.dtype_c.shortcut()}_{ker.shuffle_stride.value}"
+                        meta = pccm.cuda.CudaStaticMemberFunctionMeta(impl_file_suffix=".cu", name=func_name)
+                        code_split.add_dependency(TensorViewKernel)
+
+                        decl = pccm.core.FunctionDecl(meta, code_split)
+                        code.raw(f"""
+                        {func_name}(params);
+                        """)
+                        yield dabc_kers, decl
+
+
     @pccm.pybind.mark
     @pccm.cuda.static_function(name="matmul2")
     def matmul2(self):
+        code_main = pccm.code()
+        code_main.add_dependency(TensorViewKernel)
+        # for p, ker in zip(self.all_params, self.all_kernels):
+        #     code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params,
+        #                          "GemmParams" + ker.get_algo_name())
+        #     code.add_param_class(ker.get_algo_name(), ker,
+        #                          "Gemm" + ker.get_algo_name())
+        code_main.arg("params", "tv::gemm::GemmParams", pyanno="cumm.tensorview.gemm.GemmParams")
+        code_main.raw(f"auto& algo_desp = params.algo_desp;")
+        for kers, decl in self.matmul_select_split(self.all_kernels, code_main):
+            code = decl.code
+            for ker in kers:
+                code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params,
+                                    "GemmParams" + ker.get_algo_name())
+                code.add_param_class(ker.get_algo_name(), ker,
+                                    "Gemm" + ker.get_algo_name())
+            self.add_func_decl(decl)
+            code.arg("params", "tv::gemm::GemmParams", pyanno="cumm.tensorview.gemm.GemmParams")
+
+            nvrtc_gemm_template(code)
+            for kers in self.matmul_select_helper_stage2(kers, code):
+                ker = kers[0]
+                param_type_str = "GemmParams" + ker.get_algo_name()
+                code.raw(f"""
+                found = true;
+                """)
+                if CUTLASS_MODE:
+                    code.raw(f"""
+                    CutlassGemm::ThreadblockSwizzle threadblock_swizzle;
+
+                    cutlass::gemm::GemmCoord grid_shape = threadblock_swizzle.get_tiled_shape(
+                        {{m, n, k}}, 
+                        {{{ker.tile_shape[0]}, {ker.tile_shape[1]}, {ker.tile_shape[2]}}},
+                        1);
+
+                    CutlassGemm::GemmKernel::Params params{{
+                        {{m, n, k}},
+                        grid_shape,
+                        {{a_ten.data_ptr<{ker.dtype_a}>(), a_ten.stride(0)}},
+                        {{b_ten.data_ptr<{ker.dtype_b}>(), b_ten.stride(0)}},
+                        {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.stride(0)}},
+                        {{c_ten.data_ptr<{ker.dtype_c}>(), c_ten.stride(0)}},
+                    }};
+                    dim3 grid = threadblock_swizzle.get_grid_shape(params.grid_tiled_shape);
+                    tv::cuda::Launch launcher(grid, dim3({ker.num_threads}, 1, 1),
+                                                {ker.smem_size});
+                    cudaError_t result;
+                    if ({ker.smem_size} >= (48 << 10)) {{
+                        result = cudaFuncSetAttribute({ker.get_algo_name()}::gemm_kernel,
+                                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                        {ker.smem_size});
+                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                        result = cudaFuncSetAttribute(
+                            {ker.get_algo_name()}::gemm_kernel,
+                            cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                    }}
+
+                    launcher({ker.get_algo_name()}::gemm_kernel, params);
+                    """)
+                else:
+                    if ker.shuffle_stride == ShuffleStrideType.ShuffleAC:
+                        code.raw(f"""
+                        const int* a_ptr = nullptr;
+                        if (!a_inds.empty()){{
+                            a_ptr = a_inds.data_ptr<const int>();
+                        }}
+                        TV_ASSERT_RT_ERR(!c_inds.empty(), "c must not empty");
+                        // tv::ssprint(d.ndim() == 1 ? 0 : d_ten.stride(0), (d.ndim() == 1 ? nullptr : c_inds.data_ptr<const int>()) == nullptr, "WTF");
+                        {param_type_str} kernel_params(
+                            m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
+                            c_ten.data_ptr<{ker.dtype_c}>(), d_ten.data_ptr<{ker.dtype_c}>(), 
+                            a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0), 
+                            a_ptr, c_inds.data_ptr<const int>(), d.ndim() == 1 ? nullptr : c_inds.data_ptr<const int>(), 
+                            {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), 
+                            {ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta),
+                            params.act_type,
+                            split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        """)
+                    elif ker.shuffle_stride == ShuffleStrideType.ShuffleAB:
+                        code.raw(f"""
+                        TV_ASSERT_RT_ERR(!a_inds.empty() && !b_inds.empty(), "error");
+                        {param_type_str} kernel_params(
+                            m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
+                            c_ten.data_ptr<{ker.dtype_c}>(), d_ten.data_ptr<{ker.dtype_c}>(), 
+                            a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0), 
+                            a_inds.data_ptr<const int>(), b_inds.data_ptr<const int>(),
+                            {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), 
+                            {ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta),
+                            params.act_type,
+                            split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        """)
+                    else:
+                        code.raw(f"""
+                        {param_type_str} kernel_params(
+                            m, n, k, a_ten.data_ptr<const {ker.dtype_a}>(), b_ten.data_ptr<const {ker.dtype_b}>(),
+                            c_ten.data_ptr<{ker.dtype_c}>(), d_ten.data_ptr<{ker.dtype_c}>(), 
+                            a_ten.stride(0), b_ten.stride(0), c_ten.stride(0), d.ndim() == 1 ? 0 : d_ten.stride(0), 
+                            {ker.dtype_comp}(params.alpha), {ker.dtype_comp}(params.beta), 
+                            {ker.dtype_comp}(params.act_alpha), {ker.dtype_comp}(params.act_beta),
+                            params.act_type,
+                            split_k_slices{", workspace.raw_data()" if ker.support_splitk() else ""});
+                        """)
+                    code.raw(f"""
+                    tv::cuda::Launch launcher(kernel_params.grid_dims, dim3({ker.num_threads}),
+                                                {ker.smem_size}, reinterpret_cast<cudaStream_t>(params.stream));
+                    cudaError_t result;
+                    if ({ker.smem_size} >= (48 << 10)) {{
+                        result = cudaFuncSetAttribute({ker.get_algo_name()}::gemm_kernel,
+                                                        cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                                        {ker.smem_size});
+                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                        result = cudaFuncSetAttribute(
+                            {ker.get_algo_name()}::gemm_kernel,
+                            cudaFuncAttributePreferredSharedMemoryCarveout, 100);
+                        TV_ASSERT_RT_ERR(result == cudaSuccess, "error");
+                    }}
+                    """)
+                    if cudasim.enable_debug():
+                        code.raw(f"""
+                        auto timer = tv::CudaContextTimer<>();
+                        """)
+                    code.raw(f"""
+                    {{
+                        tv::CUDAKernelTimerGuard timerguard(\"{ker.get_algo_name()}\", evtimer, reinterpret_cast<cudaStream_t>(params.stream));
+                        launcher({ker.get_algo_name()}::gemm_kernel, kernel_params);
+                    }}
+                    TV_CHECK_CUDA_ERR_V2("{ker.get_algo_name()}", "error with params", a.shape(), b.shape(), c.shape());
+                    """)
+                    if cudasim.enable_debug():
+                        code.raw(f"""
+                        cudaFuncAttributes attr;
+                        checkCudaErrors(
+                            cudaFuncGetAttributes(&attr, {ker.get_algo_name()}::gemm_kernel));
+                        tv::ssprint("{ker.get_algo_name()} kernel num regs:", attr.numRegs, "time:", timer.report() / 1000.0);
+                        """)
+                    code.raw(f"return;")
+            code.raw("""
+            if (!found){
+                TV_THROW_INVALID_ARG("Can't Found Algorithm for params:", algo_desp.tile_shape, algo_desp.warp_tile_shape, 
+                    algo_desp.num_stage, tv::dtype_str(a.dtype()), 
+                    tv::dtype_str(b.dtype()), tv::dtype_str(c.dtype()), tv::dtype_str(dacc), 
+                    tv::dtype_str(dcomp), ta, tb, tc, algo_desp.algo, algo_desp.tensorop);
+            }
+            // return 0;
+            """)
+
+        return code_main
+
+    # @pccm.pybind.mark
+    # @pccm.cuda.static_function(name="matmul2_deprecated")
+    def matmul2_deprecated(self):
         code = pccm.code()
         code.add_dependency(TensorViewKernel)
         for p, ker in zip(self.all_params, self.all_kernels):
