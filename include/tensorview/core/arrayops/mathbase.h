@@ -28,7 +28,7 @@ namespace tv {
 namespace arrayops {
 
 template <typename T> struct MathScalarOp {
-#ifndef __CUDACC_RTC__
+#ifndef __CUDACC__
   static T copysign(T x, T y) { return std::copysign(x, y); }
 
   static T atan2(T y, T x) { return std::atan2(y, x); }
@@ -38,6 +38,8 @@ template <typename T> struct MathScalarOp {
   static T pow(T x, T n) { return std::pow(x, n); }
 
   static T fmod(T x, T n) { return std::fmod(x, n); }
+
+  static T neg(T x) { return -x; }
 
   static T sqrt(T x) { return std::sqrt(x); }
 
@@ -87,7 +89,80 @@ template <typename T> struct MathScalarOp {
 
   static T atanh(T x) { return std::atanh(x); }
 
-  static T neg(T x) { return -x; }
+  static T rsqrt(T x) { return T(1) / sqrt(x); }
+#else
+
+  TV_HOST_DEVICE_INLINE static T copysign(T x, T y) {
+    return T(copysignf(float(x), float(y)));
+  }
+
+  TV_HOST_DEVICE_INLINE static T atan2(T y, T x) {
+    return T(atan2f(float(y), float(x)));
+  }
+
+  TV_HOST_DEVICE_INLINE static T scalbn(T x, int n) {
+    return T(scalbnf(float(x), n));
+  }
+
+  TV_HOST_DEVICE_INLINE static T pow(T x, T n) {
+    return T(pow(float(x), float(n)));
+  }
+
+  TV_HOST_DEVICE_INLINE static T fmod(T x, T n) {
+    return T(fmodf(float(x), float(n)));
+  }
+
+  TV_HOST_DEVICE_INLINE static T sqrt(T x) { return T(sqrtf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T ceil(T x) { return T(ceilf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T cos(T x) { return T(cosf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T exp(T x) { return T(expf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T exp2(T x) { return T(exp2f(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T floor(T x) { return T(floorf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T log(T x) { return T(logf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T log10(T x) { return T(log10f(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T log2(T x) { return T(log2f(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T rint(T x) { return T(rintf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T sin(T x) { return T(sinf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T trunc(T x) { return T(truncf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T fabs(T x) { return T(fabsf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T tan(T x) { return T(tanf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T asin(T x) { return T(asinf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T acos(T x) { return T(acosf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T atan(T x) { return T(atanf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T round(T x) { return T(roundf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T sinh(T x) { return T(sinhf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T cosh(T x) { return T(coshf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T tanh(T x) { return T(tanhf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T asinh(T x) { return T(asinhf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T acosh(T x) { return T(acoshf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T atanh(T x) { return T(atanhf(float(x))); }
+
+  TV_HOST_DEVICE_INLINE static T neg(T x) { return -x; }
+
+  TV_HOST_DEVICE_INLINE static T rsqrt(T x) { return T(1) / sqrt(x); }
 
 #endif
 };
@@ -114,6 +189,7 @@ template <> struct MathScalarOp<float> {
   TV_HOST_DEVICE_INLINE static float fmod(float x, float n) {
     return fmodf(x, n);
   }
+  TV_HOST_DEVICE_INLINE static float neg(float x) { return -x; }
 
   TV_HOST_DEVICE_INLINE static float sqrt(float x) { return sqrtf(x); }
 
@@ -166,9 +242,6 @@ template <> struct MathScalarOp<float> {
   TV_HOST_DEVICE_INLINE static float acosh(float x) { return acoshf(x); }
 
   TV_HOST_DEVICE_INLINE static float atanh(float x) { return atanhf(x); }
-
-  TV_HOST_DEVICE_INLINE static float neg(float x) { return -x; }
-
 };
 #ifdef __CUDACC__
 template <> struct MathScalarOp<__half> {
@@ -292,16 +365,6 @@ template <> struct MathScalarOp<__half> {
     return __half(fabsf(float(x)));
 #endif
   }
-
-  TV_HOST_DEVICE_INLINE static __half neg(__half x) { 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
-    return __hneg(x);
-#else
-    return __half(-(float(x)));
-#endif
-
-  }
-
 
   TV_DEVICE_INLINE static __half2 v2sqrt(__half2 x) {
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
@@ -482,6 +545,14 @@ template <> struct MathScalarOp<__half> {
     return __floats2half2_rn(x0, x1);
 #endif
   }
+
+  TV_HOST_DEVICE_INLINE static __half neg(__half x) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 530)
+    return __hneg(x);
+#else
+    return __half(-(float(x)));
+#endif
+  }
 };
 #endif
 #if (defined(__CUDACC_VER_MAJOR__) && (__CUDACC_VER_MAJOR__ >= 11))
@@ -604,14 +675,6 @@ template <> struct MathScalarOp<__nv_bfloat16> {
     return __habs(x);
 #else
     return __nv_bfloat16(fabsf(float(x)));
-#endif
-  }
-
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 neg(__nv_bfloat16 x) { 
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
-    return __hneg(x);
-#else
-    return __nv_bfloat16(-(float(x)));
 #endif
   }
 
@@ -792,6 +855,14 @@ template <> struct MathScalarOp<__nv_bfloat16> {
     x0 = fabsf(x0);
     x1 = fabsf(x1);
     return __floats2bfloat162_rn(x0, x1);
+#endif
+  }
+
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 neg(__nv_bfloat16 x) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+    return __hneg(x);
+#else
+    return __nv_bfloat16(-(float(x)));
 #endif
   }
 };

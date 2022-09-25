@@ -57,6 +57,7 @@ def main():
 
     ]
     code_cpus = []
+    code_gpu_fallbacks = []
     code_cuda_fps = []
     code_cuda_hfs = []
     code_cuda_bfs = []
@@ -70,7 +71,11 @@ def main():
         return std::{item.name}(x);
     }}
             """)
-
+            code_gpu_fallbacks.append(f"""
+    TV_HOST_DEVICE_INLINE static T {item.name}(T x){{
+        return T({item.name}f(float(x)));
+    }}
+            """)
         code_cuda_fps.append(f"""
     TV_HOST_DEVICE_INLINE static float {item.name}(float x){{
         return {item.name}f(x);
@@ -125,6 +130,8 @@ def main():
             """)
 
     code_cpu = "\n".join(code_cpus)
+    code_gpu_fallback = "\n".join(code_gpu_fallbacks)
+
     code_cuda_fp = "\n".join(code_cuda_fps)
     code_cuda_hf = "\n".join(code_cuda_hfs)
     code_cuda_hf2 = "\n".join(code_cuda_hf2s)
@@ -134,7 +141,7 @@ def main():
     code = f"""
 template <typename T>
 struct MathScalarOp{{
-#ifndef __CUDACC_RTC__
+#ifndef __CUDACC__
 static T copysign(T x, T y){{
     return std::copysign(x, y);
 }}
@@ -154,11 +161,48 @@ static T pow(T x, T n){{
 static T fmod(T x, T n){{
     return std::fmod(x, n);
 }}
+
 static T neg(T x) {{ 
     return -x; 
 }}
 
 {code_cpu}
+
+static T rsqrt(T x) {{ 
+    return T(1) / sqrt(x); 
+}}
+#else 
+
+TV_HOST_DEVICE_INLINE static T copysign(T x, T y){{
+    return T(copysignf(float(x), float(y)));
+}}
+
+TV_HOST_DEVICE_INLINE static T atan2(T y, T x){{
+    return T(atan2f(float(y), float(x)));
+}}
+
+TV_HOST_DEVICE_INLINE static T scalbn(T x, int n){{
+    return T(scalbnf(float(x), n));
+}}
+
+TV_HOST_DEVICE_INLINE static T pow(T x, T n){{
+    return T(pow(float(x), float(n)));
+}}
+
+TV_HOST_DEVICE_INLINE static T fmod(T x, T n){{
+    return T(fmodf(float(x), float(n)));
+}}
+
+{code_gpu_fallback}
+
+TV_HOST_DEVICE_INLINE static T neg(T x) {{ 
+    return -x; 
+}}
+
+TV_HOST_DEVICE_INLINE static T rsqrt(T x) {{ 
+    return T(1) / sqrt(x); 
+}}
+
 #endif
 }};
 

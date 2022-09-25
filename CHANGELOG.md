@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] - 2022-9-25
+### Fixed
+- Fix build problem in cuda 10.2
+- Fix some bug related to nvrtc
+
 ## [0.3.1] - 2022-9-25
 ### Fixed
 - Fix cpu build problem

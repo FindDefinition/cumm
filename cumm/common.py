@@ -63,7 +63,7 @@ _GPU_NAME_TO_ARCH = {
 }
 
 
-def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[int, int]]]:
+def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[int, int]], bool]:
     r'''
     Determine CUDA arch flags to use.
 
@@ -126,7 +126,7 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
         else:
             if is_gemm:
                 if (major, minor) < (11, 0):
-                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5"
+                    _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5+PTX"
                 elif (major, minor) < (12, 0):
                     _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
                 else:
@@ -136,7 +136,7 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
             else:
                 # flag for non-gemm kernels, they are usually simple and small.
                 if (major, minor) < (11, 0):
-                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5"
+                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5+PTX"
                 elif (major, minor) < (12, 0):
                     _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
                 else:
@@ -191,6 +191,7 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
             "can't find arch or can't recogize your GPU. "
             "use env CUMM_CUDA_ARCH_LIST to specify your gpu arch. "
             "for example, export CUMM_CUDA_ARCH_LIST=\"8.0;8.6+PTX\"")
+    have_ptx = False
     for arch in arch_list:
         if arch.endswith("+PTX"):
             arch_vers = arch.split("+")[0].split(".")
@@ -203,13 +204,14 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
             num = arch_vers[0] + arch_vers[1]
             nums.append((int(arch_vers[0]), int(arch_vers[1])))
             if arch.endswith('+PTX'):
+                have_ptx = True
                 flags.append(f'-gencode=arch=compute_{num},code=[sm_{num},compute_{num}]')
             else:
                 flags.append(f'-gencode=arch=compute_{num},code=sm_{num}')
 
                 # flags.append(f'-gencode=arch=compute_{num},code=compute_{num}')
 
-    return sorted(list(set(flags))), nums
+    return sorted(list(set(flags))), nums, have_ptx
 
 def get_cuda_version_by_nvcc():
     nvcc_version = subprocess.check_output(["nvcc", "--version"
@@ -219,24 +221,31 @@ def get_cuda_version_by_nvcc():
                                     nvcc_version_str)[0]
     return version_str
 
+_CACHED_CUDA_INCLUDE_LIB: Optional[Tuple[Path, Path]] = None 
+
 def _get_cuda_include_lib():
-    if compat.InWindows:
-        nvcc_version = subprocess.check_output(["nvcc", "--version"
-                                                ]).decode("utf-8").strip()
-        nvcc_version_str = nvcc_version.split("\n")[3]
-        version_str: str = re.findall(r"release (\d+.\d+)",
-                                      nvcc_version_str)[0]
-        windows_cuda_root = Path(
-            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
-        if not windows_cuda_root.exists():
-            raise ValueError(f"can't find cuda in {windows_cuda_root}.")
-        include = windows_cuda_root / f"v{version_str}\\include"
-        lib64 = windows_cuda_root / f"v{version_str}\\lib\\x64"
+    global _CACHED_CUDA_INCLUDE_LIB
+    if _CACHED_CUDA_INCLUDE_LIB is None:
+        if compat.InWindows:
+            nvcc_version = subprocess.check_output(["nvcc", "--version"
+                                                    ]).decode("utf-8").strip()
+            nvcc_version_str = nvcc_version.split("\n")[3]
+            version_str: str = re.findall(r"release (\d+.\d+)",
+                                        nvcc_version_str)[0]
+            windows_cuda_root = Path(
+                "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
+            if not windows_cuda_root.exists():
+                raise ValueError(f"can't find cuda in {windows_cuda_root}.")
+            include = windows_cuda_root / f"v{version_str}\\include"
+            lib64 = windows_cuda_root / f"v{version_str}\\lib\\x64"
+        else:
+            linux_cuda_root = Path("/usr/local/cuda")
+            include = linux_cuda_root / f"include"
+            lib64 = linux_cuda_root / f"lib64"
+        _CACHED_CUDA_INCLUDE_LIB = (include, lib64)
+        return _CACHED_CUDA_INCLUDE_LIB
     else:
-        linux_cuda_root = Path("/usr/local/cuda")
-        include = linux_cuda_root / f"include"
-        lib64 = linux_cuda_root / f"lib64"
-    return include, lib64
+        return _CACHED_CUDA_INCLUDE_LIB
 
 
 class GemmKernelFlags(pccm.Class):
@@ -244,7 +253,7 @@ class GemmKernelFlags(pccm.Class):
     """
     def __init__(self):
         super().__init__()
-        gpu_arch_flags, self.cuda_archs = _get_cuda_arch_flags(True)
+        gpu_arch_flags, self.cuda_archs, self.has_ptx = _get_cuda_arch_flags(True)
         include, lib64 = _get_cuda_include_lib()
         self.build_meta.add_public_includes(include)
         self.build_meta.add_public_cflags("nvcc", *gpu_arch_flags)
@@ -255,7 +264,7 @@ class GemmKernelFlags(pccm.Class):
 class GenericKernelFlags(pccm.Class):
     def __init__(self):
         super().__init__()
-        gpu_arch_flags, self.cuda_archs = _get_cuda_arch_flags(False)
+        gpu_arch_flags, self.cuda_archs, self.has_ptx = _get_cuda_arch_flags(False)
         include, lib64 = _get_cuda_include_lib()
         self.build_meta.add_public_includes(include)
         self.build_meta.add_public_cflags("nvcc", *gpu_arch_flags)
@@ -374,17 +383,51 @@ class CummNVRTCLink(pccm.Class):
             self.build_meta.add_ldflags("clang++", "-Wl,--no-as-needed", "nvrtc-builtins")
             self.build_meta.add_ldflags("nvcc", "-Wl,--no-as-needed", "nvrtc-builtins")
 
+class _CudaInclude(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        if not CUMM_CPU_ONLY_BUILD:
+            include, lib64 = _get_cuda_include_lib()
+            self.add_include("cuda.h")
+            self.build_meta.add_private_includes(include)
+
 class CompileInfo(pccm.Class):
     def __init__(self):
         super().__init__()
         if not CUMM_CPU_ONLY_BUILD:
-            _, self.cuda_archs = _get_cuda_arch_flags()
-            _, self.gemm_cuda_archs = _get_cuda_arch_flags(True)
+            include, lib64 = _get_cuda_include_lib()
+            _, self.cuda_archs, self.has_ptx = _get_cuda_arch_flags()
+            self.ptx_arch = self.cuda_archs[-1]
+            _, self.gemm_cuda_archs, self.gemm_has_ptx = _get_cuda_arch_flags(True)
+            self.gemm_ptx_arch = self.gemm_cuda_archs[-1]
         else:
             self.cuda_archs = []
             self.gemm_cuda_archs = []
         self.add_include("vector", "tuple")
         self.add_include("string")
+    
+    if CUMM_CPU_ONLY_BUILD:
+        _STATIC_FUNC = pccm.static_function
+    else:
+        _STATIC_FUNC = pccm.cuda.static_function
+
+    @pccm.pybind.mark
+    @_STATIC_FUNC
+    def get_compiled_cuda_version(self):
+        code = pccm.code()
+        if CUMM_CPU_ONLY_BUILD:
+            code.raw(f"return std::make_tuple(-1, -1);")
+        else:
+            code.add_dependency(_CudaInclude)
+            code.raw(f"""
+            #ifdef __CUDACC_VER_MAJOR__
+            return std::make_tuple(__CUDACC_VER_MAJOR__, __CUDACC_VER_MINOR__);
+            #else
+            int ver = CUDA_VERSION; // from cuda.h
+            return std::make_tuple(ver / 1000, (ver % 1000) / 10);
+            #endif
+            """)
+        return code.ret("std::tuple<int, int>")
 
     @pccm.pybind.mark
     @pccm.static_function
@@ -442,6 +485,91 @@ class CompileInfo(pccm.Class):
         code.raw(f"return false;")
         return code.ret("bool")
 
+    @pccm.pybind.mark
+    @pccm.static_function
+    def arch_is_compatible(self):
+        code = pccm.code()
+        code.arg("arch", "std::tuple<int, int>")
+        if self.has_ptx:
+            code.raw(f"""
+            if (arch > std::make_tuple({self.ptx_arch[0]}, {self.ptx_arch[1]})){{
+                return true;
+            }}
+            """)
+        code.raw(f"""
+        return arch_is_compiled(arch);
+        """)
+        return code.ret("bool")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def arch_is_compatible_gemm(self):
+        code = pccm.code()
+        code.arg("arch", "std::tuple<int, int>")
+        if self.gemm_has_ptx:
+            code.raw(f"""
+            if (arch > std::make_tuple({self.gemm_ptx_arch[0]}, {self.gemm_ptx_arch[1]})){{
+                return true;
+            }}
+            """)
+        code.raw(f"""
+        return arch_is_compiled_gemm(arch);
+        """)
+        return code.ret("bool")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def algo_can_use_ptx(self):
+        code = pccm.code()
+        code.arg("min_arch", "std::tuple<int, int>")
+        code.arg("arch", "std::tuple<int, int>")
+        ptx_arch = self.ptx_arch
+        if self.has_ptx:
+            code.raw(f"""
+            auto ptx_arch = std::make_tuple({ptx_arch[0]}, {ptx_arch[1]});
+            return min_arch <= ptx_arch && arch >= ptx_arch;
+            """)
+        return code.ret("bool")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def gemm_algo_can_use_ptx(self):
+        code = pccm.code()
+        code.arg("min_arch", "std::tuple<int, int>")
+        code.arg("arch", "std::tuple<int, int>")
+
+        ptx_arch = self.gemm_ptx_arch
+        if self.gemm_has_ptx:
+            code.raw(f"""
+            auto ptx_arch = std::make_tuple({ptx_arch[0]}, {ptx_arch[1]});
+            return min_arch <= ptx_arch && arch >= ptx_arch;
+            """)
+        return code.ret("bool")
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def algo_can_be_nvrtc_compiled(self):
+        code = pccm.code()
+        code.arg("min_arch", "std::tuple<int, int>")
+        cuda_ver_to_max_arch = [
+            ((12, 0), (9, 0)),
+            ((11, 1), (8, 6)),
+            ((11, 0), (8, 0)),
+            ((10, 2), (7, 5)),
+        ]
+        code.raw(f"""
+        auto cuda_ver = get_compiled_cuda_version();
+        """)
+        for ver, max_arch in cuda_ver_to_max_arch:
+            code.raw(f"""
+            if (cuda_ver >= std::make_tuple({ver[0]}, {ver[1]})){{
+                return min_arch <= std::make_tuple({max_arch[0]}, {max_arch[1]});
+            }}
+            """)
+        code.raw(f"""
+        return false;
+        """)
+        return code.ret("bool")
 
 class TensorViewKernel(pccm.Class):
     def __init__(self):
