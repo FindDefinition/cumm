@@ -401,6 +401,10 @@ class CompileInfo(pccm.Class):
             _, self.gemm_cuda_archs, self.gemm_has_ptx = _get_cuda_arch_flags(True)
             self.gemm_ptx_arch = self.gemm_cuda_archs[-1]
         else:
+            self.has_ptx = False 
+            self.gemm_has_ptx = False 
+            self.ptx_arch = (0, 0)
+            self.gemm_ptx_arch = (0, 0)
             self.cuda_archs = []
             self.gemm_cuda_archs = []
         self.add_include("vector", "tuple")
@@ -529,6 +533,7 @@ class CompileInfo(pccm.Class):
             auto ptx_arch = std::make_tuple({ptx_arch[0]}, {ptx_arch[1]});
             return min_arch <= ptx_arch && arch >= ptx_arch;
             """)
+        code.raw(f"return false;")
         return code.ret("bool")
 
     @pccm.pybind.mark
@@ -544,6 +549,7 @@ class CompileInfo(pccm.Class):
             auto ptx_arch = std::make_tuple({ptx_arch[0]}, {ptx_arch[1]});
             return min_arch <= ptx_arch && arch >= ptx_arch;
             """)
+        code.raw(f"return false;")
         return code.ret("bool")
 
     @pccm.pybind.mark

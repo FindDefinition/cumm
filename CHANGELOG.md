@@ -1,4 +1,9 @@
 # Changelog
+## [0.3.3] - 2022-9-25
+### Fixed
+- Fix problem in CompileInfo
+### Changed
+- Change nlohmann json to 3.11.2
 
 ## [0.3.2] - 2022-9-25
 ### Fixed
