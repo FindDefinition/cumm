@@ -1164,7 +1164,7 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
 
                         decl = pccm.core.FunctionDecl(meta, code_split)
                         code.raw(f"""
-                        {func_name}(params);
+                        return {func_name}(params);
                         """)
                         yield dabc_kers, decl
 
@@ -1318,6 +1318,9 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
             }
             // return 0;
             """)
+        code_main.raw("""
+        TV_THROW_RT_ERR("can't find any suitable algo for your parameters.");
+        """)
 
         return code_main
 

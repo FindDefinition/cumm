@@ -283,14 +283,11 @@ public:
       slot = hash_val % hash_size_;
     }
     value_type val;
-    int cnt = 0;
-    while (cnt < 100) {
-      cnt++;
+    while (true) {
       val = table_[slot];
       if (reinterpret_cast<key_type_uint &>(val) == key_u) {
         return slot;
       }
-      // TODO
       if (val == empty_key) {
         return -1;
       }

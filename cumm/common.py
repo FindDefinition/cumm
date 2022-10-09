@@ -84,6 +84,8 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
         ('Ampere', '8.0;8.6+PTX'),
+        ('Hopper', '9.0+PTX'),
+
     ])
 
     supported_arches = [
@@ -127,8 +129,10 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
             if is_gemm:
                 if (major, minor) < (11, 0):
                     _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5+PTX"
-                elif (major, minor) < (12, 0):
+                elif (major, minor) < (11, 8):
                     _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+                elif (major, minor) < (12, 0):
+                    _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
                 else:
                     # remove sm < 70 prebuilt gemm kernels in CUDA 12.
                     # these gemm kernels will be compiled via nvrtc.
@@ -137,8 +141,10 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
                 # flag for non-gemm kernels, they are usually simple and small.
                 if (major, minor) < (11, 0):
                     _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5+PTX"
-                elif (major, minor) < (12, 0):
+                elif (major, minor) < (11, 8):
                     _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
+                elif (major, minor) < (12, 0):
+                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
                 else:
                     _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;9.0+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
@@ -558,7 +564,7 @@ class CompileInfo(pccm.Class):
         code = pccm.code()
         code.arg("min_arch", "std::tuple<int, int>")
         cuda_ver_to_max_arch = [
-            ((12, 0), (9, 0)),
+            ((11, 8), (9, 0)),
             ((11, 1), (8, 6)),
             ((11, 0), (8, 0)),
             ((10, 2), (7, 5)),
