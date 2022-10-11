@@ -1,4 +1,11 @@
 # Changelog
+
+## [0.3.5] - 2022-10-11
+### Added
+- add cuda flags for sm_89 and sm_90
+### Fixed 
+- Fix small bug in hash table
+
 ## [0.3.4] - 2022-9-25
 ### Changed
 - Change gemm/conv main function to splited version
