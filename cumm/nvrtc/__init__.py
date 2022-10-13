@@ -33,12 +33,12 @@ def cufilt(name: str):
     res = tv.cufilt(name)
     if res:
         return res 
-    # in windows, gcc-style demangle isn't available.
-    # so we can only use subprocess before cuda 11.4.
-    if compat.InWindows:
+    else:
+        # if fail, use cu++filt.
+        # in windows, gcc-style demangle isn't available.
+        # so we can only use subprocess before cuda 11.4.
         res = subprocess.check_output(["cu++filt", name]).decode("utf-8").strip()
         return res 
-    raise NotImplementedError
 
 @dataclasses.dataclass
 class NVRTCModuleParams:
