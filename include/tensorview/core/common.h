@@ -208,12 +208,28 @@ template <char Sep = ' ', class... TArgs> void ssprint(TArgs... args) {
     if (__macro_err) {                                                         \
       std::stringstream __macro_s;                                             \
       __macro_s << __func__ << " " << __FILE__ << ":" << __LINE__ << "\n";     \
-      __macro_s << "cuda failed with error code"                               \
+      __macro_s << "cuda failed with error code "                               \
                 << static_cast<int>(__macro_err);                              \
       __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.\n"; \
       TV_BACKTRACE_PRINT(__macro_s);                                           \
       throw std::runtime_error(__macro_s.str());                               \
     }                                                                          \
   } while (0)
+
+#define TV_CUDA_RESULT_CHECK_V2(EXPR, ...)                                     \
+  do {                                                                         \
+    auto __macro_err = EXPR;                                                   \
+    if (__macro_err) {                                                         \
+      std::stringstream __macro_s;                                             \
+      __macro_s << __func__ << " " << __FILE__ << ":" << __LINE__ << "\n";     \
+      __macro_s << "cuda failed with error code "                               \
+                << static_cast<int>(__macro_err);                              \
+      __macro_s << ". use CUDA_LAUNCH_BLOCKING=1 to get correct traceback.\n"; \
+      tv::sstream_print(__macro_s, __VA_ARGS__);                               \
+      TV_BACKTRACE_PRINT(__macro_s);                                           \
+      throw std::runtime_error(__macro_s.str());                               \
+    }                                                                          \
+  } while (0)
+
 
 } // namespace tv

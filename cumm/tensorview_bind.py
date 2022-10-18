@@ -486,7 +486,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def_property_readonly("program", &tv::NVRTCModule::get_program)
     .def("get_lowered_name", &tv::NVRTCModule::get_lowered_name)
     .def("get_kernel_attributes", &tv::NVRTCModule::get_kernel_attributes, py::arg("name"))
-    .def("set_max_dynamic_shared_size_bytes", &tv::NVRTCModule::set_max_dynamic_shared_size_bytes)
+    .def("set_max_dynamic_shared_size_bytes", &tv::NVRTCModule::set_max_dynamic_shared_size_bytes, py::arg("name"), py::arg("size"))
+    .def("set_preferred_smem_carveout", &tv::NVRTCModule::set_preferred_smem_carveout, py::arg("name"), py::arg("carveout"))
     .def("run_kernel", &tv::NVRTCModule::run_kernel);
 
   py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")

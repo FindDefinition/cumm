@@ -1,4 +1,11 @@
 # Changelog
+
+## [0.3.5] - 2022-10-18
+### Added
+- Add flags for H100 and RTX 4090
+### Fixed
+- fix nvrtc launch problem when smem size is large
+
 ## [0.3.4] - 2022-9-25
 ### Changed
 - Change gemm/conv main function to splited version
