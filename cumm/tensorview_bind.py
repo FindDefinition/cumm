@@ -51,8 +51,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             cuda_ver = get_cuda_version_by_nvcc().split(".")
             cuda_ver_ints = list(map(int, cuda_ver))
             if cuda_ver_ints >= [11, 4]:
-                self.add_include("nv_decode.h")
-                self.build_meta.add_libraries("nvrtc", "cufilt")
+                # cuflit has problem in arm platforms and windows, so we remove it.
+                # self.add_include("nv_decode.h")
+                # self.build_meta.add_libraries("nvrtc", "cufilt")
+                self.build_meta.add_libraries("nvrtc")
             else:
                 self.build_meta.add_libraries("nvrtc")
             if compat.InLinux:
