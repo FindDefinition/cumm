@@ -506,11 +506,12 @@ class GemmKernel(GemmComponentBase):
                                       split_d_params)
         # self.add_dependency(GemmNVRTCParams)
         self.add_param_class("gemm_params", self.gemm_params, "GemmParams")
-        self.add_code_before_class(f"""
-        __constant__ int {NVRTCConstants.SIZEOF_KEY} = sizeof(GemmParams);
-        __constant__ int {NVRTCConstants.NUM_THREADS_KEY} = {self.num_threads};
-        __constant__ int {NVRTCConstants.SMEM_KEY} = {self.smem_size};
-        """)
+        if self.is_nvrtc:
+            self.add_code_before_class(f"""
+            __constant__ int {NVRTCConstants.SIZEOF_KEY} = sizeof(GemmParams);
+            __constant__ int {NVRTCConstants.NUM_THREADS_KEY} = {self.num_threads};
+            __constant__ int {NVRTCConstants.SMEM_KEY} = {self.smem_size};
+            """)
         if self.nvrtc_mode == NVRTCMode.ConstantMemory:
             self.add_code_before_class(f"""
             __constant__ tv::array<uint8_t, sizeof(GemmParams)> {NVRTCConstants.CONSTANT_PARAM_KEY};
