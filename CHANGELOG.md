@@ -5,6 +5,7 @@
 - Add flags for H100 and RTX 4090
 ### Fixed
 - fix nvrtc launch problem when smem size is large
+- fix nvrtc constant variable parse problem
 
 ## [0.3.4] - 2022-9-25
 ### Changed

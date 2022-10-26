@@ -589,9 +589,9 @@ class ConvKernel(GemmComponentBase):
                              "ConvProblem")
         # use constexpr int to save metadata to ptx in nvrtc.
         self.add_code_before_class(f"""
-        constexpr int {NVRTCConstants.SIZEOF_KEY} = sizeof(ConvParams);
-        constexpr int {NVRTCConstants.NUM_THREADS_KEY} = {self.num_threads};
-        constexpr int {NVRTCConstants.SMEM_KEY} = {self.smem_size};
+        __constant__ int {NVRTCConstants.SIZEOF_KEY} = sizeof(ConvParams);
+        __constant__ int {NVRTCConstants.NUM_THREADS_KEY} = {self.num_threads};
+        __constant__ int {NVRTCConstants.SMEM_KEY} = {self.smem_size};
         """)
         if self.nvrtc_mode == NVRTCMode.ConstantMemory:
             self.add_code_before_class(f"""
