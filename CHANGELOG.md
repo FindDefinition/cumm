@@ -1,4 +1,7 @@
 # Changelog
+## [0.3.6] - 2022-11-05
+### Added
+- Add int64 support for TensorGeneric
 
 ## [0.3.5] - 2022-10-18
 ### Added

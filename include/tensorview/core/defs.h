@@ -15,7 +15,7 @@
 #pragma once
 // #include <cstdint>
 // #include <cstddef>
-#if (defined(__clang__) && defined(__CUDA__)) || defined(__NVCC__)
+#if (defined(__clang__) && defined(__CUDA__)) || defined(__NVCC__) || defined(__CUDACC__)
 #define TV_CUDA_CC
 #define TV_HOST_DEVICE_INLINE __forceinline__ __device__ __host__
 #define TV_DEVICE_INLINE __forceinline__ __device__
