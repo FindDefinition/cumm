@@ -1,4 +1,8 @@
 # Changelog
+## [0.3.7] - 2022-11-05
+### Added
+- Fix bug in ConvProblem introduced in 0.3.6
+
 ## [0.3.6] - 2022-11-05
 ### Added
 - Add int64 support for TensorGeneric

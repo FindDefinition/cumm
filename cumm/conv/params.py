@@ -255,17 +255,12 @@ class ConvProblem(pccm.ParameterizedClass):
         code.raw(f"""
         auto shape = get_npq_shape();
         """)
-        if self.ndim == 1:
-            code.raw(f"""
-            return true;
-            """)
-        else:
-            code.raw(f"return (")
-            lines: List[str] = []
-            for i in range(self.ndim - 1):
-                lines.append(f"int64_t(shape[{i + 1}])")
-            code.raw("std::abs(" + " * ".join(lines) + ") <= std::numeric_limits<int>::max()")
-            code.raw(");")
+        code.raw(f"return (")
+        lines: List[str] = []
+        for i in range(self.ndim + 1):
+            lines.append(f"int64_t(shape[{i}])")
+        code.raw("std::abs(" + " * ".join(lines) + ") <= std::numeric_limits<int>::max()")
+        code.raw(");")
         code.ret("bool")
         return code
 
