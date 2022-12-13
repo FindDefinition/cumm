@@ -51,8 +51,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             cuda_ver = get_cuda_version_by_nvcc().split(".")
             cuda_ver_ints = list(map(int, cuda_ver))
             if cuda_ver_ints >= [11, 4]:
-                self.add_include("nv_decode.h")
-                self.build_meta.add_libraries("nvrtc", "cufilt")
+                # cuflit has problem in arm platforms and windows, so we remove it.
+                # self.add_include("nv_decode.h")
+                # self.build_meta.add_libraries("nvrtc", "cufilt")
+                self.build_meta.add_libraries("nvrtc")
             else:
                 self.build_meta.add_libraries("nvrtc")
             if compat.InLinux:
@@ -487,7 +489,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def_property_readonly("program", &tv::NVRTCModule::get_program)
     .def("get_lowered_name", &tv::NVRTCModule::get_lowered_name)
     .def("get_kernel_attributes", &tv::NVRTCModule::get_kernel_attributes, py::arg("name"))
-    .def("set_max_dynamic_shared_size_bytes", &tv::NVRTCModule::set_max_dynamic_shared_size_bytes)
+    .def("set_max_dynamic_shared_size_bytes", &tv::NVRTCModule::set_max_dynamic_shared_size_bytes, py::arg("name"), py::arg("size"))
+    .def("set_preferred_smem_carveout", &tv::NVRTCModule::set_preferred_smem_carveout, py::arg("name"), py::arg("carveout"))
     .def("run_kernel", &tv::NVRTCModule::run_kernel);
 
   py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")
@@ -734,29 +737,17 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
             code.raw("""
             m.def("cufilt", [](std::string name){
               int status;
-              #if defined(TV_CUDA) && (CUDA_VERSION >= 11040)
-              std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
-              TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
-              return std::string(realname.get());
-              #else
               std::shared_ptr<char> realname = std::shared_ptr<char>(abi::__cxa_demangle(name.c_str(), 0, 0, &status), std::free);
-              TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
+              if (status != 0){
+                return std::string();
+              }
               return std::string(realname.get());
-              #endif
             }, py::arg("name")); 
             """)
         elif compat.InWindows:
-            # TODO windows CUDA contains a STATIC cufilt library which can't be used in our library.
             code.raw("""
             m.def("cufilt", [](std::string name){
-              int status;
-              #if defined(TV_CUDA) && (CUDA_VERSION >= 11040) && (false)
-              std::shared_ptr<char> realname = std::shared_ptr<char>(__cu_demangle(name.c_str(), 0, 0, &status), free);
-              TV_ASSERT_RT_ERR(status == 0, "demangle cuda symbol error");
-              return std::string(realname.get());
-              #else
-              return "";
-              #endif
+              return std::string();
             }, py::arg("name")); 
             """)
         else:

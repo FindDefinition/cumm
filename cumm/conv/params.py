@@ -238,6 +238,32 @@ class ConvProblem(pccm.ParameterizedClass):
         new_obj.groups_ = groups
         return new_obj
 
+    @pccm.member_function(header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"])
+    def get_npq_shape(self):
+        code = pccm.FunctionCode()
+        if self.mask_sparse:
+            code.raw(f"return {{N}};")
+        else:
+            pqs = codeops.unpack("output_dims", range(self.ndim))
+            code.raw(f"return {{N, {pqs}}};")
+        return code.ret(f"tv::array<int, {self.ndim + 1}>")
+
+    @pccm.member_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
+    def check_npq_not_overflow(self):
+        code = pccm.code()
+        code.raw(f"""
+        auto shape = get_npq_shape();
+        """)
+        code.raw(f"return (")
+        lines: List[str] = []
+        for i in range(self.ndim + 1):
+            lines.append(f"int64_t(shape[{i}])")
+        code.raw("std::abs(" + " * ".join(lines) + ") <= std::numeric_limits<int>::max()")
+        code.raw(");")
+        code.ret("bool")
+        return code
+
     @pccm.static_function(header_only=True, attrs=["TV_HOST_DEVICE_INLINE"])
     def calc_output_dims(self):
         code = pccm.code()

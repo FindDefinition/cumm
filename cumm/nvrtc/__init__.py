@@ -33,12 +33,12 @@ def cufilt(name: str):
     res = tv.cufilt(name)
     if res:
         return res 
-    # in windows, gcc-style demangle isn't available.
-    # so we can only use subprocess before cuda 11.4.
-    if compat.InWindows:
+    else:
+        # if fail, use cu++filt.
+        # in windows, gcc-style demangle isn't available.
+        # so we can only use subprocess before cuda 11.4.
         res = subprocess.check_output(["cu++filt", name]).decode("utf-8").strip()
         return res 
-    raise NotImplementedError
 
 @dataclasses.dataclass
 class NVRTCModuleParams:
@@ -139,12 +139,48 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                     continue
                 if len(parts) == 7:
                     name = cufilt(name)
+                    if not name:
+                        continue
                     name = "::".join(name.split("::")[1:])
                     const_values[name] = int(parts[-1].replace(";", " "))
                 elif len(parts) == 5:
                     name = cufilt(name[:-1])
+                    if not name:
+                        continue
                     name = "::".join(name.split("::")[1:])
                     const_values[name] = 0
+            elif line.startswith(".visible .const .align"):
+                parts = line.split(" ")
+                name = parts[5]
+                if "[" in name:
+                    continue
+                if len(parts) == 8:
+                    name = cufilt(name)
+                    if not name:
+                        continue
+                    const_values[name] = int(parts[-1].replace(";", " "))
+                elif len(parts) == 6:
+                    name = cufilt(name[:-1])
+                    if not name:
+                        continue
+                    const_values[name] = 0
+            elif line.startswith(".const .align"):
+                parts = line.split(" ")
+                name = parts[4]
+                if "[" in name:
+                    continue
+                if len(parts) == 7:
+                    name = cufilt(name)
+                    if not name:
+                        continue
+                    const_values[name] = int(parts[-1].replace(";", " "))
+                elif len(parts) == 5:
+                    name = cufilt(name[:-1])
+                    if not name:
+                        continue
+                    const_values[name] = 0
+
+
         self.const_values = const_values
 
     @classmethod

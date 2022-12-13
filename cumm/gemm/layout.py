@@ -440,16 +440,19 @@ class TensorGeneric(pccm.ParameterizedClass):
     fast_divmod have faster inverse performance, 
     but need more registers.
     """
-    def __init__(self, ndim: int, fast_divmod: bool = False):
+    def __init__(self, ndim: int, fast_divmod: bool = False, stride_dtype = dtypes.int32):
         super().__init__()
         self.add_dependency(TensorViewNVRTC)
         self.fast_divmod = fast_divmod
+        if stride_dtype == dtypes.int64:
+            assert not fast_divmod, "don't support fast divmod for now"
         self.ndim = ndim
         self.index_t = str(dtypes.int32)
         self.long_index_t = str(dtypes.int64)
+        self.stride_dtype = stride_dtype
         # we only need contiguous stride here.
         if ndim > 1:
-            self.add_member("strides", f"tv::array<int, {ndim - 1}>")
+            self.add_member("strides", f"tv::array<{stride_dtype}, {ndim - 1}>")
             if fast_divmod:
                 self.add_member("multipliers",
                                 f"tv::array<unsigned int, {ndim - 1}>")
@@ -485,7 +488,7 @@ class TensorGeneric(pccm.ParameterizedClass):
     def ctor(self):
         code = pccm.code()
         if self.ndim > 1:
-            code.arg("strides", f"tv::array<int, {self.ndim - 1}> const&")
+            code.arg("strides", f"tv::array<{self.stride_dtype}, {self.ndim - 1}> const&")
             code.ctor_init("strides", "strides")
         if self.fast_divmod:
             for i in range(self.ndim - 1):
@@ -507,7 +510,10 @@ class TensorGeneric(pccm.ParameterizedClass):
             lines: List[str] = []
             stmts: List[str] = []
             for i in range(self.ndim - 1):
-                lines.append(f"shape[{i + 1}]")
+                if self.stride_dtype != dtypes.int32:
+                    lines.append(f"{self.stride_dtype}(shape[{i + 1}])")
+                else:
+                    lines.append(f"shape[{i + 1}]")
             for i in range(self.ndim - 1):
                 stmts.append("  " + " * ".join(lines[self.ndim - 2 - i:]))
             code.raw(",\n".join(stmts[::-1]))
@@ -524,7 +530,10 @@ class TensorGeneric(pccm.ParameterizedClass):
         code.arg("indexes", f"const tv::array<int, {self.ndim}> &")
         stmts = [f"indexes[{self.ndim - 1}]"]
         for i in range(self.ndim - 1):
-            stmts.append(f"{self.long_index_t}(strides[{i}] * indexes[{i}])")
+            if self.stride_dtype != dtypes.int32:
+                stmts.append(f"{self.long_index_t}(strides[{i}] * {self.stride_dtype}(indexes[{i}]))")
+            else:
+                stmts.append(f"{self.long_index_t}(strides[{i}] * indexes[{i}])")
         code.raw(f"return {' + '.join(stmts)};")
         return code.ret(self.long_index_t)
 
@@ -535,6 +544,35 @@ class TensorGeneric(pccm.ParameterizedClass):
     def call_operator2(self):
         code = pccm.code()
         code.arg("indexes", f"const int*")
+        stmts = [f"indexes[{self.ndim - 1}]"]
+        for i in range(self.ndim - 1):
+            if self.stride_dtype != dtypes.int32:
+                stmts.append(f"{self.long_index_t}(strides[{i}] * {self.stride_dtype}(indexes[{i}]))")
+            else:
+                stmts.append(f"{self.long_index_t}(strides[{i}] * indexes[{i}])")
+        code.raw(f"return {' + '.join(stmts)};")
+        return code.ret(self.long_index_t)
+
+    @pccm.member_function(name="operator()",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
+    def call_operator3(self):
+        code = pccm.code()
+        code.arg("indexes", f"const tv::array<int64_t, {self.ndim}> &")
+        stmts = [f"indexes[{self.ndim - 1}]"]
+        for i in range(self.ndim - 1):
+            stmts.append(f"{self.long_index_t}(strides[{i}] * indexes[{i}])")
+        code.raw(f"return {' + '.join(stmts)};")
+        return code.ret(self.long_index_t)
+
+    @pccm.member_function(name="operator()",
+                          header_only=True,
+                          attrs=["TV_HOST_DEVICE_INLINE"],
+                          const=True)
+    def call_operator4(self):
+        code = pccm.code()
+        code.arg("indexes", f"const int64_t*")
         stmts = [f"indexes[{self.ndim - 1}]"]
         for i in range(self.ndim - 1):
             stmts.append(f"{self.long_index_t}(strides[{i}] * indexes[{i}])")

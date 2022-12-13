@@ -665,6 +665,9 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                     tv::dtype_str(dcomp));
             }
             """)
+        code_main.raw("""
+        TV_THROW_RT_ERR("can't find any suitable algo for your parameters.");
+        """)
         return code_main
 
 

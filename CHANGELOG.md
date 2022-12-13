@@ -1,4 +1,19 @@
 # Changelog
+## [0.3.7] - 2022-11-05
+### Added
+- Fix bug in ConvProblem introduced in 0.3.6
+
+## [0.3.6] - 2022-11-05
+### Added
+- Add int64 support for TensorGeneric
+
+## [0.3.5] - 2022-10-18
+### Added
+- Add flags for H100 and RTX 4090
+### Fixed
+- fix nvrtc launch problem when smem size is large
+- fix nvrtc constant variable parse problem
+
 ## [0.3.4] - 2022-9-25
 ### Changed
 - Change gemm/conv main function to splited version

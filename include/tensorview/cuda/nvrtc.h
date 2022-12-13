@@ -412,8 +412,19 @@ public:
   void set_max_dynamic_shared_size_bytes(std::string name, int size) {
 #ifdef TV_CUDA
     auto k = kernel(name);
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncSetAttribute(
-        k, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size));
+    TV_CUDA_RESULT_CHECK_V2(wrapper_.cuDrvFuncSetAttribute(
+        k, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size), 
+        "set_max_dynamic_shared_size_bytes error");
+#endif
+  }
+
+  void set_preferred_smem_carveout(std::string name, int carveout) {
+#ifdef TV_CUDA
+    TV_ASSERT_INVALID_ARG(carveout > 0 && carveout <= 100, "carveout must in (0, 100]")
+    auto k = kernel(name);
+    TV_CUDA_RESULT_CHECK_V2(wrapper_.cuDrvFuncSetAttribute(
+        k, CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT, carveout), 
+        "set_preferred_smem_carveout error");
 #endif
   }
 
@@ -461,10 +472,18 @@ public:
         TV_THROW_RT_ERR("not implemented");
       }
     }
-    TV_CUDA_RESULT_CHECK(wrapper_.cuDrvLaunchKernel(
-        kernel(name), blocks[0], blocks[1], blocks[2], threads[0], threads[1],
-        threads[2], smem_size, stream, params.data(), 0));
-    TV_CHECK_CUDA_ERR_V2("nvrtc kernel", name, "launch failed.");
+    auto k = kernel(name);
+    if (smem_size >= (48 << 10)) {
+      TV_CUDA_RESULT_CHECK_V2(wrapper_.cuDrvFuncSetAttribute(
+          k, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, smem_size), smem_size, get_kernel_attributes(name));
+      TV_CUDA_RESULT_CHECK_V2(wrapper_.cuDrvFuncSetAttribute(
+          k, CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT, 100), "cudaFuncAttributePreferredSharedMemoryCarveout");
+    }
+    TV_CUDA_RESULT_CHECK_V2(wrapper_.cuDrvLaunchKernel(
+        k, blocks[0], blocks[1], blocks[2], threads[0], threads[1],
+        threads[2], smem_size, stream, params.data(), 0),
+        "Params:", blocks[0], blocks[1], blocks[2], threads[0], threads[1],
+        threads[2], "Smem:", smem_size);
 #endif
   }
 #ifdef TV_CUDA
