@@ -31,6 +31,7 @@ from cumm.gemm.bases import (GemmInputIterator, GemmOutputIterator,
                              GemmOutWarpIterator, GemmSmemIterator,
                              GemmWarpIterator, GemmComponentBase)
 from cumm.gemm.core import MetaArray, array_type, metaseq, seq
+from cumm.conv.bases import ConvOpType
 
 
 def div_up(a, b):
@@ -73,6 +74,199 @@ class BlockMmaStorage(pccm.ParameterizedClass):
             "smem_B",
             f"tv::alignedarray<{dtype_b}, {self.smem_shape_b.prod()}, {self.smem_alignment}>"
         )
+
+class MaskIGemmIteratorMaskLoaderDynamic(pccm.ParameterizedClass):
+    def __init__(self, tile_shape, increment_k_first, op_type):
+        super().__init__()
+        self.add_dependency(GemmBasicKernel, GemmBasic, TensorViewKernel)
+        self.num_masks_per_thread = tile_shape[0] // constants.WARP_SIZE
+        self.add_member("current_mask", "int")
+        self.add_member("mask_int_count", "const int&")
+        self.add_member("mask_load_idx", "int")
+        self.add_member("RS_pos", "int")
+        self.add_member("RS_offset", "int")
+        if not increment_k_first:
+            self.add_member("k_idx", "int")
+
+        self.add_member("mask_filter", "const uint32_t &")
+        self.add_member("tile_offset_m", "const int&")
+        self.add_member("mask_ptr", "const uint32_t* const&")
+        self.add_member("mask_out_ptr", "uint32_t* const&")
+        self.add_member("RS", "const int&")
+        self.add_member("reverse", "const bool&")
+        self.add_member("gemm_k_iteration", "const int&")
+        self.add_member("lane_idx", "const int&")
+        self.add_member("problem_m", "const int&")
+
+        self.add_member("end", "bool")
+        self.add_member("mask_or_sum", "int")
+
+        self.increment_k_first = increment_k_first
+        self.op_type = op_type
+        self.tile_shape = tile_shape
+
+
+    @pccm.cuda.constructor(device=True, forceinline=True)
+    def ctor(self):
+        code = pccm.code()
+        code.arg("mask_ptr", "const uint32_t* const&")
+        code.arg("mask_out_ptr", "uint32_t* const&")
+        code.arg("mask_int_count", "const int&")
+        code.arg("tile_offset_m", "const int&")
+        code.arg("gemm_k_iteration", "const int&")
+        code.arg("RS", "const int&")
+        code.arg("mask_filter", "const uint32_t&")
+        code.arg("reverse", "const bool&")
+        code.arg("lane_idx", "const int&")
+        code.arg("problem_m", "const int&")
+        code.ctor_init("mask_int_count", "mask_int_count")
+        code.ctor_init("mask_ptr", "mask_ptr")
+        code.ctor_init("mask_out_ptr", "mask_out_ptr")
+        code.ctor_init("tile_offset_m", "tile_offset_m")
+        code.ctor_init("RS", "RS")
+        code.ctor_init("gemm_k_iteration", "gemm_k_iteration")
+        code.ctor_init("end", "false")
+        code.ctor_init("reverse", "reverse")
+        code.ctor_init("mask_filter", "mask_filter")
+
+        code.ctor_init("lane_idx", "lane_idx")
+        code.ctor_init("problem_m", "problem_m")
+
+        if not self.increment_k_first:
+            code.ctor_init("k_idx", "0")
+        code.raw(f"""
+        mask_or_sum = 0;
+        int used_rs = tv::div_up(RS, 32);
+        """)
+        with code.if_("reverse"):
+            code.raw(f"""
+                for (mask_load_idx = 0; mask_load_idx < used_rs - 1; ++mask_load_idx){{
+                    load_mask(true);
+                    mask_or_sum |= __brev(current_mask);
+                }}
+            """)
+        with code.else_():
+            code.raw(f"""
+                for (mask_load_idx = 1; mask_load_idx < used_rs; ++mask_load_idx){{
+                    load_mask(true);
+                    mask_or_sum |= current_mask;
+                }}
+            """)
+
+
+        code.raw(f"""
+            init_mask_iter(true);
+            mask_or_sum |= current_mask;
+            // if(blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && threadIdx.x == 0)
+            //     printf("OP {str(self.op_type)} into Dynamic Mask Loader  {"is" if self.increment_k_first else "not"} increment k,   mask_int_count:%d, reverse: %d\\n", mask_int_count, (int)reverse);
+            // __syncwarp();
+
+        """)
+
+        return code
+
+    @pccm.cuda.member_function(inline=True, device=True)
+    def load_mask(self):
+        code = pccm.code()
+        code.arg("save", "const bool&", "false")
+        code.raw(f"""
+            current_mask = 0;
+            tv::array<uint32_t, {self.num_masks_per_thread}> masks;
+            masks.clear();
+            TV_PRAGMA_UNROLL
+            for (int i = 0; i < {self.num_masks_per_thread}; ++i){{
+                if (tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx < problem_m){{
+                    masks[i] = mask_ptr[mask_int_count * (tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx) + mask_load_idx];
+                }}
+            }}
+            TV_PRAGMA_UNROLL
+            for (int i = 0; i < {self.num_masks_per_thread}; ++i){{
+                current_mask |= masks[i];
+            }}
+            // perform a warp reduce to get block mask
+            TV_PRAGMA_UNROLL
+            for (int mask = {constants.WARP_SIZE // 2}; mask > 0; mask /= 2) {{
+                current_mask |= __shfl_xor_sync(0xffffffff, current_mask, mask, 32);
+            }}
+            current_mask &= mask_filter;
+        """)
+        if self.op_type == ConvOpType.kForward:
+            with code.if_("save"):
+                code.raw(f"""
+                if (mask_out_ptr != nullptr)
+                    mask_out_ptr[tile_offset_m * mask_int_count + mask_load_idx] = current_mask;
+                """)
+
+        return code
+    @pccm.cuda.member_function(inline=True, device=True)
+    def init_mask_iter(self):
+        code = pccm.code()
+        code.arg("save", "const bool&", "false")
+        if self.op_type == ConvOpType.kBackwardInput:
+            code.raw(f"""
+                if (reverse){{
+                    int used_mask = tv::div_up(RS, 32);
+                    mask_load_idx = used_mask - 1;
+                    RS_pos = 0;
+                    RS_offset = used_mask * 32 - RS;
+                    load_mask(save);
+                    current_mask = __brev(current_mask);
+                    return;
+                }}
+            """)
+        code.raw(f"""
+            mask_load_idx = 0;
+            RS_pos = RS_offset = 0;
+            load_mask(save);
+        """)
+        return code
+    
+    @pccm.cuda.member_function(device=True, inline=True, name="operator++")
+    def increment_filter(self):
+        code = pccm.code()
+        with code.if_("++RS_pos >= RS"):
+            if self.increment_k_first:
+                code.raw("""
+                    end = true;
+                    return;
+                """)
+            else:
+                code.raw("""
+                    if (++k_idx >= gemm_k_iteration){{
+                        end = true;
+                        return;
+                    }}
+                    init_mask_iter();
+                    return;
+                """)
+        with code.if_("(RS_pos + RS_offset) % 32 == 0"):
+            if self.op_type == ConvOpType.kBackwardInput:
+                with code.if_("reverse"):
+                    code.raw("--mask_load_idx;")
+                with code.else_():
+                    code.raw("++mask_load_idx;")
+            else:
+                code.raw("++mask_load_idx;")
+            code.raw("load_mask();")
+            if self.op_type == ConvOpType.kBackwardInput:
+                with code.if_("reverse"):
+                    code.raw("current_mask = __brev(current_mask);")
+        return code
+    
+    @pccm.cuda.member_function(device=True, inline=True)
+    def valid(self):
+        code = pccm.code()
+        code.ret("bool")
+        code.raw("""
+            return !!(
+                    current_mask & (1u << ((RS_pos + RS_offset) % 32))
+                    );
+        """)
+        return code
+    
+    @pccm.cuda.member_function(device=True, inline=True)
+    def empty(self):
+        return pccm.code().ret("bool").raw("return !mask_or_sum;")
 
 
 class MaskIGemmIterator(pccm.ParameterizedClass):
@@ -155,11 +349,14 @@ class Mma(GemmComponentBase):
                  clear_mask: bool = True,
                  mask_sparse: bool = False,
                  increment_k_first=False,
-                 is_sparse_wgrad: bool = False):
+                 is_sparse_wgrad: bool = False,
+                 op_type: ConvOpType = ConvOpType.kForward):
         super().__init__()
         self.dtype_acc = dtype_acc
         miter = MaskIGemmIterator(increment_k_first)
         self.add_param_class("mma_ns_miter", miter, "MaskIGemmIterator")
+        self.miterd = MaskIGemmIteratorMaskLoaderDynamic(spec.input_spec.tile_shape, increment_k_first, op_type)
+        self.add_param_class("mma_ns_miterD", self.miterd, "MaskIGemmIteratorDynamic")
 
         self.add_param_class("mma_ns_wa", spec.warp_iter_a, "WarpIterA")
         self.add_param_class("mma_ns_wb", spec.warp_iter_b, "WarpIterB")
@@ -251,8 +448,9 @@ class Mma(GemmComponentBase):
         code.arg("input_iter_A", f"InputIteratorA &")
         code.arg("input_iter_B", f"InputIteratorB &")
         code.arg("src_accumulators", f"{self.accumulator_fragment} const&")
-        code.arg("mask", f"uint32_t")
+        # code.arg("mask", f"uint32_t")
         code.arg("RS", f"int")
+        code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
         code.raw(f"""
         accumulators = src_accumulators;
         {self.input_spec.input_iter_a.fragment_t} input_frag_A;
@@ -265,7 +463,7 @@ class Mma(GemmComponentBase):
         WarpMma warp_mma;
         int smem_write_stage_idx = 1;
         // mask = 0xffffffff;
-        MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+        // MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
         // find initial gemm index
         while (!mask_iter.valid()){{
             ++mask_iter;
@@ -669,8 +867,9 @@ class Mma(GemmComponentBase):
         code.arg("input_iter_A", f"InputIteratorA &")
         code.arg("input_iter_B", f"InputIteratorB &")
         code.arg("src_accumulators", f"{self.accumulator_fragment} const&")
-        code.arg("mask", f"uint32_t")
+        # code.arg("mask", f"uint32_t")
         code.arg("RS", f"int")
+        code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
         code.raw(f"""
         accumulators = src_accumulators;
         {self.input_spec.input_iter_a.fragment_t} input_frag_A;
@@ -683,7 +882,7 @@ class Mma(GemmComponentBase):
         WarpMma warp_mma;
         int smem_write_stage_idx = 1;
         // mask = 0xffffffff;
-        MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+        // MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
         // find initial gemm index
         while (!mask_iter.valid()){{
             ++mask_iter;

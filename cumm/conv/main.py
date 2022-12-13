@@ -559,6 +559,7 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                         "mask.data_ptr<const uint32_t>()",
                         "mask_argsort.data_ptr<const int32_t>()",
                         "indices.data_ptr<const int32_t>()",
+                        "params.mask_int_count",
                     ])
                     if p.op_type == ConvOpType.kForward:
                         params_str.append(f"mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>()")
