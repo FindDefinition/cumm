@@ -796,7 +796,7 @@ class ConvKernel(GemmComponentBase):
                     code.raw(f"""
                     // uint32_t kmask = params.mask_ptr[(tv::div_up(params.problem.N, params.mask_width)) - 1];
                     int filter_offset = tile_offset_n / tv::div_up(params.problem.C, {self.tile_shape[1]});
-                    if (!(params.mask_filter & (1 << filter_offset))){{
+                    if (!(params.mask_filter & (1 << (filter_offset % 32)))){{
                         return;
                     }}
                     """)
@@ -826,7 +826,7 @@ class ConvKernel(GemmComponentBase):
                         int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
                         mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
                             params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
-                            params.mask_width);
+                            params.mask_width, params.mask_int_count);
                         """)
                 else:
                     code.raw(f"""
