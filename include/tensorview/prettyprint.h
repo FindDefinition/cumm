@@ -41,6 +41,16 @@ public:
   using type = T;
 };
 
+template <typename T> struct is_eigen_object : private sfinae_base {
+private:
+  template <typename C> static yes &test(decltype(&C::rows));
+  template <typename C> static no &test(...);
+
+public:
+  static const bool value = sizeof(test<T>(nullptr)) == sizeof(yes);
+  using type = T;
+};
+
 template <typename T> struct has_begin_end : private sfinae_base {
 private:
   template <typename C>
@@ -463,7 +473,7 @@ namespace std {
 // Prints a container to the stream using default delimiters
 
 template <typename T, typename TChar, typename TCharTraits>
-inline typename enable_if<::pretty_print::is_container<T>::value,
+inline typename enable_if<::pretty_print::is_container<T>::value && !::pretty_print::detail::is_eigen_object<T>::value,
                           basic_ostream<TChar, TCharTraits> &>::type
 operator<<(basic_ostream<TChar, TCharTraits> &stream, const T &container) {
   return stream

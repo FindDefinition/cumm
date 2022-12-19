@@ -213,11 +213,13 @@ class _NVRTCInlineParams:
                  mode: CUDAMode,
                  launch: tv.LaunchParam,
                  verbose: bool = False,
-                 verbose_path: str = "") -> None:
+                 verbose_path: str = "",
+                 measure_time: bool = False) -> None:
         self.mode = mode
         self.launch = launch
         self.verbose = verbose
         self.verbose_path = verbose_path
+        self.measure_time = measure_time
 
 
 _NVRTC_FUNC_NAME = f"{PCCM_INLINE_NAMESPACE}::{PCCM_INLINE_FUNCTION_NAME}"
@@ -385,8 +387,10 @@ class NVRTCInlineBuilder(InlineBuilder):
 
 def main():
     import torch
-    INLINE = NVRTCInlineBuilder([], reload_when_code_change=True)
     from cumm import tensorview as tv
+    from cumm.common import TensorViewArrayLinalg, TensorViewNVRTCHashKernel
+    INLINE = NVRTCInlineBuilder([TensorViewArrayLinalg, TensorViewNVRTCHashKernel], reload_when_code_change=True)
+
     print(1)
     a = tv.zeros([2], tv.float32, 0)
     print(2)
@@ -405,7 +409,7 @@ def main():
         auto z = bb[0] * $t[2][0] + bb[1] * $t[2][1] + bb[2] * $t[2][1] + $t[2][3];
 
         bb[0] = x;
-        bb[1] = y;
+        bb[1] = std::numeric_limits<float>::denorm_min();
         bb[2] = z;
         """)
 

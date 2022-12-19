@@ -65,7 +65,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                 self.build_meta.add_libraries("dl")
             else:
                 # disable min/max macro if include Windows.h
-                self.build_meta.add_cflags("cl", "/DNOMINMAX")
+                self.build_meta.add_private_cflags("cl", "/DNOMINMAX")
 
     @pccm.pybind.mark
     @pccm.static_function

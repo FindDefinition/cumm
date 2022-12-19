@@ -13,8 +13,9 @@
 # limitations under the License.
 
 from pccm.builder.inliner import InlineBuilder
-from cumm.common import EigenLib, TensorView, TensorViewArrayLinalg
+from cumm.common import EigenLib, TensorView, TensorViewArrayLinalg, TensorViewParallel
 import numpy as np 
+import pccm 
 def rot_to_quat(axis, angle):
     res = np.zeros((4,), np.float32)
     res[:3] = axis*np.sin(angle/2)
@@ -54,5 +55,42 @@ def main():
 
     """)
 
+class CustomHeader(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/debug.h")
+
+def main2():
+    inliner = InlineBuilder([EigenLib, TensorView, TensorViewArrayLinalg, TensorViewParallel])
+    
+    inliner.inline("wtf", f"""
+    namespace op = tv::arrayops;
+    Eigen::Matrix4f a, b;
+    for (int j = 0; j < 16; ++j){{
+        a(j / 4, j % 4) = j + 1;
+        b(j / 4, j % 4) = j + 1;
+    }}
+    Eigen::Matrix4f c = a * b;
+
+    std::cout << c << std::endl;
+    tv::Tensor rtx = tv::zeros({{1}}, tv::float32, 0);
+    auto rtx_ptr = rtx.data_ptr<float>();
+    tv::kernel_1d_map(0, 1, [=]TV_GPU_LAMBDA(size_t i){{
+        Eigen::Matrix4f a, b;
+        for (int j = 0; j < 16; ++j){{
+            a(j / 4, j % 4) = j + 1;
+            b(j / 4, j % 4) = j + 1;
+        }}
+
+        Eigen::Matrix4f c = a * b;
+        for (int j = 0; j < 16; ++j){{
+            tv::printf2(c(j / 4, j % 4));
+        }}
+        rtx_ptr[0] = 1;
+        tv::printf2("HJELLOW");
+    }});
+    """, impl_file_suffix=".cc")
+
+
 if __name__ == "__main__":
-    main()
+    main2()

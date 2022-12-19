@@ -1,4 +1,11 @@
 # Changelog
+
+## [0.3.8] - 2022-12-19
+### Added
+- Add cuda 12.0
+### Fixed
+- Fix some problem in cuda 12.0
+
 ## [0.3.7] - 2022-11-05
 ### Added
 - Fix bug in ConvProblem introduced in 0.3.6

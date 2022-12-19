@@ -25,6 +25,7 @@
 #include <functional>
 #include <type_traits>
 #include <utility>
+#include <cstddef>
 #endif
 
 namespace tv {
@@ -75,11 +76,11 @@ template <class... T> struct mp_list {
   static constexpr typename mp_nth_t<I, T...>::value_type at_c =
       mp_nth_t<I, T...>::value;
 
-  static TV_HOST_DEVICE_INLINE constexpr size_t size() { return sizeof...(T); }
+  static TV_HOST_DEVICE_INLINE constexpr std::size_t size() { return sizeof...(T); }
 };
 
 template <> struct mp_list<> {
-  static TV_HOST_DEVICE_INLINE constexpr size_t size() { return 0; }
+  static TV_HOST_DEVICE_INLINE constexpr std::size_t size() { return 0; }
 };
 
 template <class T, T... I>
@@ -304,15 +305,15 @@ using mp_make_list_c_sequence_reverse =
 namespace detail {
 
 template <typename Ret, typename... Args>
-TV_HOST_DEVICE_INLINE std::integral_constant<size_t, sizeof...(Args)>
+TV_HOST_DEVICE_INLINE std::integral_constant<std::size_t, sizeof...(Args)>
      func_argument_size_helper(Ret (*)(Args...));
 
 template <typename Ret, typename F, typename... Args>
-TV_HOST_DEVICE_INLINE std::integral_constant<size_t, sizeof...(Args)>
+TV_HOST_DEVICE_INLINE std::integral_constant<std::size_t, sizeof...(Args)>
      func_argument_size_helper(Ret (F::*)(Args...));
 
 template <typename Ret, typename F, typename... Args>
-TV_HOST_DEVICE_INLINE std::integral_constant<size_t, sizeof...(Args)>
+TV_HOST_DEVICE_INLINE std::integral_constant<std::size_t, sizeof...(Args)>
  func_argument_size_helper(Ret (F::*)(Args...) const);
 
 template <typename F>
@@ -352,7 +353,7 @@ template <typename T>
 using return_type_t = decltype(detail::result_type_helper(std::declval<T>()));
 
 template <typename T>
-constexpr size_t argument_size_v =
+constexpr std::size_t argument_size_v =
     decltype(detail::func_argument_size_helper(std::declval<T>()))::value;
 
 // #endif

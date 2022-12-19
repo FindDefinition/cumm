@@ -45,6 +45,10 @@ namespace io {
 using json = nlohmann::json;
 constexpr const char *kJsonArrayKey = "__cumm_io_json_index";
 
+inline json access_idx(json j) {
+  return j[kJsonArrayKey].template get<int64_t>();
+}
+
 inline json json_idx(size_t i) {
   json res;
   res[kJsonArrayKey] = i;
@@ -85,6 +89,25 @@ struct JsonArrayProxy {
   JsonArrayProxy operator[](int64_t key){
     return JsonArrayProxy{data[key], tensors};
   }
+
+  std::vector<tv::Tensor> get_vector_of_tensor(){
+    std::vector<tv::Tensor> vec;
+    for (auto it = data.begin(); it != data.end(); ++it){
+      vec.push_back(tensors[access_idx(*it)]);
+    }
+    return vec;
+  }
+  tv::Tensor get_tensor(){
+    return tensors[access_idx(data)];
+  }
+  std::unordered_map<std::string, tv::Tensor> get_map_of_tensor(){
+    std::unordered_map<std::string, tv::Tensor> res;
+    for (auto it = data.begin(); it != data.end(); ++it){
+      res.insert({it.key(), tensors[access_idx(it.value())]});
+    }
+    return res;
+  }
+
 };
 
 struct JsonArray {
@@ -121,6 +144,25 @@ struct JsonArray {
   JsonArrayProxy operator[](int64_t key){
     return JsonArrayProxy{data[key], tensors};
   }
+  
+  std::vector<tv::Tensor> get_vector_of_tensor(){
+    std::vector<tv::Tensor> vec;
+    for (auto it = data.begin(); it != data.end(); ++it){
+      vec.push_back(tensors[access_idx(*it)]);
+    }
+    return vec;
+  }
+  tv::Tensor get_tensor(){
+    return tensors[access_idx(data)];
+  }
+  std::unordered_map<std::string, tv::Tensor> get_map_of_tensor(){
+    std::unordered_map<std::string, tv::Tensor> res;
+    for (auto it = data.begin(); it != data.end(); ++it){
+      res.insert({it.key(), tensors[access_idx(it.value())]});
+    }
+    return res;
+  }
+
 
 };
 
@@ -252,9 +294,6 @@ inline JsonArray load_from_file(std::string path){
 }
 
 
-inline json access_idx(json j) {
-  return j[kJsonArrayKey].template get<int64_t>();
-}
 
 } // namespace io
 } // namespace tv

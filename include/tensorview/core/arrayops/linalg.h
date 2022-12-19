@@ -3,6 +3,7 @@
 #include "simple.h"
 #include <tensorview/core/array.h>
 #include "mathbase.h"
+// from https://github.com/sgorsten/linalg/blob/main/linalg.h
 
 namespace tv {
 namespace arrayops {
@@ -560,7 +561,8 @@ template <typename T> struct qaxis<T, 4, 0> {
 template <typename T> struct qangle<T, 4, 0> {
   TV_HOST_DEVICE_INLINE constexpr T operator()(const array<T, 4> &q) {
 
-    return MathScalarOp<T>::atan2(slice<0, 3>(q).template op<l2norm>(), q[3]) * T(2);
+    return MathScalarOp<T>::atan2(slice<0, 3>(q).template op<l2norm>(), q[3]) *
+           T(2);
   }
 };
 
@@ -573,67 +575,66 @@ template <typename T> struct qzdir<T, 4, 0> {
 template <typename T, size_t N, size_t Align> struct rotation_quat;
 
 template <typename T> struct rotation_quat<T, 3, 0> {
-  TV_HOST_DEVICE_INLINE array<T, 4>
-  operator()(const array<T, 3> &self, T angle) {
+  TV_HOST_DEVICE_INLINE array<T, 4> operator()(const array<T, 3> &self,
+                                               T angle) {
     return concat(self * MathScalarOp<T>::sin(angle / 2),
                   create_array(MathScalarOp<T>::cos(angle / 2)));
   }
 };
 
-// template <typename T, size_t N, size_t Align> struct rotation_quat_matrix_simple;
+// template <typename T, size_t N, size_t Align> struct
+// rotation_quat_matrix_simple;
 
 // template <typename T> struct rotation_quat_matrix_simple<array<T, 3>, 3, 0> {
 //   TV_HOST_DEVICE_INLINE array<T, 4>
 //   operator()(const array<array<T, 3>, 3> &m) {
-//     array<T, 4> q{m[0][0]-m[1][1]-m[2][2], m[1][1]-m[0][0]-m[2][2], m[2][2]-m[0][0]-m[1][1], m[0][0]+m[1][1]+m[2][2]};
-//     array<array<T, 4>, 4> s{
-//         array<T, 4>{T(1), m[0][1] + m[1][0], m[2][0] + m[0][2], m[2][1] - m[1][2]}, 
-//         array<T, 4>{m[0][1] + m[1][0], T(1), m[1][2] + m[2][1], m[0][2] - m[2][0]},
-//         array<T, 4>{m[0][2] + m[2][0], m[1][2] + m[2][1], T(1), m[1][0] - m[0][1]},
-//         array<T, 4>{m[2][1] - m[1][2], m[0][2] - m[2][0], m[1][0] - m[0][1], T(1)}
+//     array<T, 4> q{m[0][0]-m[1][1]-m[2][2], m[1][1]-m[0][0]-m[2][2],
+//     m[2][2]-m[0][0]-m[1][1], m[0][0]+m[1][1]+m[2][2]}; array<array<T, 4>, 4>
+//     s{
+//         array<T, 4>{T(1), m[0][1] + m[1][0], m[2][0] + m[0][2], m[2][1] -
+//         m[1][2]}, array<T, 4>{m[0][1] + m[1][0], T(1), m[1][2] + m[2][1],
+//         m[0][2] - m[2][0]}, array<T, 4>{m[0][2] + m[2][0], m[1][2] + m[2][1],
+//         T(1), m[1][0] - m[0][1]}, array<T, 4>{m[2][1] - m[1][2], m[0][2] -
+//         m[2][0], m[1][0] - m[0][1], T(1)}
 //     };
 
 //     int j = 0;
 //     for (int i = 0; i < 4; ++i){
-//       if(q[i] > q[j]) 
+//       if(q[i] > q[j])
 //         j = i;
 //     }
-//     return apply(MathScalarOp<T>::copysign, apply(MathScalarOp<T>::sqrt, (q + T(1)).template op<arrayops::max>(T(0))).template op<normalize>(), s[j]);
+//     return apply(MathScalarOp<T>::copysign, apply(MathScalarOp<T>::sqrt, (q +
+//     T(1)).template op<arrayops::max>(T(0))).template op<normalize>(), s[j]);
 //   }
 // };
 
-
 template <typename T> struct rotation_quat<array<T, 3>, 3, 0> {
-  TV_HOST_DEVICE_INLINE array<T, 4>
-  operator()(const array<array<T, 3>, 3> &m) {
+  TV_HOST_DEVICE_INLINE array<T, 4> operator()(const array<array<T, 3>, 3> &m) {
     T t = m[0][0] + m[1][1] + m[2][2];
     array<T, 4> q;
-    if (t > T(0))
-    {
+    if (t > T(0)) {
       t = MathScalarOp<T>::sqrt(t + T(1.0));
-      q[3] = T(0.5)*t;
-      t = T(0.5)/t;
+      q[3] = T(0.5) * t;
+      t = T(0.5) / t;
       q[0] = (m[2][1] - m[1][2]) * t;
       q[1] = (m[0][2] - m[2][0]) * t;
       q[2] = (m[1][0] - m[0][1]) * t;
-    }
-    else
-    {
+    } else {
       int i = 0;
       if (m[1][1] > m[0][0])
         i = 1;
       if (m[2][2] > m[i][i])
         i = 2;
-      int j = (i+1)%3;
-      int k = (j+1)%3;
+      int j = (i + 1) % 3;
+      int k = (j + 1) % 3;
 
-      t = MathScalarOp<T>::sqrt(m[i][i]-m[j][j]-m[k][k] + T(1.0));
+      t = MathScalarOp<T>::sqrt(m[i][i] - m[j][j] - m[k][k] + T(1.0));
       q[i] = T(0.5) * t;
       q[i] = T(0.5) * t;
-      t = T(0.5)/t;
-      q[3] = (m[k][j]-m[j][k])*t;
-      q[j] = (m[j][i]+m[i][j])*t;
-      q[k] = (m[k][i]+m[i][k])*t;
+      t = T(0.5) / t;
+      q[3] = (m[k][j] - m[j][k]) * t;
+      q[j] = (m[j][i] + m[i][j]) * t;
+      q[k] = (m[k][i] + m[i][k]) * t;
     }
 
     return q;
@@ -646,8 +647,9 @@ template <typename T> struct qmat<T, 4, 0> {
   TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 3>
   operator()(const array<T, 4> &self) {
     return (array<array<T, 3>, 3>{self.template op<qxdir>(),
-            self.template op<qydir>(),
-            self.template op<qzdir>()}).template op<transpose>();
+                                  self.template op<qydir>(),
+                                  self.template op<qzdir>()})
+        .template op<transpose>();
   }
 };
 
@@ -659,7 +661,7 @@ template <typename T> struct angleaxis_mat<T, 3, 0> {
     array<array<T, 3>, 3> res;
     array<T, 3> sin_axis = MathScalarOp<T>::sin(m_angle) * m_axis;
     T c = MathScalarOp<T>::cos(m_angle);
-    array<T, 3> cos1_axis = (T(1)-c) * m_axis;
+    array<T, 3> cos1_axis = (T(1) - c) * m_axis;
 
     T tmp;
     tmp = cos1_axis[0] * m_axis[1];
@@ -678,6 +680,87 @@ template <typename T> struct angleaxis_mat<T, 3, 0> {
     res[1][1] = tmp2[1] + c;
     res[2][2] = tmp2[2] + c;
     return res;
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct uangle {
+  TV_HOST_DEVICE_INLINE auto operator()(const array<T, N, Align> &self,
+                                        const array<T, N, Align> &other) {
+    T d = self.template op<dot>(other);
+    return d > 1 ? 0 : MathScalarOp<T>::acos(d < -1 ? -1 : d);
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct angle {
+  TV_HOST_DEVICE_INLINE auto operator()(const array<T, N, Align> &self,
+                                        const array<T, N, Align> &other) {
+    return self.template op<normalize>().template op<uangle>(
+        other.template op<normalize>());
+  }
+};
+
+namespace detail {
+template <class A, class B, class C>
+TV_HOST_DEVICE_INLINE constexpr auto lerp(A a, B b, C c) -> decltype(a * (1 - c) + b * c) {
+  return a * (1 - c) + b * c;
+}
+} // namespace detail
+
+template <typename T, size_t N, size_t Align> struct nlerp {
+  TV_HOST_DEVICE_INLINE auto operator()(const array<T, N, Align> &self,
+                                        const array<T, N, Align> &other, T t) {
+    return apply(detail::lerp<T, T, T>, self, other, t)
+        .template op<normalize>();
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct slerp {
+  TV_HOST_DEVICE_INLINE auto operator()(const array<T, N, Align> &a,
+                                        const array<T, N, Align> &b, T t) {
+    T th = a.template op<uangle>(b);
+    return th == 0 ? a
+                   : a * (MathScalarOp<T>::sin(th * (1 - t)) /
+                          MathScalarOp<T>::sin(th)) +
+                         b * (MathScalarOp<T>::sin(th * t) /
+                              MathScalarOp<T>::sin(th));
+  }
+};
+
+template <typename T, size_t Align> struct qnlerp {
+  TV_HOST_DEVICE_INLINE auto operator()(const array<T, 4, Align> &a,
+                                        const array<T, 4, Align> &b, T t) {
+    return a.template op<nlerp>(a.template op<dot>(b) < 0 ? -b : b, t);
+  }
+};
+
+template <typename T, size_t Align> struct qslerp {
+  TV_HOST_DEVICE_INLINE auto operator()(const array<T, 4, Align> &a,
+                                        const array<T, 4, Align> &b, T t) {
+    return a.template op<slerp>(a.template op<dot>(b) < 0 ? -b : b, t);
+  }
+};
+
+template <typename T, size_t Align> struct qconj {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4, Align>
+  operator()(const array<T, 4, Align> &q) {
+    return {-q[0], -q[1], -q[2], q[3]};
+  }
+};
+
+template <typename T, size_t Align> struct qinv {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4, Align>
+  operator()(const array<T, 4, Align> &q) {
+    return q.template op<qconj>() / q.template op<length2>();
+  }
+};
+
+template <typename T, size_t Align> struct qexp {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4, Align>
+  operator()(const array<T, 4, Align> &q) {
+    const auto v = slice<0, 3>(q);
+    const auto vv = v.template op<length>();
+    return MathScalarOp<T>::exp(q.w) *
+           array<T, 4, Align>{v * (vv > 0 ? MathScalarOp<T>::sin(vv) / vv : 0), MathScalarOp<T>::cos(vv)};
   }
 };
 
