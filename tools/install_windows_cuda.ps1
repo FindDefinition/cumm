@@ -51,6 +51,8 @@ if (($CUDA_VERSION_FULL -eq "10.2") -or ($CUDA_VERSION_FULL -eq "11.0") -or ($CU
         "nvrtc_dev";
         "cudart";
         "cuxxfilt";
+        # we need this to get libcu++ headers in cuda 12.0.
+        "thrust";
     )
 }
 
