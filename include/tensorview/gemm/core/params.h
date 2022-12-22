@@ -399,6 +399,7 @@ struct ConvParams {
   uint32_t mask_filter;
   bool reverse_mask;
   bool verbose;
+  int mask_int_count;
   tv::CUDAKernelTimer timer = tv::CUDAKernelTimer(false);
   tv::Tensor workspace = tv::Tensor();
   tv::Tensor mask = tv::Tensor();
@@ -412,7 +413,7 @@ struct ConvParams {
         weight(tv::Tensor()), output(tv::Tensor()), padding(std::vector<int>()),
         stride(std::vector<int>()), dilation(std::vector<int>()), alpha(1.0),
         beta(0.0), mask_width(-1), mask_filter(0xffffffff), reverse_mask(false),
-        verbose(false), timer(timer) {}
+        verbose(false), timer(timer), mask_int_count(1) {}
 };
 
 } // namespace gemm

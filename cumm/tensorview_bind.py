@@ -354,6 +354,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("stream", &tv::gemm::ConvParams::stream);
         m_cls.def_readwrite("nvrtc_params", &tv::gemm::ConvParams::nvrtc_params);
         m_cls.def_readwrite("bias", &tv::gemm::ConvParams::bias);
+        m_cls.def_readwrite("mask_int_count", &tv::gemm::ConvParams::mask_int_count);
 
         """)
         return code

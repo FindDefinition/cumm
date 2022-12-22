@@ -173,6 +173,7 @@ class ConvParams(pccm.ParameterizedClass):
         self.add_member("ptr_D", f"const {dtype_c}*")
         if mask_sparse:
             self.add_member("mask_ptr", f"const uint32_t*")
+            self.add_member("mask_int_count", "int")
             if problem.op_type == ConvOpType.kForward:
                 self.add_member("mask_out_ptr", f"uint32_t*")
             self.add_member("mask_filter", "uint32_t")
@@ -276,6 +277,7 @@ class ConvParams(pccm.ParameterizedClass):
             code.arg("mask_ptr", f"const uint32_t*")
             code.arg("mask_argsort_ptr", f"const int*")
             code.arg("indice_ptr", f"const int*")
+            code.arg("mask_int_count", "int")
             if self.op_type == ConvOpType.kForward:
                 code.arg("mask_out_ptr", f"uint32_t*")
             code.arg("mask_filter", "uint32_t")
@@ -343,6 +345,7 @@ class ConvParams(pccm.ParameterizedClass):
             code.ctor_init("mask_ptr", "mask_ptr")
             code.ctor_init("mask_filter", "mask_filter")
             code.ctor_init("reverse_mask", "reverse_mask")
+            code.ctor_init("mask_int_count", "mask_int_count")
 
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             code.ctor_init("mask_width", "mask_width")
@@ -618,7 +621,8 @@ class ConvKernel(GemmComponentBase):
                 mask_sparse=self.mask_sparse,
                 increment_k_first=increment_k_first,
                 is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight,
-                smem_clear_opt=SharedMemoryClearOption.kZfill
+                smem_clear_opt=SharedMemoryClearOption.kZfill,
+                op_type=self.problem.op_type
                 )
         else:
             self.mma_container = Mma(
@@ -631,8 +635,8 @@ class ConvKernel(GemmComponentBase):
                 clear_mask=False,
                 mask_sparse=self.mask_sparse,
                 increment_k_first=increment_k_first,
-                is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight)
-            
+                is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight,
+                op_type=self.problem.op_type)
         self.output = Output(dtype_acc, self.warp_count_shape, self.partk,
                              self.output_spec, self.out_smem_storage)
         self.add_param_class("out_iter", self.output_spec.out_iter, "OutIter")
@@ -641,6 +645,7 @@ class ConvKernel(GemmComponentBase):
         self.add_param_class("out_op", self.output_spec.output_op, "OutputOp")
 
         self.add_param_class("mma", self.mma_container, "Mma")
+        self.add_param_class("mma_miterd", self.mma_container.miterd, "MaskIGemmIteratorDynamic")
         self.add_param_class("output", self.output, "Output")
 
     def min_arch(self) -> Tuple[int, int]:
@@ -773,57 +778,25 @@ class ConvKernel(GemmComponentBase):
             """)
             if self.mask_sparse:
                 if not self.problem.op_type == ConvOpType.kBackwardWeight:
-                    num_mask_per_thread = self.tile_shape[
-                        0] // constants.WARP_SIZE
-                    assert num_mask_per_thread > 0
                     code.raw(f"""
-                    uint32_t kmask = 0;
-                    tv::array<uint32_t, {num_mask_per_thread}> masks;
-                    masks.clear();
-                    TV_PRAGMA_UNROLL
-                    for (int i = 0; i < {num_mask_per_thread}; ++i){{
-                        if (tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx < params.m){{
-                            masks[i] = params.mask_ptr[tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx];
-                        }}
-                    }}
-                    TV_PRAGMA_UNROLL
-                    for (int i = 0; i < {num_mask_per_thread}; ++i){{
-                        kmask |= masks[i];
-                    }}
-                    // perform a warp reduce to get block mask
-                    TV_PRAGMA_UNROLL
-                    for (int mask = {constants.WARP_SIZE // 2}; mask > 0; mask /= 2) {{
-                        kmask |= __shfl_xor_sync(0xffffffff, kmask, mask, 32);
-                    }}
-                    kmask &= params.mask_filter;
+                        MaskIGemmIteratorDynamic MaskLoader(params.mask_ptr, 
+                                                                 {"params.mask_out_ptr" if self.problem.op_type == ConvOpType.kForward else "nullptr"}, 
+                                                                 params.mask_int_count,
+                                                                 tile_offset_m, params.gemm_k_iterations,
+                                                                 params.problem.kernel_volume, params.mask_filter,
+                                                                 {"params.reverse_mask" if self.problem.op_type == ConvOpType.kBackwardInput else "false"}, 
+                                                                 lane_idx, params.m);
                     """)
-                    if self.problem.op_type == ConvOpType.kForward:
-                        # we need to save mask which will be used in backward weight.
-                        code.raw(f"""
-                        if (params.mask_out_ptr != nullptr){{
-                            params.mask_out_ptr[tile_offset_m] = kmask;
-                        }}
-                        """)
-                    else:
-                        # backward input don't need to handle bias, so we can
-                        # exit early.
-                        code.raw(f"""
-                        if (kmask == 0){{
-                            return;
-                        }}
-                        """)
                     if self.problem.op_type == ConvOpType.kBackwardInput:
-                        # reverse kmask
                         code.raw(f"""
-                        if (params.reverse_mask){{
-                            kmask = __brev(kmask) >> ({32} - params.problem.kernel_volume);
-                        }}
+                            if (MaskLoader.empty())
+                                return;
                         """)
                 else:
                     code.raw(f"""
                     // uint32_t kmask = params.mask_ptr[(tv::div_up(params.problem.N, params.mask_width)) - 1];
                     int filter_offset = tile_offset_n / tv::div_up(params.problem.C, {self.tile_shape[1]});
-                    if (!(params.mask_filter & (1 << filter_offset))){{
+                    if (!(params.mask_filter & (1 << (filter_offset % 32)))){{
                         return;
                     }}
                     """)
@@ -839,13 +812,13 @@ class ConvKernel(GemmComponentBase):
                         if self.problem.op_type == ConvOpType.kForward:
                             # we can't exit early when have bias/act for forward.
                             code.raw(f"""
-                            if (kmask != 0){{
-                                mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask,  params.problem.kernel_volume);
-                            }}
+                            if (!MaskLoader.empty())
+                                mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators,  params.problem.kernel_volume, MaskLoader);
+                            
                             """)
                         else:
                             code.raw(f"""
-                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask,  params.problem.kernel_volume);
+                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators,  params.problem.kernel_volume, MaskLoader);
                             """)
 
                     else:
@@ -853,7 +826,7 @@ class ConvKernel(GemmComponentBase):
                         int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
                         mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
                             params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
-                            params.mask_width);
+                            params.mask_width, params.mask_int_count);
                         """)
                 else:
                     code.raw(f"""
