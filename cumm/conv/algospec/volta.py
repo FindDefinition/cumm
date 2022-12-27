@@ -28,6 +28,7 @@ from cumm.gemm.core import MetaArray, metaseq, seq
 
 
 class InputVolta(bases.Input):
+
     def __init__(self,
                  problem: ConvProblem,
                  iter_algo: ConvIterAlgo,
@@ -201,6 +202,7 @@ class InputVolta(bases.Input):
 
 
 class AlgoSpecificVolta(object):
+
     def __init__(self,
                  problem: ConvProblem,
                  tile_shape: MetaArray[int],
@@ -216,7 +218,8 @@ class AlgoSpecificVolta(object):
                  algo: GemmAlgo = GemmAlgo.Volta,
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
-                 access_per_vector: int = 1):
+                 access_per_vector: int = 1,
+                 int8_inference: bool = False):
         assert algo == GemmAlgo.Volta
         trans_a, trans_b, trans_c = problem.get_gemm_trans_abc()
         self.input_spec = InputVolta(problem, iter_algo, tile_shape,
@@ -241,4 +244,5 @@ class AlgoSpecificVolta(object):
                                        tensorop,
                                        algo,
                                        shuffle_stride=shuffle_stride,
-                                       access_per_vector=access_per_vector)
+                                       access_per_vector=access_per_vector,
+                                       int8_inference=int8_inference)

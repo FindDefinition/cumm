@@ -36,35 +36,12 @@
 #define CUTLASS_ENABLE_F16C 0
 #endif
 
-#ifdef __CUDACC__
-#include <cuda_fp16.h>
-#endif
 
 #if defined(__CUDACC_RTC__)
-/* All floating-point numbers can be put in one of these categories.  */
-enum {
-  FP_NAN =
-#define FP_NAN 0
-      FP_NAN,
-  FP_INFINITE =
-#define FP_INFINITE 1
-      FP_INFINITE,
-  FP_ZERO =
-#define FP_ZERO 2
-      FP_ZERO,
-  FP_SUBNORMAL =
-#define FP_SUBNORMAL 3
-      FP_SUBNORMAL,
-  FP_NORMAL =
-#define FP_NORMAL 4
-      FP_NORMAL
-};
-
-// F16C extensions are not meaningful when compiling for NVRTC which only
-// accommodates device code.
+#include "fp_nvrtc.h"
+#include <tensorview/core/nvrtc_std.h>
 #undef CUTLASS_ENABLE_F16C
 #define CUTLASS_ENABLE_F16C 0
-
 #else
 #include <cmath>
 #include <cstdint>
@@ -72,8 +49,10 @@ enum {
 #endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
-#ifdef TV_CUDA
+#ifdef __CUDACC__
+#if (__CUDACC_VER_MAJOR__ >= 11)
 #include <cuda_fp16.h>
+#endif
 #endif
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 

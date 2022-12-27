@@ -1,25 +1,35 @@
-// Copyright 2021 Yan Yan
-//
+// Copyright 2022 Yan Yan
+// 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-//
+// 
 //     http://www.apache.org/licenses/LICENSE-2.0
-//
+// 
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#pragma once 
+namespace tv {
+enum  {
+    FP_NAN =
+# define FP_NAN 0
+      FP_NAN,
+    FP_INFINITE =
+# define FP_INFINITE 1
+      FP_INFINITE,
+    FP_ZERO =
+# define FP_ZERO 2
+      FP_ZERO,
+    FP_SUBNORMAL =
+# define FP_SUBNORMAL 3
+      FP_SUBNORMAL,
+    FP_NORMAL =
+# define FP_NORMAL 4
+      FP_NORMAL
+};
 
-#pragma once
-#include "bfloat16.h"
-#include "common.h"
-#ifdef TV_CUDA
-#include "complex.h"
-#endif
-#include "half.h"
-#include "subint.h"
-#include "tf32.h"
-#include "float8.h"
-#include <tensorview/dtypes.h>
+}
+

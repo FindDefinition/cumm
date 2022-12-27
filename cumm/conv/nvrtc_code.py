@@ -34,7 +34,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     auto& weight = params.weight;
     auto& output = params.output;
     auto& bias = params.bias;
-
+    auto& scale = params.scale;
     auto& indices = params.indices;
     auto& mask = params.mask;
     auto& mask_argsort = params.mask_argsort;
@@ -73,7 +73,9 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     kernel_params.ptr_A = a_ten.const_raw_data();
     kernel_params.ptr_B = b_ten.const_raw_data();
     kernel_params.ptr_C = c_ten.raw_data();
-    kernel_params.ptr_D = bias.empty() ? c_ten.raw_data() : bias.raw_data();
+    kernel_params.ptr_D = algo_desp.is_int8_inference ? c_ten.raw_data() : (bias.empty() ? c_ten.raw_data() : bias.raw_data());
+    kernel_params.bias_pointer = bias.empty() ? nullptr : bias.raw_data();
+    kernel_params.scale_pointer = scale.empty() ? nullptr : scale.raw_data();
     kernel_params.alpha = params.alpha;
     kernel_params.beta = params.beta;
     kernel_params.ndim = ndim;
@@ -87,6 +89,9 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     sp_kernel_params.ptr_B = kernel_params.ptr_B;
     sp_kernel_params.ptr_C = kernel_params.ptr_C;
     sp_kernel_params.ptr_D = kernel_params.ptr_D;
+    sp_kernel_params.scale_pointer = kernel_params.scale_pointer;
+    sp_kernel_params.bias_pointer = kernel_params.bias_pointer;
+
     sp_kernel_params.alpha = kernel_params.alpha;
     sp_kernel_params.beta = kernel_params.beta;
     sp_kernel_params.ndim = kernel_params.ndim;

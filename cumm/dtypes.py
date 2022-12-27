@@ -89,6 +89,10 @@ float16_origin = DType("__half", 2 * 8, "f16", 7, RegDType.F16, "cutlass::half_t
 float16 = DType("tv::half_t", 2 * 8, "f16", 7, RegDType.F16, "cutlass::half_t")
 float32 = DType("float", 4 * 8, "f32", 0, RegDType.F32)
 float64 = DType("double", 8 * 8, "f64", 4, RegDType.F64)
+
+float_e4m3 = DType("tv::float_e4m3_t", 8, "e4m3", 14, RegDType.U8, "cutlass::float_e4m3_t")
+float_e5m2 = DType("tv::float_e5m2_t", 8, "e5m2", 15, RegDType.U8, "cutlass::float_e5m2_t")
+
 int8 = DType("int8_t", 1 * 8, "s8", 3, RegDType.S8)
 int16 = DType("int16_t", 2 * 8, "s16", 2, RegDType.S16)
 int32 = DType("int32_t", 4 * 8, "s32", 1, RegDType.S32)

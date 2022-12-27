@@ -127,10 +127,12 @@ class ConvParams(pccm.ParameterizedClass):
                  itera_params: ConvIterParams,
                  iterb_params: ConvIterParams,
                  out_params: out_iters.OutIteratorParams,
+                 out_params_scalebias: out_iters.OutIteratorParams,
                  have_workspace: bool = False,
                  mask_sparse: bool = False,
                  increment_k_first: bool = True,
-                 split_d_params: bool = False):
+                 split_d_params: bool = False,
+                 int8_inference: bool = False):
         super().__init__()
         self.add_dependency(TensorViewNVRTC, GemmBasic, ConvUtils,
                             GemmUtilsCPU)
@@ -146,12 +148,18 @@ class ConvParams(pccm.ParameterizedClass):
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
         self.split_d_params = split_d_params
-
+        self.int8_inference = int8_inference
+        self.out_params_scalebias = out_params_scalebias
         self.add_param_class("cp", problem, "ConvProblem")
         self.add_param_class("itera_p", itera_params, "IterAParams")
         self.add_param_class("iterb_p", iterb_params, "IterBParams")
 
         self.add_param_class("out_params_ns", out_params, "OutIterParams")
+        if out_params_scalebias is out_params:
+            self.add_typedef("OutIterParamsScaleBias", "OutIterParams")
+        else:
+            self.add_param_class("out_params_scalebias_ns", out_params_scalebias, "OutIterParamsScaleBias")
+
         self.add_param_class("la", layout_a, "LayoutA")
         self.add_param_class("lb", layout_b, "LayoutB")
         self.add_param_class("lc", layout_c, "LayoutC")
@@ -161,7 +169,8 @@ class ConvParams(pccm.ParameterizedClass):
         self.dtype_b = dtype_b
         self.dtype_c = dtype_c
         self.dtype_comp = dtype_comp
-
+        if self.op_type == ConvOpType.kBackwardWeight:
+            assert not self.int8_inference
         self.add_member("problem", "ConvProblem")
         # if mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
         #     self.add_member("m, n, k, gemm_k_size_per_split", "int")
@@ -171,9 +180,13 @@ class ConvParams(pccm.ParameterizedClass):
         self.add_member("ptr_B", f"const {dtype_b}*")
         self.add_member("ptr_C", f"{dtype_c}*")
         self.add_member("ptr_D", f"const {dtype_c}*")
+        if self.int8_inference:
+            self.add_member("bias_pointer", f"const {self.dtype_comp}*")
+            self.add_member("scale_pointer", f"const {self.dtype_comp}*")
+
         if mask_sparse:
             self.add_member("mask_ptr", f"const uint32_t*")
-            self.add_member("mask_int_count", "int")
+            # self.add_member("mask_int_count", "int")
             if problem.op_type == ConvOpType.kForward:
                 self.add_member("mask_out_ptr", f"uint32_t*")
             self.add_member("mask_filter", "uint32_t")
@@ -181,7 +194,7 @@ class ConvParams(pccm.ParameterizedClass):
 
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             self.add_member("mask_width", "int")
-
+        # if int8_inference, alpha is input scale, beta is output_add scale.
         self.add_member("alpha, beta, act_alpha, act_beta", f"{dtype_comp}")
         self.add_member("act_type", f"tv::gemm::Activation")
         
@@ -192,8 +205,9 @@ class ConvParams(pccm.ParameterizedClass):
         self.add_member("itera_params_", f"IterAParams")
         self.add_member("iterb_params_", f"IterBParams")
         self.add_member("out_params_", f"OutIterParams")
-        if split_d_params:
-            self.add_member("out_params_d_", f"OutIterParams")
+        self.add_member("out_params_source_", f"OutIterParams")
+        if int8_inference:
+            self.add_member("out_params_scalebias_", f"OutIterParamsScaleBias")
 
         # cudasim members
         self.problem_size_: Optional[ConvProblem] = None
@@ -225,7 +239,7 @@ class ConvParams(pccm.ParameterizedClass):
                              self.dtype_b, self.dtype_c, self.dtype_comp,
                              self.layout_a, self.layout_b, self.layout_c,
                              self.itera_params, self.iterb_params,
-                             self.out_params, self.have_workspace)
+                             self.out_params, self.out_params, self.have_workspace)
         mnk = problem.implicit_gemm_mnk_python(self.op_type)
         new_obj.problem_size_ = problem
         m = mnk[0]
@@ -273,11 +287,13 @@ class ConvParams(pccm.ParameterizedClass):
         code.arg("B", f"const {self.dtype_b}*")
         code.arg("C", f"{self.dtype_c}*")
         code.arg("D", f"const {self.dtype_c}*")
+        if self.int8_inference:
+            code.arg("bias_pointer", f"const {self.dtype_comp}*")
+            code.arg("scale_pointer", f"const {self.dtype_comp}*")
         if self.mask_sparse:
             code.arg("mask_ptr", f"const uint32_t*")
             code.arg("mask_argsort_ptr", f"const int*")
             code.arg("indice_ptr", f"const int*")
-            code.arg("mask_int_count", "int")
             if self.op_type == ConvOpType.kForward:
                 code.arg("mask_out_ptr", f"uint32_t*")
             code.arg("mask_filter", "uint32_t")
@@ -345,7 +361,6 @@ class ConvParams(pccm.ParameterizedClass):
             code.ctor_init("mask_ptr", "mask_ptr")
             code.ctor_init("mask_filter", "mask_filter")
             code.ctor_init("reverse_mask", "reverse_mask")
-            code.ctor_init("mask_int_count", "mask_int_count")
 
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             code.ctor_init("mask_width", "mask_width")
@@ -358,6 +373,9 @@ class ConvParams(pccm.ParameterizedClass):
         if self.have_workspace:
             code.ctor_init("workspace", "workspace")
         # code.ctor_init("d_is_bias_", "d_is_bias")
+        if self.int8_inference:
+            code.ctor_init("bias_pointer", "bias_pointer")
+            code.ctor_init("scale_pointer", "scale_pointer")
 
         optype_to_cpp = {
             ConvOpType.kForward: "tv::gemm::ConvOpType::kForward",
@@ -422,19 +440,19 @@ class ConvParams(pccm.ParameterizedClass):
                 itera_params_.set_inc_reset_for_inc_k_first(gemm_k_iterations);
                 iterb_params_.set_inc_reset_for_inc_k_first(gemm_k_iterations);
                 """)
-            
             code.raw("out_params_ = OutIterParams(n, mask_argsort_ptr);")
-            if self.split_d_params:
-                code.raw("out_params_d_ = d_is_bias ? OutIterParams(0, nullptr) : OutIterParams(n, mask_argsort_ptr);")
-
+            code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n, d_is_bias ? nullptr : mask_argsort_ptr);")
+            if self.int8_inference:
+                code.raw("out_params_scalebias_ = OutIterParamsScaleBias();")
         else:
-            # code.raw(f"""
-            # TV_THROW_RT_ERR("WTF");
-            # """)
-            code.raw("out_params_ = OutIterParams(n);")
-            if self.split_d_params:
-                code.raw("out_params_d_ = d_is_bias ? OutIterParams(0) : OutIterParams(n);")
-
+            if self.op_type != ConvOpType.kBackwardWeight:
+                code.raw("out_params_ = OutIterParams(n);")
+                code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n);")
+                if self.int8_inference:
+                    code.raw("out_params_scalebias_ = OutIterParamsScaleBias();")
+            else:
+                code.raw("out_params_ = OutIterParams(n);")
+                code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n);")
         return code
 
 
@@ -463,7 +481,9 @@ class ConvKernel(GemmComponentBase):
                  increment_k_first: bool = False,
                  access_per_vector: int = 1,
                  nvrtc_mode: NVRTCMode = NVRTCMode.Disabled,
-                 split_d_params: bool = True):
+                 split_d_params: bool = True,
+                 dynamic_mask: bool = False,
+                 int8_inference: bool = False):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -474,6 +494,10 @@ class ConvKernel(GemmComponentBase):
         1. conv kernel only change the input iterator (and interleaved layout for NCxHWx),
            the code is easy to understand and debug without simulation and visualization.
         2. conv kernel simulation is very slow.
+
+        Args:
+            dynamic_mask: enable dynamic mask, slightly slower kernel and support larger spconv kernel size.
+            int8_inference: enable int8 inference kernel. if not enabled, only standard int8 conv kernel generated.
         """
         super().__init__()
         self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
@@ -484,7 +508,9 @@ class ConvKernel(GemmComponentBase):
         self.need_source = need_source
         self.nvrtc_mode = nvrtc_mode
         self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
-
+        self.int8_inference = int8_inference
+        if int8_inference:
+            assert split_d_params, "split_d_params is needed for bias."
         problem = ConvProblem(ndim, op_type, layout_desp_input,
                               layout_desp_weight, layout_desp_output,
                               mask_sparse)
@@ -530,11 +556,12 @@ class ConvKernel(GemmComponentBase):
         algo_spec = get_algo_spec(self.algo)(
             problem, tile_shape, warp_tile_shape, num_stage, dtype_a, dtype_b,
             dtype_c, dtype_acc, dtype_comp, iter_algo, tensorop, algo,
-            mask_sparse, increment_k_first, access_per_vector)
+            mask_sparse, increment_k_first, access_per_vector, int8_inference)
         self.algo_spec = algo_spec
         self.input_spec = algo_spec.input_spec
         self.mma_spec = algo_spec.mma_spec
         self.output_spec = algo_spec.output_spec
+        self.dynamic_mask = dynamic_mask
 
         self.warp_count_shape = tile_shape // warp_tile_shape
         self.warp_count = self.warp_count_shape.prod()
@@ -584,9 +611,10 @@ class ConvKernel(GemmComponentBase):
             problem, tile_shape, dtype_a, dtype_b, dtype_c, dtype_comp,
             self.input_spec.layout_a, self.input_spec.layout_b, self.layout_c,
             inp_iter_a_param, inp_iter_b_param,
-            self.output_spec.out_iter.get_params(), have_workspace,
+            self.output_spec.out_iter.get_params(), 
+            self.output_spec.int8_scalebias_out_iter.get_params(), have_workspace,
             mask_sparse, increment_k_first,
-            split_d_params)
+            split_d_params, int8_inference=int8_inference)
         self.add_param_class("conv_params", self.gemm_params, "ConvParams")
         self.add_param_class("conv_params", self.gemm_params.problem,
                              "ConvProblem")
@@ -622,8 +650,8 @@ class ConvKernel(GemmComponentBase):
                 increment_k_first=increment_k_first,
                 is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight,
                 smem_clear_opt=SharedMemoryClearOption.kZfill,
-                op_type=self.problem.op_type
-                )
+                op_type=self.problem.op_type,
+                dynamic_mask=dynamic_mask)
         else:
             self.mma_container = Mma(
                 dtype_acc,
@@ -636,12 +664,17 @@ class ConvKernel(GemmComponentBase):
                 mask_sparse=self.mask_sparse,
                 increment_k_first=increment_k_first,
                 is_sparse_wgrad=self.problem.op_type == ConvOpType.kBackwardWeight,
+                dynamic_mask=dynamic_mask,
                 op_type=self.problem.op_type)
         self.output = Output(dtype_acc, self.warp_count_shape, self.partk,
-                             self.output_spec, self.out_smem_storage)
+                             self.output_spec, self.out_smem_storage, self.int8_inference)
         self.add_param_class("out_iter", self.output_spec.out_iter, "OutIter")
         self.add_param_class("out_iter_const", self.output_spec.const_out_iter,
                              "ConstOutIter")
+        if int8_inference:   
+            self.add_param_class("scale_out_iter_const", self.output_spec.int8_scalebias_out_iter,
+                                "ConstScaleOutIter")
+
         self.add_param_class("out_op", self.output_spec.output_op, "OutputOp")
 
         self.add_param_class("mma", self.mma_container, "Mma")
@@ -686,6 +719,10 @@ class ConvKernel(GemmComponentBase):
         res += f"{self.problem.layout_desp_input}{self.problem.layout_desp_weight}{self.problem.layout_desp_output}"
         if self.mask_sparse:
             res += "_SF" if not self.increment_k_first else "_SK"
+        if self.dynamic_mask:
+            res += "D"
+        if self.int8_inference:
+            res += "_S8"
         return res
 
     @pccm.cuda.cuda_global_function  # (inline=True)
@@ -778,25 +815,74 @@ class ConvKernel(GemmComponentBase):
             """)
             if self.mask_sparse:
                 if not self.problem.op_type == ConvOpType.kBackwardWeight:
-                    code.raw(f"""
-                        MaskIGemmIteratorDynamic MaskLoader(params.mask_ptr, 
-                                                                 {"params.mask_out_ptr" if self.problem.op_type == ConvOpType.kForward else "nullptr"}, 
-                                                                 params.mask_int_count,
-                                                                 tile_offset_m, params.gemm_k_iterations,
-                                                                 params.problem.kernel_volume, params.mask_filter,
-                                                                 {"params.reverse_mask" if self.problem.op_type == ConvOpType.kBackwardInput else "false"}, 
-                                                                 lane_idx, params.m);
-                    """)
-                    if self.problem.op_type == ConvOpType.kBackwardInput:
+                    if self.dynamic_mask:
                         code.raw(f"""
+                        int mask_int_count = tv::div_up(params.problem.kernel_volume, 32);
+                        MaskIGemmIteratorDynamic MaskLoader(params.mask_ptr, 
+                                                            {"params.mask_out_ptr" if self.problem.op_type == ConvOpType.kForward else "nullptr"}, 
+                                                            mask_int_count,
+                                                            tile_offset_m, params.gemm_k_iterations,
+                                                            params.problem.kernel_volume, params.mask_filter,
+                                                            {"params.reverse_mask" if self.problem.op_type == ConvOpType.kBackwardInput else "false"}, 
+                                                            lane_idx, params.m);
+                        """)
+                        if self.problem.op_type == ConvOpType.kBackwardInput:
+                            code.raw(f"""
                             if (MaskLoader.empty())
                                 return;
+                            """)
+                    else:
+                        num_mask_per_thread = self.tile_shape[
+                            0] // constants.WARP_SIZE
+                        assert num_mask_per_thread > 0
+                        code.raw(f"""
+                        uint32_t kmask = 0;
+                        tv::array<uint32_t, {num_mask_per_thread}> masks;
+                        masks.clear();
+                        TV_PRAGMA_UNROLL
+                        for (int i = 0; i < {num_mask_per_thread}; ++i){{
+                            if (tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx < params.m){{
+                                masks[i] = params.mask_ptr[tile_offset_m * {self.tile_shape[0]} + i * {constants.WARP_SIZE} + lane_idx];
+                            }}
+                        }}
+                        TV_PRAGMA_UNROLL
+                        for (int i = 0; i < {num_mask_per_thread}; ++i){{
+                            kmask |= masks[i];
+                        }}
+                        // perform a warp reduce to get block mask
+                        TV_PRAGMA_UNROLL
+                        for (int mask = {constants.WARP_SIZE // 2}; mask > 0; mask /= 2) {{
+                            kmask |= __shfl_xor_sync(0xffffffff, kmask, mask, 32);
+                        }}
+                        kmask &= params.mask_filter;
                         """)
+                        if self.problem.op_type == ConvOpType.kForward:
+                            # we need to save mask which will be used in backward weight.
+                            code.raw(f"""
+                            if (params.mask_out_ptr != nullptr){{
+                                params.mask_out_ptr[tile_offset_m] = kmask;
+                            }}
+                            """)
+                        else:
+                            # backward input don't need to handle bias, so we can
+                            # exit early.
+                            code.raw(f"""
+                            if (kmask == 0){{
+                                return;
+                            }}
+                            """)
+                        if self.problem.op_type == ConvOpType.kBackwardInput:
+                            # reverse kmask
+                            code.raw(f"""
+                            if (params.reverse_mask){{
+                                kmask = __brev(kmask) >> ({32} - params.problem.kernel_volume);
+                            }}
+                            """)
                 else:
                     code.raw(f"""
                     // uint32_t kmask = params.mask_ptr[(tv::div_up(params.problem.N, params.mask_width)) - 1];
                     int filter_offset = tile_offset_n / tv::div_up(params.problem.C, {self.tile_shape[1]});
-                    if (!(params.mask_filter & (1 << (filter_offset % 32)))){{
+                    if (!(params.mask_filter & (1 << ({"filter_offset % 32" if self.dynamic_mask else "filter_offset"})))){{
                         return;
                     }}
                     """)
@@ -811,23 +897,44 @@ class ConvKernel(GemmComponentBase):
                         # TODO split algo requires to run output even if mask is zero for bias.
                         if self.problem.op_type == ConvOpType.kForward:
                             # we can't exit early when have bias/act for forward.
+                            if self.dynamic_mask:
+                                code.raw(f"""
+                                if (!MaskLoader.empty()){{
+                                    mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, MaskLoader, params.problem.kernel_volume);
+                                }}
+                                """)
+                            else:
+                                code.raw(f"""
+                                if (kmask != 0){{
+                                    mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask, params.problem.kernel_volume);
+                                }}
+                                """)
+
+                        else:
+                            if self.dynamic_mask:
+                                code.raw(f"""
+                                mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, MaskLoader, params.problem.kernel_volume);
+                                """)
+                            else:
+                                code.raw(f"""
+                                mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, kmask, params.problem.kernel_volume);
+                                """)
+                    else:
+                        if self.dynamic_mask:
                             code.raw(f"""
-                            if (!MaskLoader.empty())
-                                mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators,  params.problem.kernel_volume, MaskLoader);
-                            
+                            int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
+                            int mask_int_count = tv::div_up(params.problem.kernel_volume, 32);
+                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
+                                params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
+                                params.mask_width, mask_int_count);
                             """)
                         else:
                             code.raw(f"""
-                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators,  params.problem.kernel_volume, MaskLoader);
+                            int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
+                            mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
+                                params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
+                                params.mask_width);
                             """)
-
-                    else:
-                        code.raw(f"""
-                        int num_reduced_mask = tv::div_up(params.problem.N, params.mask_width);
-                        mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators, 
-                            params.mask_ptr, num_reduced_mask, tile_offset_k, gridDim.z, filter_offset,
-                            params.mask_width, params.mask_int_count);
-                        """)
                 else:
                     code.raw(f"""
                     mma(params.gemm_k_iterations, accumulators, input_iter_A, input_iter_B, accumulators);
@@ -867,6 +974,16 @@ class ConvKernel(GemmComponentBase):
                                     block_offset_C,
                                     thread_idx);
             """)
+            if self.int8_inference:
+                code.raw(f"""
+                ConstScaleOutIter out_iter_bias(params.out_params_scalebias_, params.bias_pointer, block_extent_C,
+                                        block_offset_C,
+                                        thread_idx);
+
+                ConstScaleOutIter out_iter_scale(params.out_params_scalebias_, params.scale_pointer, block_extent_C,
+                                        block_offset_C,
+                                        thread_idx);
+                """)
             if self.splitk_serial:
                 code.raw(f"""
                 bool need_self_reduce = false;
@@ -879,22 +996,16 @@ class ConvKernel(GemmComponentBase):
                 }}
                 """)
             if self.need_source:
-                if not self.split_d_params:
-                    code.raw(f"""
-                    ConstOutIter out_iter_D(params.out_params_, params.ptr_D, block_extent_C,
-                                        block_offset_C,
-                                        thread_idx);
-                    """)
-                else:
-                    code.raw(f"""
-                    ConstOutIter out_iter_D(params.out_params_d_, params.ptr_D, block_extent_C,
-                                        block_offset_C,
-                                        thread_idx);
-                    """)
+                code.raw(f"""
+                ConstOutIter out_iter_source(params.out_params_source_, params.ptr_D, block_extent_C,
+                                    block_offset_C,
+                                    thread_idx);
+                """)
             code.raw(
                 f"Output out(out_shared_mem, thread_idx, warp_idx_k, warp_m, warp_n, lane_idx);"
             )
             if self.splitk_serial:
+                assert not self.int8_inference
                 with code.if_("need_self_reduce"):
                     code.raw(
                         f"out.run_self_reduce(output_op, accumulators, out_iter_C);"
@@ -902,19 +1013,26 @@ class ConvKernel(GemmComponentBase):
                 with code.else_():
                     if self.need_source:
                         code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
+                            f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
                         )
                     else:
                         code.raw(
                             f"out.run(output_op, accumulators, out_iter_C);")
             else:
-                if self.need_source:
-                    code.raw(
-                        f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
-                    )
+                if self.int8_inference:
+                    if self.need_source:
+                        code.raw(
+                            f"out.run(output_op, accumulators, out_iter_C, out_iter_source, out_iter_bias, out_iter_scale);"
+                        )
+                    else:
+                        code.raw(f"out.run(output_op, accumulators, out_iter_C, out_iter_bias, out_iter_scale);")
                 else:
-                    code.raw(f"out.run(output_op, accumulators, out_iter_C);")
-
+                    if self.need_source:
+                        code.raw(
+                            f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
+                        )
+                    else:
+                        code.raw(f"out.run(output_op, accumulators, out_iter_C);")
             if self.splitk_serial:
                 code.raw(f"""
                 if (params.grid_dims.z > 1){{
@@ -967,6 +1085,10 @@ class ConvKernel(GemmComponentBase):
             f"reinterpret_cast<{self.dtype_c}*>({p}.ptr_C)",
             f"reinterpret_cast<const {self.dtype_c}*>({p}.ptr_D)",
         ]
+        if self.int8_inference:
+            args.extend([ 
+                f"{p}.bias_pointer, {p}.scale_pointer"
+            ])
         if self.mask_sparse:
             args.extend([
                 f"{p}.mask_ptr, {p}.mask_argsort_ptr, {p}.indice_ptr",

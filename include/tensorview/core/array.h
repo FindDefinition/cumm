@@ -18,9 +18,6 @@
 #endif
 #include <tensorview/core/defs.h>
 #include <tensorview/core/mp_helper.h>
-#ifdef TV_DEBUG
-#include <tensorview/common.h>
-#endif
 #include "const_ops.h"
 
 #ifdef __CUDACC_RTC__

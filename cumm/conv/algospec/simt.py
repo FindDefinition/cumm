@@ -28,6 +28,7 @@ from cumm.gemm.core import MetaArray, metaseq, seq
 
 
 class InputSimt(bases.Input):
+
     def __init__(self,
                  problem: ConvProblem,
                  iter_algo: ConvIterAlgo,
@@ -191,6 +192,7 @@ class InputSimt(bases.Input):
 
 
 class AlgoSpecificSimt(object):
+
     def __init__(self,
                  problem: ConvProblem,
                  tile_shape: MetaArray[int],
@@ -206,7 +208,8 @@ class AlgoSpecificSimt(object):
                  algo: GemmAlgo = GemmAlgo.Simt,
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
-                 access_per_vector: int = 1):
+                 access_per_vector: int = 1,
+                 int8_inference: bool = False):
         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A
         trans_a, trans_b, trans_c = problem.get_gemm_trans_abc()
         self.input_spec = InputSimt(problem, iter_algo, tile_shape,
@@ -230,4 +233,5 @@ class AlgoSpecificSimt(object):
                                       tensorop,
                                       algo,
                                       shuffle_stride=shuffle_stride,
-                                      access_per_vector=access_per_vector)
+                                      access_per_vector=access_per_vector,
+                                      int8_inference=int8_inference)

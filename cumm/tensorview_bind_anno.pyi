@@ -672,6 +672,8 @@ class ConvAlgoDesp(GemmAlgoDesp):
     interleave_o: int
     mask_sparse: bool
     increment_k_first: bool
+    is_int8_inference: bool 
+    dynamic_mask: bool
 
     def copy(self) -> "ConvAlgoDesp":
         ...
@@ -854,6 +856,8 @@ class ConvParams:
     stream: int
     nvrtc_params: NVRTCParams
     bias: Tensor = Tensor()
+    output_add: Tensor = Tensor()
+    scale: Tensor = Tensor()
 
     def __init__(
         self,

@@ -350,14 +350,15 @@ class Mma(GemmComponentBase):
                  mask_sparse: bool = False,
                  increment_k_first=False,
                  is_sparse_wgrad: bool = False,
-                 op_type: ConvOpType = ConvOpType.kForward):
+                 op_type: ConvOpType = ConvOpType.kForward,
+                 dynamic_mask: bool = False):
         super().__init__()
         self.dtype_acc = dtype_acc
         miter = MaskIGemmIterator(increment_k_first)
         self.add_param_class("mma_ns_miter", miter, "MaskIGemmIterator")
         self.miterd = MaskIGemmIteratorMaskLoaderDynamic(spec.input_spec.tile_shape, increment_k_first, op_type)
         self.add_param_class("mma_ns_miterD", self.miterd, "MaskIGemmIteratorDynamic")
-
+        self.dynamic_mask = dynamic_mask
         self.add_param_class("mma_ns_wa", spec.warp_iter_a, "WarpIterA")
         self.add_param_class("mma_ns_wb", spec.warp_iter_b, "WarpIterB")
         self.add_param_class("mma_ns_sa", spec.smem_iter_a, "SmemIterA")
@@ -448,9 +449,12 @@ class Mma(GemmComponentBase):
         code.arg("input_iter_A", f"InputIteratorA &")
         code.arg("input_iter_B", f"InputIteratorB &")
         code.arg("src_accumulators", f"{self.accumulator_fragment} const&")
-        # code.arg("mask", f"uint32_t")
+        if self.dynamic_mask:
+            code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
+        else:
+            code.arg("mask", f"uint32_t")
+
         code.arg("RS", f"int")
-        code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
         code.raw(f"""
         accumulators = src_accumulators;
         {self.input_spec.input_iter_a.fragment_t} input_frag_A;
@@ -463,7 +467,12 @@ class Mma(GemmComponentBase):
         WarpMma warp_mma;
         int smem_write_stage_idx = 1;
         // mask = 0xffffffff;
-        // MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+        """)
+        if not self.dynamic_mask:
+            code.raw(f"""
+            MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+            """)
+        code.raw(f"""
         // find initial gemm index
         while (!mask_iter.valid()){{
             ++mask_iter;
@@ -582,7 +591,8 @@ class Mma(GemmComponentBase):
 
         code.arg("filter_offset", f"int")
         code.arg("mask_width", f"int")
-        code.arg("mask_int_count", f"const int&")
+        if self.dynamic_mask:
+            code.arg("mask_int_count", f"const int&")
 
         # assert self.mask_width > 0
         # mask_width_rate = self.mask_width // self.input_spec.tile_shape[2]
@@ -597,8 +607,19 @@ class Mma(GemmComponentBase):
         code.raw(f"""
         int mask_width_rate = mask_width / {self.input_spec.tile_shape[2]};
         // tv::printf2_once("WTF num_reduced_mask",gemm_k_iterations, num_reduced_mask, split_k_slices, mask_width, mask_width_rate, filter_offset);
-        int mask_offset = filter_offset / 32;
-        uint32_t filter_offset_mask = 1u << (filter_offset % 32);
+        """)
+        if self.dynamic_mask:
+            code.raw(f"""
+            uint32_t filter_offset_mask = 1u << (filter_offset % 32);
+            int mask_offset = filter_offset / 32;
+            """)
+            mask_idx_str = "mask_idx * mask_int_count + mask_offset"
+        else:
+            code.raw(f"""
+            uint32_t filter_offset_mask = 1u << filter_offset;
+            """)
+            mask_idx_str = "mask_idx"
+        code.raw(f"""
         accumulators = src_accumulators;
         {self.input_spec.input_iter_a.fragment_t} input_frag_A;
         {self.input_spec.input_iter_b.fragment_t} input_frag_B;
@@ -609,7 +630,7 @@ class Mma(GemmComponentBase):
         input_iter_B.increment_filter(filter_offset);
         int k_idx = tile_offset_k;
         int mask_idx = k_idx / mask_width_rate;
-        uint32_t mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+        uint32_t mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
         // mask = 0xffffffff;
         // find first valid mask
         // int total_skip_count = 0;
@@ -619,7 +640,7 @@ class Mma(GemmComponentBase):
             skip_cnt += 1;
             k_idx += split_k_slices;
             mask_idx = k_idx / mask_width_rate;
-            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
             // mask = 0xffffffff;
             --gemm_k_iterations;
             input_iter_A.increment_no_clear_mask();
@@ -703,13 +724,13 @@ class Mma(GemmComponentBase):
                     k_idx += split_k_slices;
                     mask_idx = k_idx / mask_width_rate;
                     // load current mask
-                    mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                    mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
                     // mask = 0xffffffff;
                     while (!(mask & filter_offset_mask) && (gemm_k_iterations)){{
                         skip_cnt += 1;
                         k_idx += split_k_slices;
                         mask_idx = k_idx / mask_width_rate;
-                        mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                        mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
                         // mask = 0xffffffff;
                         --gemm_k_iterations;
                         input_iter_A.increment_no_clear_mask();
@@ -869,9 +890,11 @@ class Mma(GemmComponentBase):
         code.arg("input_iter_A", f"InputIteratorA &")
         code.arg("input_iter_B", f"InputIteratorB &")
         code.arg("src_accumulators", f"{self.accumulator_fragment} const&")
-        # code.arg("mask", f"uint32_t")
+        if self.dynamic_mask:
+            code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
+        else:
+            code.arg("mask", f"uint32_t")
         code.arg("RS", f"int")
-        code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
         code.raw(f"""
         accumulators = src_accumulators;
         {self.input_spec.input_iter_a.fragment_t} input_frag_A;
@@ -884,7 +907,12 @@ class Mma(GemmComponentBase):
         WarpMma warp_mma;
         int smem_write_stage_idx = 1;
         // mask = 0xffffffff;
-        // MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+        """)
+        if not self.dynamic_mask:
+            code.raw(f"""
+            MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+            """)
+        code.raw(f"""
         // find initial gemm index
         while (!mask_iter.valid()){{
             ++mask_iter;

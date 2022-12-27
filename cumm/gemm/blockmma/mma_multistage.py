@@ -154,8 +154,10 @@ class MmaMultiStage(pccm.ParameterizedClass):
                  increment_k_first=False,
                  is_sparse_wgrad: bool = False,
                  smem_clear_opt = SharedMemoryClearOption.kNone,
-                 op_type = ConvOpType.kForward):
+                 op_type = ConvOpType.kForward,
+                 dynamic_mask: bool = False):
         super().__init__()
+        self.dynamic_mask = dynamic_mask
         assert smem_clear_opt in [SharedMemoryClearOption.kZfill, SharedMemoryClearOption.kNone], "Not Implemented"
         if mask_sparse:
             assert increment_k_first, "not impl"
@@ -451,20 +453,31 @@ class MmaMultiStage(pccm.ParameterizedClass):
 
         code.arg("filter_offset", f"const int&")
         code.arg("mask_width", f"const int&")
-        code.arg("mask_int_count", f"const int&")
+        if self.dynamic_mask:
+            code.arg("mask_int_count", f"const int&")
 
         code.raw(f"""
         int mask_width_rate = mask_width / {self.input_spec.tile_shape[2]};
-        const int& mask_offset = filter_offset / 32;
-
-        uint32_t filter_offset_mask = 1u << (filter_offset % 32);
+        """)
+        if self.dynamic_mask:
+            code.raw(f"""
+            uint32_t filter_offset_mask = 1u << (filter_offset % 32);
+            int mask_offset = filter_offset / 32;
+            """)
+            mask_idx_str = "mask_idx * mask_int_count + mask_offset"
+        else:
+            code.raw(f"""
+            uint32_t filter_offset_mask = 1u << filter_offset;
+            """)
+            mask_idx_str = "mask_idx"
+        code.raw(f"""
         accumulators = src_accumulators;
 
 
         input_iter_B.increment_filter(filter_offset);
         int k_idx = tile_offset_k;
         int mask_idx = k_idx / mask_width_rate;
-        uint32_t mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+        uint32_t mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
 
         {self.spec.warp_iter_a.fragment_t} warp_frag_A[2];
         {self.spec.warp_iter_b.fragment_t} warp_frag_B[2];
@@ -476,11 +489,11 @@ class MmaMultiStage(pccm.ParameterizedClass):
                 k_idx += split_k_slices;
 #ifndef MMA_MA_OPTIMIZE_LESS_LOAD
                 mask_idx = k_idx / mask_width_rate;
-                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
 #else
                 if ((1 + mask_idx) * mask_width_rate <= k_idx){{
                     mask_idx = k_idx / mask_width_rate;
-                    mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                    mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
                 }}
 #endif
                 --gemm_k_iterations;
@@ -501,11 +514,11 @@ class MmaMultiStage(pccm.ParameterizedClass):
             k_idx += split_k_slices;
 #ifndef MMA_MA_OPTIMIZE_LESS_LOAD
             mask_idx = k_idx / mask_width_rate;
-            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
 #else
             if ((1 + mask_idx) * mask_width_rate <= k_idx){{
                 mask_idx = k_idx / mask_width_rate;
-                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
             }}
 #endif
         }}
@@ -516,11 +529,11 @@ class MmaMultiStage(pccm.ParameterizedClass):
             k_idx += split_k_slices;
 #ifndef MMA_MA_OPTIMIZE_LESS_LOAD
             mask_idx = k_idx / mask_width_rate;
-            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
 #else
             if ((1 + mask_idx) * mask_width_rate <= k_idx){{
                 mask_idx = k_idx / mask_width_rate;
-                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
             }}
 #endif
             --gemm_k_iterations;
@@ -580,11 +593,11 @@ class MmaMultiStage(pccm.ParameterizedClass):
                     k_idx += split_k_slices;
 #ifndef MMA_MA_OPTIMIZE_LESS_LOAD
                     mask_idx = k_idx / mask_width_rate;
-                    mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                    mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
 #else
                     if ((1 + mask_idx) * mask_width_rate <= k_idx){{
                         mask_idx = k_idx / mask_width_rate;
-                        mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                        mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
                     }}
 #endif
 
@@ -593,11 +606,11 @@ class MmaMultiStage(pccm.ParameterizedClass):
                         k_idx += split_k_slices;
 #ifndef MMA_MA_OPTIMIZE_LESS_LOAD
                         mask_idx = k_idx / mask_width_rate;
-                        mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                        mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
 #else
                         if ((1 + mask_idx) * mask_width_rate <= k_idx){{
                             mask_idx = k_idx / mask_width_rate;
-                            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[mask_idx * mask_int_count + mask_offset] : 0;
+                            mask = (mask_idx < num_reduced_mask) ? reduced_mask_ptr[{mask_idx_str}] : 0;
                         }}
 #endif
                         --gemm_k_iterations;
@@ -638,9 +651,11 @@ class MmaMultiStage(pccm.ParameterizedClass):
         code.arg("input_iter_A", f"InputIteratorA &")
         code.arg("input_iter_B", f"InputIteratorB &")
         code.arg("src_accumulators", f"{self.accumulator_fragment} const&")
-        # code.arg("mask", f"const uint32_t&")
+        if self.dynamic_mask:
+            code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
+        else:
+            code.arg("mask", f"uint32_t")
         code.arg("RS", f"const int&")
-        code.arg("mask_iter", "MaskIGemmIteratorDynamic&")
         code.raw(f"""
         accumulators = src_accumulators;
         {self.spec.warp_iter_a.fragment_t} warp_frag_A[2];
@@ -648,7 +663,12 @@ class MmaMultiStage(pccm.ParameterizedClass):
         WarpMma warp_mma;
         int smem_write_stage_idx = {self.num_stage - 1};
         int smem_read_stage_idx = 0;
-        // MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+        """)
+        if not self.dynamic_mask:
+            code.raw(f"""
+            MaskIGemmIterator mask_iter(gemm_k_iterations, RS, mask);
+            """)
+        code.raw(f"""
         int local_gemm_k_iterations = gemm_k_iterations;
         while(!mask_iter.valid()){{
             ++mask_iter;

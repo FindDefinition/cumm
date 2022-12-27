@@ -167,6 +167,7 @@ def test_nvrtc_problem():
     #include <cuda/std/cfloat>
     #include <tensorview/hash/linear.cu.h>
     #include <cuda_fp16.h>
+    
 
     extern \"C\" __global__
     void add(float *x, int64_t n)

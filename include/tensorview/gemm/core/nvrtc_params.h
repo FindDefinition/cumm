@@ -60,6 +60,8 @@ public:
   int mode;
   int groups;
   bool d_is_bias;
+  const void* bias_pointer;
+  const void* scale_pointer;
 };
 
 struct ConvNVRTCParams {
@@ -80,6 +82,8 @@ public:
   int mode;
   int groups;
   bool d_is_bias;
+  const void* bias_pointer;
+  const void* scale_pointer;
 };
 
 } // namespace gemm

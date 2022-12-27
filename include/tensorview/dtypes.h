@@ -46,6 +46,8 @@ enum DType {
   uint64 = 11,
   bfloat16 = 12,
   tf32 = 13,
+  float_e4m3 = 14,
+  float_e5m2 = 15,
   custom16 = 100,
   custom32 = 101,
   custom48 = 102,
@@ -114,6 +116,16 @@ template <> struct TypeToDtype<__nv_bfloat16> {
   static constexpr DType dtype = bfloat16;
 };
 #endif
+#if (CUDA_VERSION >= 11080 && defined(TV_CUDA))
+template <> struct TypeToDtype<__nv_fp8_e5m2> {
+  static constexpr DType dtype = float_e5m2;
+};
+template <> struct TypeToDtype<__nv_fp8_e4m3> {
+  static constexpr DType dtype = float_e4m3;
+};
+
+#endif
+
 template <> struct TypeToDtype<float> {
   static constexpr DType dtype = float32;
 };
@@ -182,6 +194,10 @@ template <typename T> TV_HOST_DEVICE_INLINE constexpr const char *dtype_str(T t)
     return "uint64";
   case DType::float16:
     return "half";
+  case DType::float_e4m3:
+    return "float_e4m3";
+  case DType::float_e5m2:
+    return "float_e5m2";
   case DType::custom16:
     return "custom16";
   case DType::custom32:
@@ -230,6 +246,10 @@ template <typename T> TV_HOST_DEVICE_INLINE constexpr const char *dtype_short_st
     return "u64";
   case DType::float16:
     return "f16";
+  case DType::float_e4m3:
+    return "e4m3";
+  case DType::float_e5m2:
+    return "e5m2";
   case DType::custom16:
     return "x16";
   case DType::custom32:
@@ -278,6 +298,10 @@ template <typename T> TV_HOST_DEVICE_INLINE constexpr int bit_size(T t) {
     return 64;
   case DType::float16:
     return 16;
+  case DType::float_e4m3:
+    return 8;
+  case DType::float_e5m2:
+    return 8;
   case DType::custom16:
     return 16;
   case DType::custom32:

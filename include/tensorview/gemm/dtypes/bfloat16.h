@@ -35,6 +35,9 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#else 
+#include "fp_nvrtc.h"
+#include <tensorview/core/nvrtc_std.h>
 #endif
 #include "half.h"
 #include <tensorview/core/all.h>

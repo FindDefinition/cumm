@@ -334,7 +334,9 @@ class OutputSimt(bases.Output):
             tensorop: Optional[TensorOp] = None,
             algo: GemmAlgo = GemmAlgo.Simt,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
-            access_per_vector: int = 1):
+            access_per_vector: int = 1,
+            int8_inference: bool = False,
+            scale_dtype: dtypes.DType = dtypes.float32):
         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A
         self._mma_spec = mma_spec
         self.warp_count_shape = tile_shape // warp_tile_shape
@@ -380,6 +382,7 @@ class OutputSimt(bases.Output):
             self.shared_mem_alignment)
         shuffle = shuffle_stride == ShuffleStrideType.ShuffleAC
         out_iter_params = out_iters.OutIteratorParams(self.out_tmap, shuffle)
+        bias_out_iter_params = out_iters.OutIteratorParams(self.out_tmap, False, int8_inference)
         self._out_iter = out_iters.OutIterator(
             dtype_c,
             self.out_tmap,
@@ -399,24 +402,39 @@ class OutputSimt(bases.Output):
             read_only=True,
             shuffle_in_stride=shuffle,
             access_per_vector=access_per_vector)
-
+        rate = min(dtype_comp.bitsize() // dtype_c.bitsize(), 1)
+        self.int8_scalebias_iterator = out_iters.OutIterator(
+            dtype_comp,
+            self.out_tmap,
+            bias_out_iter_params,
+            self.part_shape,
+            self.part_dilation,
+            output_op_count // rate,
+            read_only=True,
+            shuffle_in_stride=False,
+            access_per_vector=rate)
         self.out_unary_op_fp_t = f"tv::math::UnaryIdentity<{dtype_comp}, {output_op_count}>"
         self.out_unary_op_i8_t = f"tv::math::Clamp<{dtype_comp}, {dtype_c}, {output_op_count}>"
         out_unary_op_fp = gemmmath.UnaryActivation(dtype_comp, dtype_c,
                                                  output_op_count)
         out_unary_op_i8 = gemmmath.Clamp(dtype_comp, dtype_c, output_op_count)
 
-        if dtype_c == dtypes.int8:
+        if dtype_c == dtypes.int8 and not int8_inference:
             self.out_unary_op_t = self.out_unary_op_i8_t
             self.out_unary_op = out_unary_op_i8
         else:
             self.out_unary_op_t = self.out_unary_op_fp_t
             self.out_unary_op = out_unary_op_fp
-        self._output_op = output_op.linear.LinearCombination(
-            dtype_c, output_op_count, dtype_acc, dtype_comp, self.out_unary_op)
+        if int8_inference:
+            self._output_op = output_op.linear.Int8Inference(
+                dtype_c, output_op_count, dtype_acc, dtype_comp, self.out_unary_op)
+        else:
+            self._output_op = output_op.linear.LinearCombination(
+                dtype_c, output_op_count, dtype_acc, dtype_comp, self.out_unary_op)
         self._apply_op = output_op.apply.ApplyOutputOp(
             output_op_count, self.output_op, self.out_iter.fragment_t,
-            self.out_smem_loader.fragment_t)
+            self.out_smem_loader.fragment_t, self.int8_scalebias_iterator.fragment_t,
+            int8_inference)
 
     @property
     def mma_spec(self) -> bases.Mma:
@@ -445,6 +463,10 @@ class OutputSimt(bases.Output):
     @property
     def const_out_iter(self) -> GemmOutputIterator:
         return self._const_out_iter
+    
+    @property
+    def int8_scalebias_out_iter(self) -> GemmOutputIterator:
+        return self.int8_scalebias_iterator
 
     @property
     def num_out_iters(self) -> int:

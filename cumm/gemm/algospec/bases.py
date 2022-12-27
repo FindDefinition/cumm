@@ -163,6 +163,10 @@ class Output(GemmContainerBase):
         raise NotImplementedError
 
     @abc.abstractproperty
+    def int8_scalebias_out_iter(self) -> GemmOutputIterator:
+        raise NotImplementedError
+
+    @abc.abstractproperty
     def output_op(self) -> GemmOutputOp:
         raise NotImplementedError
 

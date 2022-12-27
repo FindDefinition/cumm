@@ -13,4 +13,7 @@
 // limitations under the License.
 
 #include "kernel_utils.h"
+#if !defined(__CUDACC_RTC__)
+
 #include "launch.h"
+#endif

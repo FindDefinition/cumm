@@ -64,12 +64,15 @@ class OutputSmemStorage(pccm.ParameterizedClass):
 class Output(pccm.ParameterizedClass):
     def __init__(self, dtype_acc: dtypes.DType,
                  warp_count_shape: MetaArray[int], partk: int,
-                 spec: bases.Output, smem_storage: OutputSmemStorage):
+                 spec: bases.Output, smem_storage: OutputSmemStorage,
+                 int8_inference: bool = False):
         super().__init__()
         self.spec = spec
         self.dtype_acc = dtype_acc
         self.smem_storage = smem_storage
         self.warp_count_shape = warp_count_shape
+        self.int8_inference = int8_inference
+
         self.add_param_class("out_ns_frag", spec.frag_iter, "FragIter")
         self.add_param_class("out_ns_warp", spec.warp_store_iter,
                              "OutWarpIter")
@@ -77,6 +80,9 @@ class Output(pccm.ParameterizedClass):
         self.add_param_class("out_ns_out", spec.out_iter, "OutIter")
         self.add_param_class("out_ns_out_const", spec.const_out_iter,
                              "ConstOutIter")
+        if int8_inference:
+            self.add_param_class("scale_ns_out_const", spec.int8_scalebias_out_iter,
+                                "ConstScaleOutIter")
 
         self.add_param_class("out_ns_sto", smem_storage, "OutputStorage")
         self.add_param_class("out_ns_op", spec.output_op, "OutputOp")
@@ -128,6 +134,10 @@ class Output(pccm.ParameterizedClass):
         code.arg("out_iter", f"OutIter&")
         if have_source:
             code.arg("source_iter", f"ConstOutIter&")
+        if self.int8_inference:
+            code.arg("bias_iter", f"ConstScaleOutIter&")
+            code.arg("scale_iter", f"ConstScaleOutIter&")
+
         # TODO why frag_per_iter > 1?
         frag_per_iter = self.spec.frag_per_iter
         if have_source is not None:
@@ -138,10 +148,16 @@ class Output(pccm.ParameterizedClass):
         else:
             platform_math = "tv::math"
         if have_source:
+            with code.if_("!output_op.is_source_needed()"):
+                if self.int8_inference:
+                    code.raw(f"""
+                    return run(output_op, accumulators, out_iter, bias_iter, scale_iter);
+                    """)
+                else:
+                    code.raw(f"""
+                    return run(output_op, accumulators, out_iter);
+                    """)
             code.raw(f"""
-            if (!output_op.is_source_needed()){{
-                return run(output_op, accumulators, out_iter);
-            }}
             {self.spec.out_iter.fragment_t} source_frag;
             source_frag.clear();
             """)
@@ -150,6 +166,14 @@ class Output(pccm.ParameterizedClass):
             {self.spec.out_iter.fragment_t} source_frag;
             source_frag.clear();
             """)
+        if self.int8_inference:
+            code.raw(f"""
+            {self.spec.int8_scalebias_out_iter.fragment_t} int8_bias_frag;
+            {self.spec.int8_scalebias_out_iter.fragment_t} int8_scale_frag;
+            int8_bias_frag.clear();
+            int8_scale_frag.clear();
+            """)
+
         code.raw(f"FragIter out_acc_iter(accumulators.data());")
         with code.for_(
                 f"int iter = 0; iter < {self.spec.num_out_iters}; iter += {frag_per_iter}",
@@ -163,6 +187,12 @@ class Output(pccm.ParameterizedClass):
                 code.raw(f"""
                 out_iter.load(source_frag);
                 """)
+            if self.int8_inference:
+                code.raw(f"""
+                bias_iter.load(int8_bias_frag);
+                scale_iter.load(int8_scale_frag);
+                """)
+
             code.raw(f"__syncthreads();")
             with code.range_("p", frag_per_iter, "TV_PRAGMA_UNROLL"):
                 code.raw(f"""
@@ -213,13 +243,23 @@ class Output(pccm.ParameterizedClass):
 
                     # code.raw(f"tv::print_fragment_once<float, 0, 8, {cudasim.debug_tx()}>(smem_frags[0]);")
                 if have_source or self_reduce:
-                    code.raw(f"""
-                    ApplyOp::apply_output_operator(out_frag, output_op, smem_frags[0], source_frag);
-                    """)
+                    if self.int8_inference:
+                        code.raw(f"""
+                        ApplyOp::apply_output_with_int8_operator(out_frag, output_op, smem_frags[0], source_frag, int8_bias_frag, int8_scale_frag);
+                        """)
+                    else:
+                        code.raw(f"""
+                        ApplyOp::apply_output_operator(out_frag, output_op, smem_frags[0], source_frag);
+                        """)
                 else:
-                    code.raw(f"""
-                    ApplyOp::apply_output_operator_no_source(out_frag, output_op, smem_frags[0]);
-                    """)
+                    if self.int8_inference:
+                        code.raw(f"""
+                        ApplyOp::apply_output_with_int8_operator_no_source(out_frag, output_op, smem_frags[0], int8_bias_frag, int8_scale_frag);
+                        """)
+                    else:
+                        code.raw(f"""
+                        ApplyOp::apply_output_operator_no_source(out_frag, output_op, smem_frags[0]);
+                        """)
                 # if cudasim.enable_debug():
 
                 #     # code.raw(f"tv::print_fragment_meta_once<float, {cudasim.debug_tx()}>(out_frag, iter, \"OutFrag\");")

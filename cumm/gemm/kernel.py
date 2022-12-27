@@ -146,7 +146,7 @@ class GemmParams(pccm.ParameterizedClass):
             # TODO reduce output register usage
             self.add_member("out_params_", f"OutIterParams")
             if split_d_params:
-                self.add_member("out_params_d_", f"OutIterParams")
+                self.add_member("out_params_scalebias_", f"OutIterParams")
         self.split_d_params = split_d_params
         # cudasim members
         self.m = 0
@@ -322,9 +322,9 @@ class GemmParams(pccm.ParameterizedClass):
             if self.split_d_params:
                 # D don't support 
                 if self.shuffle_stride == ShuffleStrideType.ShuffleAC:
-                    code.raw("out_params_d_ = OutIterParams(stride_D, IndiceD);")
+                    code.raw("out_params_scalebias_ = OutIterParams(stride_D, IndiceD);")
                 else:
-                    code.raw("out_params_d_ = OutIterParams(stride_D);")
+                    code.raw("out_params_scalebias_ = OutIterParams(stride_D);")
 
             
         code.arg("m, n, k", "int")
@@ -858,7 +858,7 @@ class GemmKernel(GemmComponentBase):
                 if self.need_source:
                     if self.split_d_params:
                         code.raw(f"""
-                        ConstOutIter out_iter_D(params.out_params_d_, params.ptr_D, {{params.m, params.n}},
+                        ConstOutIter out_iter_D(params.out_params_scalebias_, params.ptr_D, {{params.m, params.n}},
                                             {{block_offset_C[0], block_offset_C[1]}},
                                             thread_idx);
                         """)

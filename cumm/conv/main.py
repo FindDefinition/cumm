@@ -67,7 +67,9 @@ class ConvAlgoParams(GemmAlgoParams):
                  mask_sparse: bool = False,
                  increment_k_first: bool = False,
                  access_per_vector: int = 1,
-                 is_nvrtc: bool = False):
+                 is_nvrtc: bool = False,
+                 int8_inference: bool = False,
+                 dynamic_mask: bool = False):
         trans_a, trans_b, trans_c = get_gemm_trans_abc(op_type)
         super().__init__(ts,
                          wts,
@@ -87,6 +89,8 @@ class ConvAlgoParams(GemmAlgoParams):
         self.iter_algo = iter_algo
         self.mask_sparse = mask_sparse
         self.increment_k_first = increment_k_first
+        self.int8_inference = int8_inference
+        self.dynamic_mask = dynamic_mask
 
         indices = conv_iwo_012_to_abc(op_type)
         dtypes_abc = [self.dtype_a, self.dtype_b, self.dtype_c]
@@ -123,7 +127,9 @@ def gen_gemm_params(op_types: List[ConvOpType],
                     mask_sparse: bool = False,
                     increment_k_first: bool = False,
                     access_per_vector: int = 1,
-                    is_nvrtc: bool = False):
+                    is_nvrtc: bool = False,
+                    int8_inference: bool = False,
+                    dynamic_mask: Optional[bool] = None):
     res: List[ConvAlgoParams] = []
     if not isinstance(dtypes_string, list):
         dtypes_string = [dtypes_string]
@@ -132,24 +138,35 @@ def gen_gemm_params(op_types: List[ConvOpType],
         stages.extend(stage)
     else:
         stages.append(stage)
+    dymasks = [False, True]
+    # dynamic_mask is used for debug
+    if dynamic_mask is not None:
+        dymasks = [dynamic_mask]
     for dts in dtypes_string:
         for op_type in op_types:
             for num_stage in stages:
-                if op_type == ConvOpType.kBackwardWeight:
-                    p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, num_stage,
-                                    dts, li, lw, lo, algo, tensorop, True,
-                                    splitk_parallel, mask_sparse,
-                                    increment_k_first, access_per_vector,
-                                    is_nvrtc=is_nvrtc)
-                else:
-                    p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, num_stage,
-                                    dts, li, lw, lo, algo, tensorop,
-                                    splitk_serial, splitk_parallel, mask_sparse,
-                                    increment_k_first, access_per_vector,
-                                    is_nvrtc=is_nvrtc)
+                for dymask in dymasks:
+                    if dymask and dynamic_mask is None:
+                        cur_is_nvrtc = True
+                    else:
+                        cur_is_nvrtc = is_nvrtc
+                    if op_type == ConvOpType.kBackwardWeight:
+                        p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, num_stage,
+                                        dts, li, lw, lo, algo, tensorop, True,
+                                        splitk_parallel, mask_sparse,
+                                        increment_k_first, access_per_vector,
+                                        is_nvrtc=cur_is_nvrtc, int8_inference=int8_inference,
+                                        dynamic_mask=dymask)
+                    else:
+                        p = ConvAlgoParams(ndim, op_type, iter_algo, ts, wts, num_stage,
+                                        dts, li, lw, lo, algo, tensorop,
+                                        splitk_serial, splitk_parallel, mask_sparse,
+                                        increment_k_first, access_per_vector,
+                                        is_nvrtc=cur_is_nvrtc, int8_inference=int8_inference,
+                                        dynamic_mask=dymask)
 
-                if not p.skipped():
-                    res.append(p)
+                    if not p.skipped():
+                        res.append(p)
     return res
 
 
@@ -208,7 +225,9 @@ def gen_gemm_kernels(params: ConvAlgoParams,
                              mask_sparse=params.mask_sparse,
                              increment_k_first=params.increment_k_first,
                              access_per_vector=params.access_per_vector,
-                             nvrtc_mode=nvrtc_mode)
+                             nvrtc_mode=nvrtc_mode,
+                             int8_inference=params.int8_inference,
+                             dynamic_mask=params.dynamic_mask)
 
 
 SHUFFLE_SIMT_PARAMS = []
@@ -359,7 +378,7 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
 
     @staticmethod
     def _get_sparse_params(ker: kernel.ConvKernel):
-        return (ker.mask_sparse, ker.increment_k_first)
+        return (ker.mask_sparse, ker.increment_k_first, ker.int8_inference, ker.dynamic_mask)
 
     @staticmethod
     def conv_select_helper_stage1(kernels: List[kernel.ConvKernel],
@@ -405,6 +424,8 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                                     if_tests = [
                                         f"algo_desp.mask_sparse == {pccm.boolean(ms_ikf_mw[0])}",
                                         f"algo_desp.increment_k_first == {pccm.boolean(ms_ikf_mw[1])}",
+                                        f"algo_desp.is_int8_inference == {pccm.boolean(ms_ikf_mw[2])}",
+                                        f"algo_desp.dynamic_mask == {pccm.boolean(ms_ikf_mw[3])}",
                                     ]
                                     with code.if_(" && ".join(if_tests)):
                                         yield ms_ikf_mw_kers
@@ -484,6 +505,11 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                     code.raw(f"""
                     TV_ASSERT_RT_ERR(bias.empty(), "bias must be empty if split_d_params not enable");
                     """)
+                if ker.int8_inference:
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR(!bias.empty(), "bias must not be empty if int8_inference enable");
+                    TV_ASSERT_RT_ERR(!scale.empty(), "scale must not be empty if int8_inference enable");
+                    """)
                 if p.mask_sparse:
                     if p.op_type == ConvOpType.kBackwardWeight:
                         code.raw(f"""
@@ -537,16 +563,23 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                     for (int i = 0; i < {p.ndim}; ++i){{
                         TV_ASSERT_RT_ERR(output_dims_check_again[i] == output_dims[i], "error");
                     }}
+                    
                     {param_cls_ns}::ConvProblem problem(N, C, K, input_dims, output_dims, ksize, padding_arr, stride_arr, dilation_arr, 
                         tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
                     """)
+                code.raw(f"""
+                auto source_ptr = algo_desp.is_int8_inference ? c_ten.data_ptr<const {ker.dtype_c}>() : (bias.empty() ? c_ten.data_ptr<const {ker.dtype_c}>() : bias.data_ptr<const {ker.dtype_c}>());
+                """)
                 params_str = [
                     "problem", 
                     f"a_ten.data_ptr<const {ker.dtype_a}>()",
                     f"b_ten.data_ptr<const {ker.dtype_b}>()",
                     f"c_ten.data_ptr<{ker.dtype_c}>()",
-                    f"bias.empty() ? c_ten.data_ptr<const {ker.dtype_c}>() : bias.data_ptr<const {ker.dtype_c}>()",
+                    f"source_ptr",
                 ]
+                if ker.int8_inference:
+                    params_str.append(f"bias.empty() ? nullptr : bias.data_ptr<const {ker.dtype_comp}>()",)
+                    params_str.append(f"scale.empty() ? nullptr : scale.data_ptr<const {ker.dtype_comp}>()",)
                 if p.mask_sparse:
                     # mask_out_ptr = "mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>(), "
                     # if p.op_type != ConvOpType.kForward:
@@ -559,7 +592,7 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                         "mask.data_ptr<const uint32_t>()",
                         "mask_argsort.data_ptr<const int32_t>()",
                         "indices.data_ptr<const int32_t>()",
-                        "params.mask_int_count",
+                        # "params.mask_int_count",
                     ])
                     if p.op_type == ConvOpType.kForward:
                         params_str.append(f"mask_output.empty() ? nullptr : mask_output.data_ptr<uint32_t>()")
@@ -718,6 +751,12 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                 code.raw(f"""
                 TV_ASSERT_RT_ERR(bias.empty(), "bias must be empty if split_d_params not enable");
                 """)
+                if ker.int8_inference:
+                    code.raw(f"""
+                    TV_ASSERT_RT_ERR(!scale.empty(), "scale must not be empty if int8_inference enable");
+                    TV_ASSERT_RT_ERR(!scale.empty(), "scale must not be empty if int8_inference enable");
+                    """)
+
             if p.mask_sparse:
                 if p.op_type == ConvOpType.kBackwardWeight:
                     code.raw(f"""
@@ -957,6 +996,8 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
             desp.interleave_o = {ker.problem.layout_desp_output.interleave};
             desp.mask_sparse = {pccm.boolean(ker.mask_sparse)};
             desp.increment_k_first = {pccm.boolean(ker.increment_k_first)};
+            desp.is_int8_inference = {pccm.boolean(ker.int8_inference)};
+            desp.dynamic_mask = {pccm.boolean(ker.dynamic_mask)};
             TV_ASSERT_RT_ERR(desp.__repr__() == \"{ker.get_algo_name()}\", "error", desp.__repr__(), \"{ker.get_algo_name()}\");
             desps.push_back(desp);
             """)

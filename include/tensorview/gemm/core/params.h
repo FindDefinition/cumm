@@ -177,6 +177,8 @@ struct ConvAlgoDesp : public GemmAlgoDesp {
   bool increment_k_first = false;
   std::array<int, 3> conv2gemm_inds;
   std::array<int, 3> gemm2conv_inds;
+  bool dynamic_mask = false;
+  bool is_int8_inference = false;
   ConvAlgoDesp(int ndim, ConvOpType op_type)
       : GemmAlgoDesp(), ndim(ndim), op_type(op_type),
         iter_algo(ConvIterAlgo::kOptimized),
@@ -211,6 +213,12 @@ struct ConvAlgoDesp : public GemmAlgoDesp {
     ss << layout_i_str << layout_w_str << layout_o_str;
     if (mask_sparse) {
       ss << "_" << (increment_k_first ? "SK" : "SF");
+    }
+    if (dynamic_mask){
+      ss << "D";
+    }
+    if (is_int8_inference){
+      ss << "_S8";
     }
     return ss.str();
   }
@@ -324,6 +332,7 @@ struct GemmParams {
   tv::Tensor b;
   tv::Tensor c;
   tv::Tensor d = tv::Tensor();
+
   int split_k_slices = 1;
   tv::Tensor workspace = tv::Tensor();
   tv::Tensor a_inds = tv::Tensor();
@@ -385,7 +394,9 @@ struct ConvParams {
   tv::Tensor input;
   tv::Tensor weight;
   tv::Tensor output;
+  tv::Tensor output_add = tv::Tensor();
   tv::Tensor bias = tv::Tensor();
+  tv::Tensor scale = tv::Tensor();
   int split_k_slices = 1;
   std::vector<int> padding;
   std::vector<int> stride;

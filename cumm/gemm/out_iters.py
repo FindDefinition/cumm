@@ -368,16 +368,18 @@ def _add_out_iter_params_members(c: pccm.Class, long_index_t: str):
 class OutIteratorParams(pccm.ParameterizedClass):
     def __init__(self,
                  tmap: thread_map.Out5DLinear,
-                 shuffle_in_stride: bool = False):
+                 shuffle_in_stride: bool = False,
+                 is_bias: bool = False):
         super().__init__()
         self.tmap = tmap
         self.add_param_class("tmap", tmap, "ThreadMap")
         self.long_index_t = dtypes.int64
         self.shuffle_in_stride = shuffle_in_stride
-        _add_out_iter_params_members(self, str(self.long_index_t))
-        if self.shuffle_in_stride:
-            self.add_member("indice_ptr_", "const int*")
-
+        if not is_bias:
+            _add_out_iter_params_members(self, str(self.long_index_t))
+            if self.shuffle_in_stride:
+                self.add_member("indice_ptr_", "const int*")
+        self.is_bias = is_bias
         #cudasim params
         self.stride = -1
         self.increment_row = 0
@@ -413,23 +415,26 @@ class OutIteratorParams(pccm.ParameterizedClass):
     @pccm.cuda.constructor(device=True, host=True, forceinline=True)
     def ctor(self):
         code = pccm.code()
+        if self.is_bias:
+            return code.make_invalid()
         code.arg("stride_", "int")
         code.ctor_init("stride", "stride_")
         if self.shuffle_in_stride:
             code.arg("indice_ptr", "const int*", "nullptr")
             code.ctor_init("indice_ptr_", "indice_ptr")
-        code.raw("""
-        auto increment_params = ThreadMap::iteration_inc_params(stride);
-        auto advance_params = ThreadMap::iteration_advance_params(stride);
+        if not self.is_bias:
+            code.raw("""
+            auto increment_params = ThreadMap::iteration_inc_params(stride);
+            auto advance_params = ThreadMap::iteration_advance_params(stride);
 
-        increment_cluster = increment_params[0];
-        increment_group = increment_params[1];
-        increment_row = increment_params[2];
-        advance_tile = advance_params[0];
-        advance_cluster = advance_params[1];
-        advance_group = advance_params[2];
-        advance_row = advance_params[3];
-        """)
+            increment_cluster = increment_params[0];
+            increment_group = increment_params[1];
+            increment_row = increment_params[2];
+            advance_tile = advance_params[0];
+            advance_cluster = advance_params[1];
+            advance_group = advance_params[2];
+            advance_row = advance_params[3];
+            """)
         return code
 
 
@@ -460,19 +465,22 @@ class OutIterator(GemmOutputIterator):
         self.part_shape = part_shape
         self.part_dilation = part_dilation
         self.tmap = tmap
+        # if is_bias, all params in OutIteratorParams is zero.
+
+        self.is_bias = self.params.is_bias
         if read_only:
             self.add_member("pointer_", self.const_pointer)
         else:
             self.add_member("pointer_", self.pointer)
 
-        # self.add_member("pointer_bkp_", self.pointer)
         self.add_member("params_", "Params const&")
         self.add_member(
             "column_masks_",
             "bool",
             array=f"[{self.iterations[4]}][{self.access_per_vector}]")
         self.add_member("extent_row_, thread_start_row_", self.index_t)
-        self.add_member("counts_", "int", array="[3]")
+        if not self.is_bias:
+            self.add_member("counts_", "int", array="[3]")
         if self.shuffle_in_stride:
             self.add_member("indices_",
                             "int64_t",
@@ -495,9 +503,14 @@ class OutIterator(GemmOutputIterator):
         code = pccm.FunctionCode(f"""
         // pointer_bkp_ = ptr;
         extent_row_ = extent[0];
-        counts_[0] = 0;
-        counts_[1] = 0;
-        counts_[2] = 0;
+        """)
+        if not self.is_bias:
+            code.raw(f"""
+            counts_[0] = 0;
+            counts_[1] = 0;
+            counts_[2] = 0;
+            """)
+        code.raw(f"""
         auto thread_offset = ThreadMap::initial_offset(thread_idx) + offset_2d;
         thread_start_row_ = thread_offset[0];
         TV_PRAGMA_UNROLL
@@ -510,6 +523,7 @@ class OutIterator(GemmOutputIterator):
 
         """)
         if self.shuffle_in_stride:
+            assert not self.is_bias, "shuffle in stride don't support bias."
             with code.range_("cluster", str(self.iterations[1]),
                              "TV_PRAGMA_UNROLL"):
                 with code.range_("group", str(self.iterations[2]),
@@ -528,9 +542,14 @@ class OutIterator(GemmOutputIterator):
             pointer_ = ptr + thread_offset[1];
             """)
         else:
-            code.raw(f"""
-            pointer_ = ptr + (thread_offset[0]) * params.stride + thread_offset[1];
-            """)
+            if self.is_bias:
+                code.raw(f"""
+                pointer_ = ptr + thread_offset[1];
+                """)
+            else:
+                code.raw(f"""
+                pointer_ = ptr + (thread_offset[0]) * params.stride + thread_offset[1];
+                """)
 
         code.arg("params", "Params const&")
         code.arg("ptr",
@@ -585,11 +604,14 @@ class OutIterator(GemmOutputIterator):
                     int frag_row_idx =
                         (row +  {self.iterations[3]} * (group +  {self.iterations[2]} * cluster));
                     // delta: [Cluster, Group, Row]
-                    int row_offset =
-                        row * {self.delta[3]} + group * {self.delta[2]} + cluster * {self.delta[1]};
-
-                    bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
                     """)
+                    if not self.is_bias:
+                        code.raw(f"""
+                        int row_offset =
+                            row * {self.delta[3]} + group * {self.delta[2]} + cluster * {self.delta[1]};
+
+                        bool row_guard = ((row_offset + thread_start_row_) < extent_row_);
+                        """)
                     if self.access_per_vector > 1:
                         if self.shuffle_in_stride:
                             code.raw(f"""
@@ -603,9 +625,14 @@ class OutIterator(GemmOutputIterator):
                                          "TV_PRAGMA_UNROLL"):
                             with code.range_("v", self.access_per_vector,
                                              "TV_PRAGMA_UNROLL"):
-                                code.raw(
-                                    f"bool guard = row_guard && column_masks_[column][v];"
-                                )
+                                if self.is_bias:
+                                    code.raw(
+                                        f"bool guard = column_masks_[column][v];"
+                                    )
+                                else:
+                                    code.raw(
+                                        f"bool guard = row_guard && column_masks_[column][v];"
+                                    )
                                 if store:
                                     code.raw(f"""
                                     tv::gemm::global_store<{self.access_t}, sizeof({self.access_t})>(
@@ -634,9 +661,14 @@ class OutIterator(GemmOutputIterator):
 
                         with code.range_("column", str(self.iterations[4]),
                                          "TV_PRAGMA_UNROLL"):
-                            code.raw(
-                                f"bool guard = row_guard && column_masks_[column][0];"
-                            )
+                            if self.is_bias:
+                                code.raw(
+                                    f"bool guard = column_masks_[column][0];"
+                                )
+                            else:
+                                code.raw(
+                                    f"bool guard = row_guard && column_masks_[column][0];"
+                                )
                             if store:
                                 code.raw(f"""
                                 tv::gemm::global_store<{self.access_t}, sizeof({self.access_t})>(
@@ -651,19 +683,21 @@ class OutIterator(GemmOutputIterator):
                                     (const void *)&memory_pointer[column * {self.delta[4]} / {self.element_per_acc}],
                                     guard);
                                 """)
-                    if not self.shuffle_in_stride:
+
+
+                    if not self.shuffle_in_stride and not self.is_bias:
                         code.raw(f"""
                         if (row + 1 <  {self.iterations[3]}) {{
                             cur_pointer += params_.increment_row;
                         }}
                         """)
-                if not self.shuffle_in_stride:
+                if not self.shuffle_in_stride and not self.is_bias:
                     code.raw(f"""
                     if (group + 1 <  {self.iterations[2]}) {{
                         cur_pointer += params_.increment_group;
                     }}
                     """)
-            if not self.shuffle_in_stride:
+            if not self.shuffle_in_stride and not self.is_bias:
                 code.raw(f"""
                 if (cluster + 1 <  {self.iterations[1]}) {{
                     cur_pointer += params_.increment_cluster;
@@ -678,6 +712,8 @@ class OutIterator(GemmOutputIterator):
                  f"{self.fragment_t} const &").arg("offset", str(self.index_t))
         if self.read_only:
             return code
+        if self.is_bias:
+            return code.make_invalid()
         return self.load_store_with_offset_template(True)
 
     @pccm.cuda.member_function(device=True, forceinline=True)
@@ -740,6 +776,8 @@ class OutIterator(GemmOutputIterator):
         code = pccm.FunctionCode(f"""
         store_with_offset(frag, 0);
         """)
+        if self.is_bias:
+            return code.make_invalid()
         code.arg("frag", f"{self.fragment_t} const &")
         return code
 
@@ -756,37 +794,41 @@ class OutIterator(GemmOutputIterator):
                                forceinline=True)
     def operator_pp(self):
         cond = codeops.Condition(not self.shuffle_in_stride)
-        code = pccm.FunctionCode(f"""
-        ++counts_[2];
-        {cond("pointer_ += params_.advance_row;")}
-        // kPartShape: [Tile, Cluster, Group, Row, Col]
-        thread_start_row_ += {self.part_shape[3]};
+        if self.is_bias:
+            code = pccm.FunctionCode()
+        else:
+            code = pccm.FunctionCode(f"""
+            ++counts_[2];
+            {cond("pointer_ += params_.advance_row;")}
+            // kPartShape: [Tile, Cluster, Group, Row, Col]
+            thread_start_row_ += {self.part_shape[3]};
 
-        if (counts_[2] == {self.part_dilation[3]}) {{
+            if (counts_[2] == {self.part_dilation[3]}) {{
 
-          counts_[2] = 0;
-          ++counts_[1];
-          {cond("pointer_ += params_.advance_group;")}
-
-          thread_start_row_ +=
-              ({self.part_shape[2]} - 1) * {self.part_shape[3]} * {self.part_dilation[3]};
-
-          if (counts_[1] == {self.part_dilation[2]}) {{
-
-            counts_[1] = 0;
-            ++counts_[0];
-            {cond("pointer_ += params_.advance_cluster;")}
+            counts_[2] = 0;
+            ++counts_[1];
+            {cond("pointer_ += params_.advance_group;")}
 
             thread_start_row_ +=
-                {self.part_dilation[2]} * {self.part_shape[2]} * {self.part_shape[3]} * {self.part_dilation[3]};
+                ({self.part_shape[2]} - 1) * {self.part_shape[3]} * {self.part_dilation[3]};
 
-            if (counts_[0] == {self.part_dilation[1]}) {{
-              counts_[0] = 0;
-              {cond("pointer_ += params_.advance_tile;")}
+            if (counts_[1] == {self.part_dilation[2]}) {{
+
+                counts_[1] = 0;
+                ++counts_[0];
+                {cond("pointer_ += params_.advance_cluster;")}
+
+                thread_start_row_ +=
+                    {self.part_dilation[2]} * {self.part_shape[2]} * {self.part_shape[3]} * {self.part_dilation[3]};
+
+                if (counts_[0] == {self.part_dilation[1]}) {{
+                counts_[0] = 0;
+                {cond("pointer_ += params_.advance_tile;")}
+                }}
             }}
-          }}
-        }}
-        """)
+            }}
+            """)
+
         if self.shuffle_in_stride:
             # update indices
             with code.range_("cluster", str(self.iterations[1]),

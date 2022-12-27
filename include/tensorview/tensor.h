@@ -111,6 +111,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
 #include <cuda_bf16.h>
 #endif
+#if (CUDA_VERSION >= 11080 && defined(TV_CUDA))
+#include <cuda_fp8.h>
+#endif
+
 #include <random>
 
 namespace tv {
@@ -317,6 +321,12 @@ template <typename T> size_t sizeof_dtype(T dtype) {
     return 2;
   case tf32:
     return sizeof(float);
+#endif
+#if (CUDA_VERSION >= 11080 && defined(TV_CUDA))
+  case float_e4m3:
+    return 1;
+  case float_e5m2:
+    return 1;
 #endif
   case custom16:
     return 2;
@@ -1680,6 +1690,15 @@ template <typename Os> Os &operator<<(Os &os, const Tensor &tensor) {
         });
 #elif defined(TV_CUDA) && CUDA_VERSION >= 11000
     if_constexpr<std::is_same<T, __half>::value || std::is_same<T, __nv_bfloat16>::value>([&](auto _){
+      auto tensorf = tensor.astype(float32);
+      auto tview = tensorf.tview<const float, -1, DefaultPtrTraits, int64_t>();
+      os << tview.repr(ss);
+    }, [&](auto _){
+      auto tview = tensor.tview<const T, -1, DefaultPtrTraits, int64_t>();
+      os << tview.repr(ss);
+    });
+#elif defined(TV_CUDA) && CUDA_VERSION >= 11080
+    if_constexpr<std::is_same<T, __half>::value || std::is_same<T, __nv_bfloat16>::value || std::is_same<T, __nv_fp8_e5m2>::value || std::is_same<T, __nv_fp8_e4m3>::value>([&](auto _){
       auto tensorf = tensor.astype(float32);
       auto tview = tensorf.tview<const float, -1, DefaultPtrTraits, int64_t>();
       os << tview.repr(ss);

@@ -312,7 +312,12 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
                             &tv::gemm::ConvAlgoDesp::mask_sparse);
         m_cls.def_readwrite("increment_k_first",
                             &tv::gemm::ConvAlgoDesp::increment_k_first);
-
+        m_cls.def_readwrite("increment_k_first",
+                            &tv::gemm::ConvAlgoDesp::increment_k_first);
+        m_cls.def_readwrite("is_int8_inference",
+                            &tv::gemm::ConvAlgoDesp::is_int8_inference);
+        m_cls.def_readwrite("dynamic_mask",
+                            &tv::gemm::ConvAlgoDesp::dynamic_mask);
         """)
         return code
 
@@ -330,6 +335,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("input", &tv::gemm::ConvParams::input);
         m_cls.def_readwrite("weight", &tv::gemm::ConvParams::weight);
         m_cls.def_readwrite("output", &tv::gemm::ConvParams::output);
+        m_cls.def_readwrite("output_add", &tv::gemm::ConvParams::output_add);
+        m_cls.def_readwrite("bias", &tv::gemm::ConvParams::bias);
+        m_cls.def_readwrite("scale", &tv::gemm::ConvParams::scale);
+
         m_cls.def_readwrite("split_k_slices",
                             &tv::gemm::ConvParams::split_k_slices);
         m_cls.def_readwrite("padding", &tv::gemm::ConvParams::padding);
@@ -353,7 +362,6 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         m_cls.def_readwrite("mask_output", &tv::gemm::ConvParams::mask_output);
         m_cls.def_readwrite("stream", &tv::gemm::ConvParams::stream);
         m_cls.def_readwrite("nvrtc_params", &tv::gemm::ConvParams::nvrtc_params);
-        m_cls.def_readwrite("bias", &tv::gemm::ConvParams::bias);
         m_cls.def_readwrite("mask_int_count", &tv::gemm::ConvParams::mask_int_count);
 
         """)
