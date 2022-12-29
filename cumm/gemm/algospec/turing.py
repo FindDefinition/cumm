@@ -350,7 +350,8 @@ class OutputTuring(bases.Output):
             algo: GemmAlgo = GemmAlgo.Simt,
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
             access_per_vector: int = 1,
-            int8_inference: bool = False):
+            int8_inference: bool = False,
+            with_source: bool = False):
         self._mma_spec = mma_spec
         output_op_count = constants.OPTIM_ACCESS_BITS // dtype_c.bitsize()
         # TODO support more mixed tile shape for int8
@@ -452,7 +453,8 @@ class OutputTuring(bases.Output):
             self.part_dilation,
             output_op_count,
             shuffle_in_stride=shuffle,
-            access_per_vector=access_per_vector)
+            access_per_vector=access_per_vector,
+            with_source=with_source)
         self._const_out_iter = out_iters.OutIterator(
             dtype_c,
             self.out_tmap,
@@ -463,14 +465,14 @@ class OutputTuring(bases.Output):
             read_only=True,
             shuffle_in_stride=shuffle,
             access_per_vector=access_per_vector)
-        rate = min(dtype_comp.bitsize() // dtype_c.bitsize(), 1)
+        rate = min(max(dtype_comp.bitsize() // dtype_c.bitsize(), 1), output_op_count)
         self.int8_scalebias_iterator = out_iters.OutIterator(
             dtype_comp,
             self.out_tmap,
             bias_out_iter_params,
             self.part_shape,
             self.part_dilation,
-            output_op_count // rate,
+            output_op_count,
             read_only=True,
             shuffle_in_stride=False,
             access_per_vector=rate)

@@ -212,6 +212,50 @@ struct NumericConverter<int8_t, float, FloatRoundStyle::round_toward_zero> {
   }
 };
 
+template <>
+struct NumericConverter<int8_t, half_t, FloatRoundStyle::round_to_nearest> {
+
+  using result_type = int8_t;
+  using source_type = half_t;
+  static FloatRoundStyle const round_style = FloatRoundStyle::round_to_nearest;
+
+  TV_HOST_DEVICE_INLINE
+  static result_type convert(source_type const & s) {
+    float ss = float(s);
+    int32_t intermediate;
+    asm volatile("cvt.rni.sat.s8.f32 %0, %1;" : "=r"(intermediate) : "f"(ss));
+
+    return static_cast<result_type>(intermediate);
+  }
+
+  TV_HOST_DEVICE_INLINE
+  result_type operator()(source_type const &s) {
+    return convert(s);
+  }
+};
+
+template <>
+struct NumericConverter<int8_t, half_t, FloatRoundStyle::round_toward_zero> {
+
+  using result_type = int8_t;
+  using source_type = half_t;
+  static FloatRoundStyle const round_style =  FloatRoundStyle::round_toward_zero;
+
+  TV_HOST_DEVICE_INLINE
+  static result_type convert(source_type const & s) {
+    float ss = float(s);
+    int32_t intermediate;
+    asm volatile("cvt.rzi.sat.s8.f32 %0, %1;" : "=r"(intermediate) : "f"(ss));
+
+    return static_cast<result_type>(intermediate);
+  }
+
+  TV_HOST_DEVICE_INLINE
+  result_type operator()(source_type const &s) {
+    return convert(s);
+  }
+};
+
 #elif !defined(__CUDACC_RTC__)
 
 template <>

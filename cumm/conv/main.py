@@ -227,7 +227,8 @@ def gen_gemm_kernels(params: ConvAlgoParams,
                              access_per_vector=params.access_per_vector,
                              nvrtc_mode=nvrtc_mode,
                              int8_inference=params.int8_inference,
-                             dynamic_mask=params.dynamic_mask)
+                             dynamic_mask=params.dynamic_mask,
+                             nvrtc_compile=params.is_nvrtc)
 
 
 SHUFFLE_SIMT_PARAMS = []
@@ -463,16 +464,22 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
         for kers, decl in GemmMainUnitTest.matmul_select_split(self.all_kernels, code_main):
             code = decl.code
             for ker in kers:
-                code.add_param_class("cp" + ker.get_algo_name(), ker.gemm_params,
-                                    "ConvParams" + ker.get_algo_name())
-                code.add_param_class(ker.get_algo_name(), ker,
-                                    "Conv" + ker.get_algo_name())
+                if not ker.nvrtc_compile:
+                    code.add_param_class("cp" + ker.get_algo_name(), ker.gemm_params,
+                                        "ConvParams" + ker.get_algo_name())
+                    code.add_param_class(ker.get_algo_name(), ker,
+                                        "Conv" + ker.get_algo_name())
             nvrtc_conv_template(code)
             self.add_func_decl(decl)
             code.arg("params", "tv::gemm::ConvParams", pyanno="cumm.tensorview.gemm.ConvParams")
 
             for kers in self.conv_select_helper(kers, code):
                 ker = kers[0]
+                if ker.nvrtc_compile:
+                    code.raw(f"""
+                    TV_THROW_RT_ERR("you must add cumodule for nvrtc kernel.");
+                    """)
+                    continue
                 p = ker.problem
                 param_type_str = "ConvParams" + ker.get_algo_name()
                 indices = conv_iwo_012_to_abc(ker.problem.op_type)
@@ -568,7 +575,13 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                         tv::gemm::ConvMode::kCrossCorrelation, split_k_slices, groups);
                     """)
                 code.raw(f"""
+                if (!algo_desp.is_int8_inference){{
+                    TV_ASSERT_INVALID_ARG(output_add.empty(), "only int8 inference support output_add not empty ")
+                }}
                 auto source_ptr = algo_desp.is_int8_inference ? c_ten.data_ptr<const {ker.dtype_c}>() : (bias.empty() ? c_ten.data_ptr<const {ker.dtype_c}>() : bias.data_ptr<const {ker.dtype_c}>());
+                if (!output_add.empty()){{
+                    source_ptr = output_add.data_ptr<const {ker.dtype_c}>();
+                }}
                 """)
                 params_str = [
                     "problem", 
@@ -753,7 +766,7 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                 """)
                 if ker.int8_inference:
                     code.raw(f"""
-                    TV_ASSERT_RT_ERR(!scale.empty(), "scale must not be empty if int8_inference enable");
+                    TV_ASSERT_RT_ERR(!bias.empty(), "bias must not be empty if int8_inference enable");
                     TV_ASSERT_RT_ERR(!scale.empty(), "scale must not be empty if int8_inference enable");
                     """)
 

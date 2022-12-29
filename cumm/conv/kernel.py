@@ -128,6 +128,7 @@ class ConvParams(pccm.ParameterizedClass):
                  iterb_params: ConvIterParams,
                  out_params: out_iters.OutIteratorParams,
                  out_params_scalebias: out_iters.OutIteratorParams,
+                 out_iter: bases.GemmOutputIterator,
                  have_workspace: bool = False,
                  mask_sparse: bool = False,
                  increment_k_first: bool = True,
@@ -194,7 +195,7 @@ class ConvParams(pccm.ParameterizedClass):
 
         if self.mask_sparse and self.op_type == ConvOpType.kBackwardWeight:
             self.add_member("mask_width", "int")
-        # if int8_inference, alpha is input scale, beta is output_add scale.
+        # if int8_inference, alpha is output scale, beta is output_add scale.
         self.add_member("alpha, beta, act_alpha, act_beta", f"{dtype_comp}")
         self.add_member("act_type", f"tv::gemm::Activation")
         
@@ -205,7 +206,9 @@ class ConvParams(pccm.ParameterizedClass):
         self.add_member("itera_params_", f"IterAParams")
         self.add_member("iterb_params_", f"IterBParams")
         self.add_member("out_params_", f"OutIterParams")
-        self.add_member("out_params_source_", f"OutIterParams")
+        self.out_iter = out_iter
+        if not out_iter.support_both_source_and_target():
+            self.add_member("out_params_source_", f"OutIterParams")
         if int8_inference:
             self.add_member("out_params_scalebias_", f"OutIterParamsScaleBias")
 
@@ -239,7 +242,7 @@ class ConvParams(pccm.ParameterizedClass):
                              self.dtype_b, self.dtype_c, self.dtype_comp,
                              self.layout_a, self.layout_b, self.layout_c,
                              self.itera_params, self.iterb_params,
-                             self.out_params, self.out_params, self.have_workspace)
+                             self.out_params, self.out_params, self.out_iter, self.have_workspace)
         mnk = problem.implicit_gemm_mnk_python(self.op_type)
         new_obj.problem_size_ = problem
         m = mnk[0]
@@ -441,15 +444,17 @@ class ConvParams(pccm.ParameterizedClass):
                 iterb_params_.set_inc_reset_for_inc_k_first(gemm_k_iterations);
                 """)
             code.raw("out_params_ = OutIterParams(n, mask_argsort_ptr);")
-            code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n, d_is_bias ? nullptr : mask_argsort_ptr);")
+            if not self.out_iter.support_both_source_and_target():
+                code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n, d_is_bias ? nullptr : mask_argsort_ptr);")
             if self.int8_inference:
                 code.raw("out_params_scalebias_ = OutIterParamsScaleBias();")
         else:
             if self.op_type != ConvOpType.kBackwardWeight:
                 code.raw("out_params_ = OutIterParams(n);")
-                code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n);")
                 if self.int8_inference:
                     code.raw("out_params_scalebias_ = OutIterParamsScaleBias();")
+                if not self.out_iter.support_both_source_and_target():
+                    code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n);")
             else:
                 code.raw("out_params_ = OutIterParams(n);")
                 code.raw("out_params_source_ = OutIterParams(d_is_bias ? 0 : n);")
@@ -483,7 +488,8 @@ class ConvKernel(GemmComponentBase):
                  nvrtc_mode: NVRTCMode = NVRTCMode.Disabled,
                  split_d_params: bool = True,
                  dynamic_mask: bool = False,
-                 int8_inference: bool = False):
+                 int8_inference: bool = False,
+                 nvrtc_compile: bool = False):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
@@ -498,13 +504,14 @@ class ConvKernel(GemmComponentBase):
         Args:
             dynamic_mask: enable dynamic mask, slightly slower kernel and support larger spconv kernel size.
             int8_inference: enable int8 inference kernel. if not enabled, only standard int8 conv kernel generated.
+            nvrtc_compile: no effect on kernel. if enable, library (main) won't compile kernel in library, only desp keeped.
         """
         super().__init__()
         self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
                             layout.ColumnMajor, GemmBasicKernel, GemmBasic)
         if nvrtc_mode == NVRTCMode.Disabled:
             self.add_dependency(GemmKernelFlags)
-
+        self.nvrtc_compile = nvrtc_compile
         self.need_source = need_source
         self.nvrtc_mode = nvrtc_mode
         self.is_nvrtc = nvrtc_mode != NVRTCMode.Disabled
@@ -612,7 +619,9 @@ class ConvKernel(GemmComponentBase):
             self.input_spec.layout_a, self.input_spec.layout_b, self.layout_c,
             inp_iter_a_param, inp_iter_b_param,
             self.output_spec.out_iter.get_params(), 
-            self.output_spec.int8_scalebias_out_iter.get_params(), have_workspace,
+            self.output_spec.int8_scalebias_out_iter.get_params(), 
+            self.output_spec.out_iter,
+            have_workspace,
             mask_sparse, increment_k_first,
             split_d_params, int8_inference=int8_inference)
         self.add_param_class("conv_params", self.gemm_params, "ConvParams")
@@ -969,11 +978,19 @@ class ConvKernel(GemmComponentBase):
                                                 tile_offset_n * {self.tile_shape[1]}}};
                 tv::array<int, 2> block_extent_C{{params.m, params.n}};
                 """)
-            code.raw(f"""
-            OutIter out_iter_C(params.out_params_, params.ptr_C, block_extent_C,
-                                    block_offset_C,
-                                    thread_idx);
-            """)
+            out_iter_both_io = self.output_spec.out_iter.support_both_source_and_target()
+            if out_iter_both_io:
+                code.raw(f"""
+                OutIter out_iter_C(params.out_params_, params.ptr_C, params.ptr_D, block_extent_C,
+                                        block_offset_C,
+                                        thread_idx);
+                """)
+            else:
+                code.raw(f"""
+                OutIter out_iter_C(params.out_params_, params.ptr_C, block_extent_C,
+                                        block_offset_C,
+                                        thread_idx);
+                """)
             if self.int8_inference:
                 code.raw(f"""
                 ConstScaleOutIter out_iter_bias(params.out_params_scalebias_, params.bias_pointer, block_extent_C,
@@ -995,7 +1012,7 @@ class ConvKernel(GemmComponentBase):
                     __threadfence();
                 }}
                 """)
-            if self.need_source:
+            if self.need_source and not out_iter_both_io:
                 code.raw(f"""
                 ConstOutIter out_iter_source(params.out_params_source_, params.ptr_D, block_extent_C,
                                     block_offset_C,
@@ -1012,27 +1029,42 @@ class ConvKernel(GemmComponentBase):
                     )
                 with code.else_():
                     if self.need_source:
-                        code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
-                        )
+                        if not out_iter_both_io:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C);"
+                            )
+                        else:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
+                            )
                     else:
                         code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C);")
+                            f"out.run_no_source(output_op, accumulators, out_iter_C);")
             else:
                 if self.int8_inference:
                     if self.need_source:
-                        code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C, out_iter_source, out_iter_bias, out_iter_scale);"
-                        )
+                        if not out_iter_both_io:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C, out_iter_source, out_iter_bias, out_iter_scale);"
+                            )
+                        else:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C, out_iter_bias, out_iter_scale);"
+                            )
                     else:
-                        code.raw(f"out.run(output_op, accumulators, out_iter_C, out_iter_bias, out_iter_scale);")
+                        code.raw(f"out.run_no_source(output_op, accumulators, out_iter_C, out_iter_bias, out_iter_scale);")
                 else:
                     if self.need_source:
-                        code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
-                        )
+                        if not out_iter_both_io:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
+                            )
+                        else:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C);"
+                            )
                     else:
-                        code.raw(f"out.run(output_op, accumulators, out_iter_C);")
+                        code.raw(f"out.run_no_source(output_op, accumulators, out_iter_C);")
             if self.splitk_serial:
                 code.raw(f"""
                 if (params.grid_dims.z > 1){{
@@ -1087,7 +1119,8 @@ class ConvKernel(GemmComponentBase):
         ]
         if self.int8_inference:
             args.extend([ 
-                f"{p}.bias_pointer, {p}.scale_pointer"
+                f"reinterpret_cast<const {self.dtype_comp}*>({p}.bias_pointer)",
+                f"reinterpret_cast<const {self.dtype_comp}*>({p}.scale_pointer)"
             ])
         if self.mask_sparse:
             args.extend([

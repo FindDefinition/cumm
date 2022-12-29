@@ -439,6 +439,10 @@ class OutIteratorParams(pccm.ParameterizedClass):
 
 
 class OutIterator(GemmOutputIterator):
+    """
+    Args:
+        with_source: add source pointer to save registers
+    """
     def __init__(self,
                  dtype: dtypes.DType,
                  tmap: thread_map.Out5DLinear,
@@ -448,10 +452,10 @@ class OutIterator(GemmOutputIterator):
                  access_length: int,
                  read_only: bool = False,
                  shuffle_in_stride: bool = False,
-                 access_per_vector: int = 1):
+                 access_per_vector: int = 1,
+                 with_source: bool = False):
         self.iterations = tmap.iterations  # type: MetaArray[int]
         self.delta = tmap.delta  # type: MetaArray[int]
-
         super().__init__(dtype,
                          self.iterations.prod() * access_length, access_length,
                          dtype.itemsize() * access_length, access_per_vector)
@@ -466,20 +470,23 @@ class OutIterator(GemmOutputIterator):
         self.part_dilation = part_dilation
         self.tmap = tmap
         # if is_bias, all params in OutIteratorParams is zero.
-
+        if with_source:
+            assert not self.params.is_bias, "bias iter isn't related to source"
         self.is_bias = self.params.is_bias
         if read_only:
             self.add_member("pointer_", self.const_pointer)
         else:
             self.add_member("pointer_", self.pointer)
-
+        if with_source:
+            self.add_member("source_pointer_", self.const_pointer)
+        self.with_source = with_source
         self.add_member("params_", "Params const&")
         self.add_member(
             "column_masks_",
             "bool",
             array=f"[{self.iterations[4]}][{self.access_per_vector}]")
-        self.add_member("extent_row_, thread_start_row_", self.index_t)
         if not self.is_bias:
+            self.add_member("extent_row_, thread_start_row_", str(self.index_t))
             self.add_member("counts_", "int", array="[3]")
         if self.shuffle_in_stride:
             self.add_member("indices_",
@@ -498,11 +505,13 @@ class OutIterator(GemmOutputIterator):
     def get_params(self):
         return self.params
 
+    def support_both_source_and_target(self) -> bool:
+        return self.with_source 
+        
     @pccm.cuda.constructor(device=True, forceinline=True)
     def ctor(self):
         code = pccm.FunctionCode(f"""
         // pointer_bkp_ = ptr;
-        extent_row_ = extent[0];
         """)
         if not self.is_bias:
             code.raw(f"""
@@ -512,7 +521,6 @@ class OutIterator(GemmOutputIterator):
             """)
         code.raw(f"""
         auto thread_offset = ThreadMap::initial_offset(thread_idx) + offset_2d;
-        thread_start_row_ = thread_offset[0];
         TV_PRAGMA_UNROLL
         for (int c = 0; c < {self.iterations[4]}; ++c) {{
             for (int v = 0; v < {self.access_per_vector}; ++v){{
@@ -520,8 +528,12 @@ class OutIterator(GemmOutputIterator):
             }}
         }}
         // tv::printf2_block_once("Outthread_offset ", threadIdx.x, thread_offset[0], thread_offset[1], (thread_offset[0]) * stride + thread_offset[1]);
-
         """)
+        if not self.is_bias:
+            code.raw(f"""
+            extent_row_ = extent[0];
+            thread_start_row_ = thread_offset[0];
+            """)
         if self.shuffle_in_stride:
             assert not self.is_bias, "shuffle in stride don't support bias."
             with code.range_("cluster", str(self.iterations[1]),
@@ -541,6 +553,10 @@ class OutIterator(GemmOutputIterator):
             code.raw(f"""
             pointer_ = ptr + thread_offset[1];
             """)
+            if self.with_source:
+                code.raw(f"""
+                source_pointer_ = source_ptr + thread_offset[1];
+                """)
         else:
             if self.is_bias:
                 code.raw(f"""
@@ -550,10 +566,18 @@ class OutIterator(GemmOutputIterator):
                 code.raw(f"""
                 pointer_ = ptr + (thread_offset[0]) * params.stride + thread_offset[1];
                 """)
+                if self.with_source:
+                    code.raw(f"""
+                    source_pointer_ = source_ptr + (thread_offset[0]) * params.stride + thread_offset[1];
+                    """)
 
         code.arg("params", "Params const&")
         code.arg("ptr",
                  f"{self.const_pointer if self.read_only else self.pointer}")
+        if self.with_source:
+            code.arg("source_ptr",
+                    f"{self.const_pointer}")
+
         code.arg("extent, offset_2d", "tv::array<int, 2>")
         code.arg("thread_idx", "int")
         code.ctor_init("params_", "params")
@@ -587,11 +611,17 @@ class OutIterator(GemmOutputIterator):
         code = pccm.code()
         const_frag = "const" if store else ""
         const_mem = "" if store else "const"
-
         code.arg("frag", f"{self.fragment_t} {const_frag} &").arg(
             "offset", str(self.index_t))
+        if self.with_source and not store:
+            code.raw(f"""
+            auto cur_pointer = source_pointer_;
+            """)
+        else:
+            code.raw(f"""
+            auto cur_pointer = pointer_;
+            """)
         code.raw(f"""
-        auto cur_pointer = pointer_;
         {self.access_t} {const_frag} *frag_ptr = reinterpret_cast<{self.access_t} {const_frag} *>(&frag);
         """)
         with code.range_("cluster", str(self.iterations[1]),
@@ -794,12 +824,15 @@ class OutIterator(GemmOutputIterator):
                                forceinline=True)
     def operator_pp(self):
         cond = codeops.Condition(not self.shuffle_in_stride)
+        cond_bothio = codeops.Condition(not self.shuffle_in_stride and self.with_source)
+
         if self.is_bias:
             code = pccm.FunctionCode()
         else:
             code = pccm.FunctionCode(f"""
             ++counts_[2];
             {cond("pointer_ += params_.advance_row;")}
+            {cond_bothio("source_pointer_ += params_.advance_row;")}
             // kPartShape: [Tile, Cluster, Group, Row, Col]
             thread_start_row_ += {self.part_shape[3]};
 
@@ -808,7 +841,7 @@ class OutIterator(GemmOutputIterator):
             counts_[2] = 0;
             ++counts_[1];
             {cond("pointer_ += params_.advance_group;")}
-
+            {cond_bothio("source_pointer_ += params_.advance_group;")}
             thread_start_row_ +=
                 ({self.part_shape[2]} - 1) * {self.part_shape[3]} * {self.part_dilation[3]};
 
@@ -817,13 +850,14 @@ class OutIterator(GemmOutputIterator):
                 counts_[1] = 0;
                 ++counts_[0];
                 {cond("pointer_ += params_.advance_cluster;")}
-
+                {cond_bothio("source_pointer_ += params_.advance_cluster;")}
                 thread_start_row_ +=
                     {self.part_dilation[2]} * {self.part_shape[2]} * {self.part_shape[3]} * {self.part_dilation[3]};
 
                 if (counts_[0] == {self.part_dilation[1]}) {{
                 counts_[0] = 0;
                 {cond("pointer_ += params_.advance_tile;")}
+                {cond_bothio("source_pointer_ += params_.advance_tile;")}
                 }}
             }}
             }}

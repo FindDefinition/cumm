@@ -93,6 +93,7 @@ class Output(pccm.ParameterizedClass):
         self.out_num_tile = self.spec.frag_per_iter if self.spec.frag_per_iter > 1 else partk
         self.out_tile_size = smem_storage.smem_size // dtype_acc.itemsize(
         ) // self.out_num_tile
+        self.iter_support_both_io = spec.out_iter.support_both_source_and_target()
         # print(smem_storage.smem_size, self.out_tile_size, self.out_num_tile)
         # raise NotImplementedError
 
@@ -132,17 +133,20 @@ class Output(pccm.ParameterizedClass):
         code.arg("output_op", f"OutputOp const&")
         code.arg("accumulators", f"{self.accumulator_fragment} const&")
         code.arg("out_iter", f"OutIter&")
-        if have_source:
+        if have_source and not self.iter_support_both_io:
             code.arg("source_iter", f"ConstOutIter&")
         if self.int8_inference:
             code.arg("bias_iter", f"ConstScaleOutIter&")
             code.arg("scale_iter", f"ConstScaleOutIter&")
-
+        assert not (self_reduce and have_source)
         # TODO why frag_per_iter > 1?
         frag_per_iter = self.spec.frag_per_iter
         if have_source is not None:
             frag_per_iter = 1
-
+        if have_source and self.iter_support_both_io:
+            code.raw(f"""
+            OutIter& source_iter = out_iter;
+            """)
         if CUTLASS_MODE:
             platform_math = "cutlass"
         else:
@@ -151,11 +155,11 @@ class Output(pccm.ParameterizedClass):
             with code.if_("!output_op.is_source_needed()"):
                 if self.int8_inference:
                     code.raw(f"""
-                    return run(output_op, accumulators, out_iter, bias_iter, scale_iter);
+                    return run_no_source(output_op, accumulators, out_iter, bias_iter, scale_iter);
                     """)
                 else:
                     code.raw(f"""
-                    return run(output_op, accumulators, out_iter);
+                    return run_no_source(output_op, accumulators, out_iter);
                     """)
             code.raw(f"""
             {self.spec.out_iter.fragment_t} source_frag;
@@ -178,20 +182,6 @@ class Output(pccm.ParameterizedClass):
         with code.for_(
                 f"int iter = 0; iter < {self.spec.num_out_iters}; iter += {frag_per_iter}",
                 "TV_PRAGMA_UNROLL"):
-            if have_source:
-                code.raw(f"""
-                source_iter.load(source_frag);
-                ++source_iter;
-                """)
-            elif self_reduce:
-                code.raw(f"""
-                out_iter.load(source_frag);
-                """)
-            if self.int8_inference:
-                code.raw(f"""
-                bias_iter.load(int8_bias_frag);
-                scale_iter.load(int8_scale_frag);
-                """)
 
             code.raw(f"__syncthreads();")
             with code.range_("p", frag_per_iter, "TV_PRAGMA_UNROLL"):
@@ -216,6 +206,23 @@ class Output(pccm.ParameterizedClass):
             __syncthreads();
             """)
             with code.range_("p", frag_per_iter, "TV_PRAGMA_UNROLL"):
+                if have_source:
+                    code.raw(f"""
+                    source_iter.load(source_frag);
+                    """)
+                    if not self.iter_support_both_io:
+                        code.raw(f"""
+                        ++source_iter;
+                        """)
+                elif self_reduce:
+                    code.raw(f"""
+                    out_iter.load(source_frag);
+                    """)
+                if self.int8_inference:
+                    code.raw(f"""
+                    bias_iter.load(int8_bias_frag);
+                    scale_iter.load(int8_scale_frag);
+                    """)
                 code.raw(f"""
                 {self.spec.smem_loader.fragment_t} smem_frags[{self.partk}];
                 smem_loader.load(smem_frags[0]);
@@ -281,7 +288,7 @@ class Output(pccm.ParameterizedClass):
     def run_source(self):
         return self.call_template(True, False)
 
-    @pccm.cuda.member_function(device=True, forceinline=True, name="run")
+    @pccm.cuda.member_function(device=True, forceinline=True, name="run_no_source")
     def run_no_source(self):
         return self.call_template(False, False)
 

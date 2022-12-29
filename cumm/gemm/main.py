@@ -303,7 +303,8 @@ def gen_gemm_kernels(params: GemmAlgoParams,
                              splitk_parallel=params.splitk_parallel,
                              shuffle_stride=params.shuffle_stride,
                              access_per_vector=params.access_per_vector,
-                             nvrtc_mode=nvrtc_mode)
+                             nvrtc_mode=nvrtc_mode,
+                             nvrtc_compile=params.is_nvrtc)
 
 
 class SpconvKernel(pccm.Class):
@@ -1184,16 +1185,22 @@ class GemmMainUnitTest(pccm.ParameterizedClass):
         for kers, decl in self.matmul_select_split(self.all_kernels, code_main):
             code = decl.code
             for ker in kers:
-                code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params,
-                                    "GemmParams" + ker.get_algo_name())
-                code.add_param_class(ker.get_algo_name(), ker,
-                                    "Gemm" + ker.get_algo_name())
+                if not ker.nvrtc_compile:
+                    code.add_param_class("gp" + ker.get_algo_name(), ker.gemm_params,
+                                        "GemmParams" + ker.get_algo_name())
+                    code.add_param_class(ker.get_algo_name(), ker,
+                                        "Gemm" + ker.get_algo_name())
             self.add_func_decl(decl)
             code.arg("params", "tv::gemm::GemmParams", pyanno="cumm.tensorview.gemm.GemmParams")
 
             nvrtc_gemm_template(code)
             for kers in self.matmul_select_helper_stage2(kers, code):
                 ker = kers[0]
+                if ker.nvrtc_compile:
+                    code.raw(f"""
+                    TV_THROW_RT_ERR("you must add cumodule for nvrtc kernel.");
+                    """)
+                    continue
                 param_type_str = "GemmParams" + ker.get_algo_name()
                 code.raw(f"""
                 found = true;

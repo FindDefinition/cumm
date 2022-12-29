@@ -212,6 +212,9 @@ class GemmOutputIterator(GemmIterator):
     def get_params(self) -> pccm.ParameterizedClass:
         raise NotImplementedError
 
+    def support_both_source_and_target(self) -> bool:
+        raise NotImplementedError
+
     def python_ctor(self, params, ptr: ArrayPtr, extent: MetaArray[int],
                     offset_2d: MetaArray[int],
                     thread_idx: int) -> "GemmOutputIterator":

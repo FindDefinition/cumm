@@ -336,7 +336,7 @@ class OutputSimt(bases.Output):
             shuffle_stride: ShuffleStrideType = ShuffleStrideType.NoShuffle,
             access_per_vector: int = 1,
             int8_inference: bool = False,
-            scale_dtype: dtypes.DType = dtypes.float32):
+            with_source: bool = False):
         assert algo == GemmAlgo.Simt or algo == GemmAlgo.SimtDP4A
         self._mma_spec = mma_spec
         self.warp_count_shape = tile_shape // warp_tile_shape
@@ -391,7 +391,8 @@ class OutputSimt(bases.Output):
             self.part_dilation,
             output_op_count,
             shuffle_in_stride=shuffle,
-            access_per_vector=access_per_vector)
+            access_per_vector=access_per_vector,
+            with_source=with_source)
         self._const_out_iter = out_iters.OutIterator(
             dtype_c,
             self.out_tmap,
@@ -402,14 +403,14 @@ class OutputSimt(bases.Output):
             read_only=True,
             shuffle_in_stride=shuffle,
             access_per_vector=access_per_vector)
-        rate = min(dtype_comp.bitsize() // dtype_c.bitsize(), 1)
+        rate = min(max(dtype_comp.bitsize() // dtype_c.bitsize(), 1), output_op_count)
         self.int8_scalebias_iterator = out_iters.OutIterator(
             dtype_comp,
             self.out_tmap,
             bias_out_iter_params,
             self.part_shape,
             self.part_dilation,
-            output_op_count // rate,
+            output_op_count,
             read_only=True,
             shuffle_in_stride=False,
             access_per_vector=rate)

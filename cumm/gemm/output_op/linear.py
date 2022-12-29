@@ -318,16 +318,15 @@ class Int8Inference(bases.GemmOutputOp):
             code.raw(f"""
             intermediate = mul_add_accumulator(scale, converted_accumulator, bias); // intermediate = scale * converted_accumulator + bias_scaled
             """)
+        if need_source:
+            code.raw(f"""
+            intermediate = mul_add_accumulator(beta, converted_source, intermediate); // res = converted_source * beta + intermediate
+            """)
         code.raw(f"""
         UnaryOp op;
         // activation
         intermediate = op(intermediate, act_type, act_alpha, act_beta);
         """)
-        if need_source:
-            code.raw(f"""
-            // add output_add after activation
-            intermediate = mul_add_accumulator(beta, converted_source, intermediate); // res = converted_source * beta + intermediate
-            """)
         with code.macro_if_("""defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 720) && \\
                         ((__CUDACC_VER_MAJOR__ > 10) ||                     \\
                         ((__CUDACC_VER_MAJOR__ >= 10) && (__CUDACC_VER_MINOR__ >= 2)))"""):

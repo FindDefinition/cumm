@@ -33,6 +33,8 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     auto& input = params.input;
     auto& weight = params.weight;
     auto& output = params.output;
+    auto& output_add = params.output_add;
+
     auto& bias = params.bias;
     auto& scale = params.scale;
     auto& indices = params.indices;
@@ -73,7 +75,16 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     kernel_params.ptr_A = a_ten.const_raw_data();
     kernel_params.ptr_B = b_ten.const_raw_data();
     kernel_params.ptr_C = c_ten.raw_data();
-    kernel_params.ptr_D = algo_desp.is_int8_inference ? c_ten.raw_data() : (bias.empty() ? c_ten.raw_data() : bias.raw_data());
+    if (!algo_desp.is_int8_inference){{
+        TV_ASSERT_INVALID_ARG(output_add.empty(), "only int8 inference support output_add not empty ")
+    }}
+    if (output_add.empty()){{
+        kernel_params.ptr_D = algo_desp.is_int8_inference ? c_ten.raw_data() : (bias.empty() ? c_ten.raw_data() : bias.raw_data());
+    }}else{{
+        TV_ASSERT_RT_ERR(output_add.dtype() == output.dtype() && output_add.shape() == output.shape(),
+            "output and output_add must have same dtype and shape");
+        kernel_params.ptr_D = output_add.raw_data();
+    }}
     kernel_params.bias_pointer = bias.empty() ? nullptr : bias.raw_data();
     kernel_params.scale_pointer = scale.empty() ? nullptr : scale.raw_data();
     kernel_params.alpha = params.alpha;

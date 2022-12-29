@@ -264,7 +264,8 @@ class AlgoSpecificTuring(object):
         shuffle_stride = ShuffleStrideType.NoShuffle
         if mask_sparse and not problem.op_type == ConvOpType.kBackwardWeight:
             shuffle_stride = ShuffleStrideType.ShuffleAC
-
+        enable_both_io = int8_inference 
+        # enable_both_io = False
         self.output_spec = OutputTuring(self.mma_spec,
                                         tile_shape,
                                         warp_tile_shape,
@@ -277,4 +278,5 @@ class AlgoSpecificTuring(object):
                                         algo,
                                         shuffle_stride=shuffle_stride,
                                         access_per_vector=access_per_vector,
-                                        int8_inference=int8_inference)
+                                        int8_inference=int8_inference,
+                                        with_source=enable_both_io)

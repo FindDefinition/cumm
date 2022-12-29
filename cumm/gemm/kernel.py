@@ -397,12 +397,15 @@ class GemmKernel(GemmComponentBase):
             access_per_vector: int = 1,
             nvrtc_mode: NVRTCMode = NVRTCMode.Disabled,
             async_kernel: bool = False,
-            split_d_params: bool = True):
+            split_d_params: bool = True,
+            nvrtc_compile: bool = False):
         """
         splitK and sliceK:
         https://github.com/NVIDIA/cutlass/issues/211#issuecomment-801992218
         split K: multiple block in k axis
         slice K: multiple warp in k axis
+
+        nvrtc_compile: only affact behavior in library compile.
         """
         super().__init__()
         self.add_dependency(TensorViewNVRTCKernel, layout.RowMajor,
@@ -415,6 +418,7 @@ class GemmKernel(GemmComponentBase):
         self.warp_tile_shape = warp_tile_shape
         self.num_stage = num_stage
         self.tensorop = tensorop
+        self.nvrtc_compile = nvrtc_compile
         self.splitk_serial = splitk_serial
         self.splitk_parallel = splitk_parallel
         self.need_source = need_source
@@ -839,10 +843,20 @@ class GemmKernel(GemmComponentBase):
                 tv::array<int, 2> block_offset_C{{tile_offset_m * {self.tile_shape[0]},
                                                 tile_offset_n * {self.tile_shape[1]}}};
 
-                OutIter out_iter_C(params.out_params_, params.ptr_C, {{params.m, params.n}},
-                                        {{block_offset_C[0], block_offset_C[1]}},
-                                        thread_idx);
                 """)
+                out_iter_both_io = self.output_spec.out_iter.support_both_source_and_target()
+                if out_iter_both_io:
+                    code.raw(f"""
+                    OutIter out_iter_C(params.out_params_, params.ptr_C, params.ptr_D, {{params.m, params.n}},
+                                            {{block_offset_C[0], block_offset_C[1]}},
+                                            thread_idx);
+                    """)
+                else:
+                    code.raw(f"""
+                    OutIter out_iter_C(params.out_params_, params.ptr_C, {{params.m, params.n}},
+                                            {{block_offset_C[0], block_offset_C[1]}},
+                                            thread_idx);
+                    """)
                 if self.splitk_serial:
                     # we reuse iter_c for splitk_serial to save some time.
                     code.raw(f"""
@@ -855,7 +869,7 @@ class GemmKernel(GemmComponentBase):
                         __threadfence();
                     }}
                     """)
-                if self.need_source:
+                if self.need_source and not out_iter_both_io:
                     if self.split_d_params:
                         code.raw(f"""
                         ConstOutIter out_iter_D(params.out_params_scalebias_, params.ptr_D, {{params.m, params.n}},
@@ -878,21 +892,27 @@ class GemmKernel(GemmComponentBase):
                         )
                     with code.else_():
                         if self.need_source:
-                            code.raw(
-                                f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
-                            )
+                            if out_iter_both_io:
+                                code.raw(f"out.run(output_op, accumulators, out_iter_C);")
+                            else:
+                                code.raw(f"out.run(output_op, accumulators, out_iter_C, out_iter_D);")
                         else:
                             code.raw(
-                                f"out.run(output_op, accumulators, out_iter_C);"
+                                f"out.run_no_source(output_op, accumulators, out_iter_C);"
                             )
                 else:
                     if self.need_source:
-                        code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
-                        )
+                        if out_iter_both_io:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C);"
+                            )
+                        else:
+                            code.raw(
+                                f"out.run(output_op, accumulators, out_iter_C, out_iter_D);"
+                            )
                     else:
                         code.raw(
-                            f"out.run(output_op, accumulators, out_iter_C);")
+                            f"out.run_no_source(output_op, accumulators, out_iter_C);")
 
                 if self.splitk_serial:
                     code.raw(f"""
