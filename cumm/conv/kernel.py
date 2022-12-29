@@ -1031,11 +1031,11 @@ class ConvKernel(GemmComponentBase):
                     if self.need_source:
                         if not out_iter_both_io:
                             code.raw(
-                                f"out.run(output_op, accumulators, out_iter_C);"
+                                f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
                             )
                         else:
                             code.raw(
-                                f"out.run(output_op, accumulators, out_iter_C, out_iter_source);"
+                                f"out.run(output_op, accumulators, out_iter_C);"
                             )
                     else:
                         code.raw(

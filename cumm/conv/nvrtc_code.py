@@ -77,6 +77,8 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     kernel_params.ptr_C = c_ten.raw_data();
     if (!algo_desp.is_int8_inference){{
         TV_ASSERT_INVALID_ARG(output_add.empty(), "only int8 inference support output_add not empty ")
+    }}else{{
+        TV_ASSERT_RT_ERR(!bias.empty() && !scale.empty(), "int8 inference must have both scale and bias");
     }}
     if (output_add.empty()){{
         kernel_params.ptr_D = algo_desp.is_int8_inference ? c_ten.raw_data() : (bias.empty() ? c_ten.raw_data() : bias.raw_data());

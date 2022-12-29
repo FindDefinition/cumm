@@ -1,8 +1,9 @@
 # Changelog
 
-## [0.3.8] - 2022-12-19
+## [0.4.0] - 2022-12-30
 ### Added
 - Add cuda 12.0
+- Add int8 inference for sparse conv 
 ### Fixed
 - Fix some problem in cuda 12.0
 
