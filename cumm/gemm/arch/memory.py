@@ -95,7 +95,7 @@ class GlobalLoad(pccm.ParameterizedClass):
         if self.load_dtype == dtypes.uint8:
             code.raw(f"""
             if (pred){{
-                reinterpret_cast<{self.load_dtype} const*>(ptr)[0] = frag_ptr[0];
+                frag_ptr[0] = reinterpret_cast<{self.load_dtype} const*>(ptr)[0];
             }}
             """)
         else:
