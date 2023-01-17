@@ -81,14 +81,15 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
         TV_ASSERT_RT_ERR(!bias.empty() && !scale.empty(), "int8 inference must have both scale and bias");
     }}
     if (output_add.empty()){{
-        kernel_params.ptr_D = algo_desp.is_int8_inference ? c_ten.raw_data() : (bias.empty() ? c_ten.raw_data() : bias.raw_data());
+        kernel_params.ptr_D = algo_desp.is_int8_inference ? c_ten.const_raw_data() : (bias.empty() ? c_ten.const_raw_data() : bias.const_raw_data());
     }}else{{
         TV_ASSERT_RT_ERR(output_add.dtype() == output.dtype() && output_add.shape() == output.shape(),
-            "output and output_add must have same dtype and shape");
-        kernel_params.ptr_D = output_add.raw_data();
+            "output and output_add must have same dtype and shape", output_add.dtype(), output.dtype(),
+            output_add.shape(), output.shape());
+        kernel_params.ptr_D = output_add.const_raw_data();
     }}
-    kernel_params.bias_pointer = bias.empty() ? nullptr : bias.raw_data();
-    kernel_params.scale_pointer = scale.empty() ? nullptr : scale.raw_data();
+    kernel_params.bias_pointer = bias.empty() ? nullptr : bias.const_raw_data();
+    kernel_params.scale_pointer = scale.empty() ? nullptr : scale.const_raw_data();
     kernel_params.alpha = params.alpha;
     kernel_params.beta = params.beta;
     kernel_params.ndim = ndim;

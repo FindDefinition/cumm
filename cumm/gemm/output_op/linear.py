@@ -304,12 +304,12 @@ class Int8Inference(bases.GemmOutputOp):
 
         {self.fragment_comp_t} intermediate;
 
-        {platform_math}::multiplies<{self.fragment_comp_t}> mul_add_source;
         {platform_math}::multiply_add<{self.fragment_comp_t}> mul_add_accumulator;
         // alpha = output scale, beta = output_add scale
         """)
         if self.scale_bias:
             code.raw(f"""
+            {platform_math}::multiplies<{self.fragment_comp_t}> mul_add_source;
             auto bias_scaled = mul_add_source(alpha, bias); // bias_scaled = bias * alpha
             intermediate = mul_add_accumulator(scale, converted_accumulator, bias_scaled); // intermediate = scale * converted_accumulator + bias_scaled
             """)
@@ -334,7 +334,7 @@ class Int8Inference(bases.GemmOutputOp):
                 # clamp int8 outputs.
                 # if count > 1, the NumericArrayConverter already contains saturation.
                 code.raw(f"""
-                constexpr {self.dtype_comp} kClamp = {self.dtype_comp}((1U << (sizeof({self.dtype_out}) * 8 - 1)) - 1);
+                const {self.dtype_comp} kClamp = {self.dtype_comp}((1U << (sizeof({self.dtype_out}) * 8 - 1)) - 1);
                 tv::math::minimum<{self.fragment_comp_t}> min_op;
                 tv::math::maximum<{self.fragment_comp_t}> max_op;
                 intermediate = max_op(intermediate, -kClamp - {self.dtype_comp}(1));
@@ -344,7 +344,7 @@ class Int8Inference(bases.GemmOutputOp):
             if self.dtype_out == dtypes.int8:
                 # clamp int8 outputs.
                 code.raw(f"""
-                constexpr {self.dtype_comp} kClamp = {self.dtype_comp}((1U << (sizeof({self.dtype_out}) * 8 - 1)) - 1);
+                const {self.dtype_comp} kClamp = {self.dtype_comp}((1U << (sizeof({self.dtype_out}) * 8 - 1)) - 1);
                 tv::math::minimum<{self.fragment_comp_t}> min_op;
                 tv::math::maximum<{self.fragment_comp_t}> max_op;
                 intermediate = max_op(intermediate, -kClamp - {self.dtype_comp}(1));
