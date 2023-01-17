@@ -20,6 +20,10 @@
 #if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
 #include <cuda_bf16.h>
 #endif
+#if (CUDA_VERSION >= 11080 && defined(TV_CUDA))
+#include <cuda_fp8.h>
+#endif
+
 #include <tensorview/core/defs.h>
 #ifdef __CUDACC_RTC__
 #include <tensorview/core/nvrtc_std.h>
