@@ -115,7 +115,6 @@ class InputTuring(bases.Input):
                 if self.access_per_vector == 0:
                     inp_iter_cls = sparse_iters.ForwardDgradSparseIOIteratorV2Mask
                     w_iter_cls = input_iters.WeightIteratorDP4AV2Mask
-
                 else:
                     inp_iter_cls = sparse_iters.ForwardDgradSparseIOIterator
                     w_iter_cls = input_iters.WeightIteratorDP4A
@@ -129,6 +128,7 @@ class InputTuring(bases.Input):
                     increment_k_first,
                     access_per_vector=access_per_vector)
             else:
+                assert self.access_per_vector != 0
                 inp_iter_cls = input_iters.ForwardDgradIOIterator
                 w_iter_cls = input_iters.WeightIteratorDP4A
                 self.inp_iter_a = inp_iter_cls(

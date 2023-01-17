@@ -139,6 +139,8 @@ def gen_gemm_params(op_types: List[ConvOpType],
     else:
         stages.append(stage)
     dymasks = [False, True]
+    if not mask_sparse:
+        dymasks = [False]
     # dynamic_mask is used for debug
     if dynamic_mask is not None:
         dymasks = [dynamic_mask]
@@ -283,9 +285,33 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
                     # *gen_gemm_params(ConvFwd, (64, 64, 32), (32, 32, 32), 3, ConvIterAlgo.Optimized, 2, ["s8,s8,s8,s32,s32"],
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((8, 8, 16))),
-                    *gen_gemm_params(ConvFwd, (128, 128, 32), (64, 64, 32), 3, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f16,f16"],
-                        NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8))),
-
+                    # *gen_gemm_params(ConvFwd, (128, 128, 32), (64, 64, 32), 2, ConvIterAlgo.Optimized, 2, ["f16,f16,f16,f16,f16"],
+                    #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8))),
+                    *gen_gemm_params(ConvFwdAndBwdInput, (32, 32, 32), (32, 32, 32),
+                                        2,
+                                        ConvIterAlgo.Optimized,
+                                        2,
+                                        ["s8,s8,s8,s32,s32"],
+                                        NHWC,
+                                        NHWC,
+                                        NHWC,
+                                        GemmAlgo.Turing,
+                                        # None,
+                                        TensorOp((16, 8, 16)),
+                                        access_per_vector=1,
+                                        dynamic_mask=False),
+                    # *gen_gemm_params(ConvFwdAndBwdInput, (64, 64, 32), (32, 32, 32),
+                    #                 2,
+                    #                 ConvIterAlgo.Optimized,
+                    #                 2,
+                    #                 ["s8,s8,s8,s32,s32"],
+                    #                 NHWC,
+                    #                 NHWC,
+                    #                 NHWC,
+                    #                 GemmAlgo.Turing,
+                    #                 TensorOp((16, 8, 32)),
+                    #                 access_per_vector=0,
+                    #                 dynamic_mask=False),
                     # *gen_gemm_params(ConvBwdWeight, (128, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Turing, TensorOp((16, 8, 8)), mask_sparse=True, increment_k_first=True, access_per_vector=1),
                     # *gen_gemm_params(ConvBwdWeight, (64, 128, 32), (32, 64, 32), 3, ConvIterAlgo.Optimized, 2, "f16,f16,f16,f32,f32",
@@ -325,7 +351,7 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
                     # *gen_gemm_params((32, 128, 16), (32, 32, 8), 3, ConvIterAlgo.Optimized, 2, "f32,f32,f32,f32,f32",
                     #     NHWC, NHWC, NHWC, GemmAlgo.Simt, None, mask_sparse=True, increment_k_first=True, mask_width=32),
-                    # *gen_gemm_params(
+                    # *gen_gemm_params(ConvFwd, 
                     #     (32, 128, 16), (32, 32, 8), 2, ConvIterAlgo.Optimized, 2,
                     #     "f32,f32,f32,f32,f32", NHWC, NHWC, NHWC, GemmAlgo.Simt, None),
                     # *gen_gemm_params_rowmajor_c((8, 32, 8), (8, 32, 8), 2, "f32,f32,f32,f32,f32", GemmAlgo.Simt, None),

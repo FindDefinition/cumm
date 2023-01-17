@@ -3,8 +3,8 @@ import pickle
 from cumm import tensorview as tv
 from cumm.constants import PACKAGE_ROOT, TENSORVIEW_INCLUDE_PATH
 from cumm.inliner import NVRTCInlineBuilder
-from cumm.common import TensorViewNVRTCHashKernel, TensorViewArrayLinalg, EigenLib
-
+from cumm.common import TensorView, TensorViewCPU, TensorViewNVRTCHashKernel, TensorViewArrayLinalg, EigenLib
+import numpy as np 
 # @lineprof.lineprof_wrapper_cpp
 def test_nvrtc():
 
@@ -189,5 +189,68 @@ def test_nvrtc_problem():
               "-I", "/usr/local/cuda/include", "--gpu-architecture=sm_52"])
     print(prog.ptx())
 
+def test_cpu_v0():
+    inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
+    # init driver
+    a = tv.zeros([1], tv.float32, 0)
+    keys = tv.zeros([5000], tv.int32, 0)
+    values = tv.zeros([5000], tv.int32, 0)
+    kv = tv.zeros([5000, 2], tv.int32, 0)
+
+    inliner.cpu_kernel_1d("wtf3", 1, 0, f"""
+    namespace op = tv::arrayops;
+    tv::array<float, 3> a{{2.010012, 0.530250, 0.630409}};
+    tv::printf2("DEBUG", a.op<op::min>());
+    """)
+
+def test_cpu_v1():
+    from pccm.builder.inliner import InlineBuilder
+    inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
+    # init driver
+    a = tv.zeros([1], tv.float32, -1)
+    keys = tv.zeros([10], tv.float32, -1)
+    values = tv.zeros([5000], tv.int32, -1)
+    kv = tv.zeros([5000, 2], tv.int32, -1)
+    # inliner = InlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
+    inliner.cpu_kernel_raw("wtf3", f"""
+    namespace op = tv::arrayops;
+    for (int i = 0; i < 10; ++i){{
+        tv::array<float, 3> a{{2.010012, 0.530250, 0.630409}};
+        tv::printf2(std::sin(a[0]) + a[1], op::length<float, 3, 0>()(a));
+        // $keys[i] = a[0] + a[1] + a[2] + op::MathScalarOp<float>::sin(a.op<op::min>());
+    }}
+    """)
+    print(keys.numpy())
+    breakpoint()
+    print(1)
+
+def test_cpu_v2():
+    from pccm.builder.inliner import InlineBuilder
+    inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
+    # init driver
+    a = tv.zeros([3], tv.float32, -1)
+    t = np.zeros((4, 4), np.float32)
+    b_out = tv.zeros([3], tv.float32, -1)
+    cc = tv.zeros([3], tv.float32, -1)
+    theta = np.radians(30)
+    c, s = np.cos(theta), np.sin(theta)
+    R = np.array(((c, -s, 0), (s, c, 0), (0, 0, 1)), np.float32)
+    # inliner = InlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
+    # cpu_kernel_raw
+    inliner.cpu_kernel_raw("wtf3", f"""
+    namespace op = tv::arrayops;
+    tv::array_nd<float, 4, 4> wf;
+    auto tr = $t;
+    auto p = reinterpret_cast<tv::array<float, 3>*>($a)[0];
+    tv::array<float, 3> b;
+    tv::printf2(b[0], "WTF");
+    b[0] = p[0] * tr[0][0] + p[1] * tr[0][1] + p[2] * tr[0][2] + tr[0][3];
+    b[1] = p[0] * tr[1][0] + p[1] * tr[1][1] + p[2] * tr[1][2] + tr[1][3];
+    b[2] = p[0] * tr[2][0] + p[1] * tr[2][1] + p[2] * tr[2][2] + tr[2][3];
+    reinterpret_cast<tv::array<float, 3>*>($b_out)[0] = b;
+    """)
+    breakpoint()
+    print(1)
+
 if __name__ == "__main__":
-    test_nvrtc_problem()
+    test_cpu_v2()

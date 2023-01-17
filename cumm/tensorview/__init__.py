@@ -94,6 +94,7 @@ class NVRTCArgMeta:
     shape: List[int]
 
     is_simple_ptr: bool = False
+    is_scalar: bool = False
 
 
 class NVRTCKernelMeta:
@@ -131,11 +132,12 @@ class NVRTCKernelMeta:
                 if meta.name in _SIMPLE_TYPES_TO_TV_DTYPE:
                     is_simple_ptr = True
                     simple_tv_type = _SIMPLE_TYPES_TO_TV_DTYPE[meta.name]
+            is_scalar = len(shape) == 0
             if len(shape) == 0:
                 shape = [1]
             # shape = shape[::-1]
             self.arg_metas.append(
-                NVRTCArgMeta(valid, simple_tv_type, shape, is_simple_ptr))
+                NVRTCArgMeta(valid, simple_tv_type, shape, is_simple_ptr, is_scalar))
 
     def __repr__(self) -> str:
         return f"NVRTCKernelMeta[name={self.name},ns={self.ns},args={self.arg_metas}]"

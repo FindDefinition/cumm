@@ -61,7 +61,7 @@ my vscode highlight extension config:
 
 import pccm
 from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME
-from cumm.nvrtc import CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
+from cumm.nvrtc import CummLLVMModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
 from pathlib import Path
 from cumm.common import TensorViewKernel
 import enum
@@ -214,12 +214,15 @@ class _NVRTCInlineParams:
                  launch: tv.LaunchParam,
                  verbose: bool = False,
                  verbose_path: str = "",
-                 measure_time: bool = False) -> None:
+                 measure_time: bool = False,
+                 is_cpu: bool = False) -> None:
         self.mode = mode
         self.launch = launch
         self.verbose = verbose
         self.verbose_path = verbose_path
         self.measure_time = measure_time
+        self.is_cpu = is_cpu
+        
 
 
 _NVRTC_FUNC_NAME = f"{PCCM_INLINE_NAMESPACE}::{PCCM_INLINE_FUNCTION_NAME}"
@@ -281,7 +284,12 @@ class NVRTCInlineBuilder(InlineBuilder):
 
     def handle_container_code(self, code_str: str, code: pccm.FunctionCode,
                               arg: Optional[_NVRTCInlineParams]):
+        is_cpu = False 
         meta = pccm.cuda.CudaGlobalFunctionMeta(attrs=["__global__"])
+
+        if arg is not None:
+            is_cpu = arg.is_cpu
+            meta = pccm.cuda.ExternalFunctionMeta()
 
         if arg is None:
             code.raw(code_str)
@@ -289,11 +297,18 @@ class NVRTCInlineBuilder(InlineBuilder):
         if arg.mode == CUDAMode.KernelRaw:
             code.raw(code_str)
             return meta
-
-        with code.for_(
-                f"auto {self.index_name} : tv::KernelLoopX<int>({_CUMM_KERNEL_1D_SIZE_NAME})"
-        ):
-            code.raw(code_str)
+        if not is_cpu:
+            with code.for_(
+                    f"auto {self.index_name} : tv::KernelLoopX<int>({_CUMM_KERNEL_1D_SIZE_NAME})"
+            ):
+                code.raw(code_str)
+        else:
+            with code.for_(
+                    f"size_t i = 0; i <{_CUMM_KERNEL_1D_SIZE_NAME}; ++i"
+            ):
+                code.raw(code_str)
+            code.raw("return 0;")
+            code.ret("int")
         return meta
 
     def build(self,
@@ -312,6 +327,9 @@ class NVRTCInlineBuilder(InlineBuilder):
             ctx = tv.measure_and_print(f"{name} nvrtc build time")
         # with tv.measure_and_print("INLINE"):
         params = create_nvrtc_code([pccm_cls])
+        is_cpu = False 
+        if user_arg is not None:
+            is_cpu = user_arg.is_cpu
         if self._remote_addr != "":
             # this should be used only you want to debug
             # different cuda version.
@@ -320,13 +338,18 @@ class NVRTCInlineBuilder(InlineBuilder):
                 mod = robj.remote_call("NVRTCCompiler.compile_nvrtc", params)
         else:
             with ctx:
-                if verbose:
-                    mod = CummNVRTCModule([pccm_cls],
-                                            verbose=verbose,
-                                            verbose_path=verbose_path)
+                if is_cpu:
+                    mod = CummLLVMModule([pccm_cls],
+                                                verbose=verbose,
+                                                verbose_path=verbose_path)
                 else:
-                    mod = CummNVRTCModuleBase.from_params(params)
-        
+                    if verbose:
+                        mod = CummNVRTCModule([pccm_cls],
+                                                verbose=verbose,
+                                                verbose_path=verbose_path)
+                    else:
+                        mod = CummNVRTCModuleBase.from_params(params)
+            
         return mod
 
     def run_func(self,
@@ -372,6 +395,46 @@ class NVRTCInlineBuilder(InlineBuilder):
                            code,
                            ".cu",
                            additional_args,
+                           _frame_cnt=2,
+                           user_arg=user_arg,
+                           disable_cache=disable_cache)
+
+    def cpu_kernel_1d(self,
+                  name: str,
+                  num: int,
+                  code: Union[str, pccm.FunctionCode],
+                  verbose_path: str = "",
+                  disable_cache: bool = False):
+        verbose = verbose_path != ""
+        num = int(num)
+        user_arg = _NVRTCInlineParams(CUDAMode.Kernel1D,
+                                      self.get_1d_param(num, stream=0),
+                                      verbose, verbose_path,
+                                      is_cpu=True)
+        additional_args = {
+            _CUMM_KERNEL_1D_SIZE_NAME: num,
+        }
+        return self.inline(name,
+                           code,
+                           ".cu",
+                           additional_args,
+                           _frame_cnt=2,
+                           user_arg=user_arg,
+                           disable_cache=disable_cache)
+
+    def cpu_kernel_raw(self,
+                   name: str,
+                #    param: tv.LaunchParam,
+                   code: Union[str, pccm.FunctionCode],
+                   verbose_path: str = "",
+                   disable_cache: bool = False):
+        verbose = verbose_path != ""
+        user_arg = _NVRTCInlineParams(CUDAMode.KernelRaw, 
+                    tv.LaunchParam((1,1,1), (1,1,1)), verbose,
+                    verbose_path, is_cpu=True)
+        return self.inline(name,
+                           code,
+                           ".cu",
                            _frame_cnt=2,
                            user_arg=user_arg,
                            disable_cache=disable_cache)

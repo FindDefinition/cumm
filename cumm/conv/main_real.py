@@ -267,9 +267,8 @@ def _asdv_test_simt_python_v2():
         t = time.time()
         custom_names = []
         if nvrtc_mode == NVRTCMode.ConstantMemory:
-            custom_names = ["&wtf::params_raw"]
+            custom_names = [f"&wtf::{NVRTCConstants.CONSTANT_PARAM_KEY}"]
         mod = CummNVRTCModule([ker_nvrtc],
-                              cudadevrt_path=str(get_cudadevrt_path()),
                               verbose=False,
                               custom_names=custom_names)
         # breakpoint()
@@ -283,14 +282,14 @@ def _asdv_test_simt_python_v2():
 
         # print("START", params.get_algo_name())
         if ndim == 3:
-            HW = [56] * ndim
+            HW = [12] * ndim
         else:
             HW = [244] * ndim
 
         RS = [3] * ndim
         N = 1
-        C = 128
-        K = 128
+        C = 32
+        K = 32
         padding = [RS[0] // 2] * ndim
         stride = [1] * ndim
         dilation = [1] * ndim
@@ -413,9 +412,10 @@ def _asdv_test_simt_python_v2():
         algo.dtype_a = params.dtype_a.tv_dtype
         algo.dtype_b = params.dtype_b.tv_dtype
         algo.dtype_c = params.dtype_c.tv_dtype
+        algo.access_per_vector = params.access_per_vector
         if params.tensorop is not None:
             algo.tensorop = params.tensorop.shape
-        assert str(algo) == ker.get_algo_name()
+        assert str(algo) == ker.get_algo_name(), f"{str(algo)} vs {ker.get_algo_name()}"
         params_cpp = params_cls(ker.problem.ndim, tv.gemm.ConvOpType(ker.problem.op_type.value))
         params_cpp.conv_algo_desp = algo
         params_cpp.split_k_slices = spk
@@ -492,6 +492,9 @@ def _asdv_test_simt_python_v2():
                 output_cpu = output_cpu.astype(np.float32)
             duration = time.time() - t
             print(output_cpu.reshape(-1)[:10], out_ref_nhwc.reshape(-1)[:10])
+            if output_cpu.reshape(-1)[0] == 0:
+                breakpoint()
+            err = np.abs(out_ref_nhwc - output_cpu)
             print(ker.get_algo_name(),
                   np.linalg.norm(out_ref_nhwc - output_cpu), "Time=",
                   op_duration)
