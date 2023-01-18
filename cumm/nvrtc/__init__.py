@@ -133,18 +133,17 @@ def create_nvrtc_code(cus: List[pccm.Class],
             meta_cls = ExternalFunctionMeta
             if not cpu_code:
                 meta_cls = CudaGlobalFunctionMeta
-            if cpu_code:
-                if isinstance(meta, meta_cls):
-                    if decl.code.is_template():
-                        # don't support template kernel
-                        continue
-                    # is global function. firstly check types
-                    meta = tv.NVRTCKernelMeta(meta.name, cu_ns,
-                                                decl.code.arguments)
-                    func_qualname = meta.name
-                    if cu_ns:
-                        func_qualname = f"{cu_ns}::{meta.name}"
-                    name_to_meta[func_qualname] = meta
+            if isinstance(meta, meta_cls):
+                if decl.code.is_template():
+                    # don't support template kernel
+                    continue
+                # is global function. firstly check types
+                meta = tv.NVRTCKernelMeta(meta.name, cu_ns,
+                                            decl.code.arguments)
+                func_qualname = meta.name
+                if cu_ns:
+                    func_qualname = f"{cu_ns}::{meta.name}"
+                name_to_meta[func_qualname] = meta
 
     # generate code for nvrtc
     header_dict, _, _ = cg.code_generation(user_cus,
