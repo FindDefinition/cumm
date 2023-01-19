@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.3] - 2023-01-19
+### Fixed
+- fix compile problem
+
 ## [0.4.2] - 2023-01-19
 ### Fixed
 - fix some compile problem in cpu only

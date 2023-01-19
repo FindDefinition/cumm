@@ -32,7 +32,7 @@
 #include <cstdint>
 #endif
 #include <tensorview/core/all.h>
-#ifdef __CUDACC__
+#ifdef TV_CUDA
 #include <cuComplex.h>
 #endif
 #include "bfloat16.h"
