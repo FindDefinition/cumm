@@ -145,9 +145,9 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
                 elif (major, minor) < (11, 8):
                     _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
                 elif (major, minor) < (12, 0):
-                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
+                    _arch_list = "5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
                 else:
-                    _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
+                    _arch_list = "5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     for named_arch, archval in named_arches.items():
         _all_arch = _all_arch.replace(named_arch, archval)

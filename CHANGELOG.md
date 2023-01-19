@@ -1,4 +1,9 @@
 # Changelog
+
+## [0.4.4] - 2023-01-19
+### Fixed
+- fix unsupported arch in cuda 12.0
+
 ## [0.4.3] - 2023-01-19
 ### Fixed
 - fix compile problem
