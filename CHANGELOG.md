@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.1] - 2023-01-19
+### Changed
+- change version to rebuild due to pypi server problem
+
 ## [0.4.0] - 2022-12-30
 ### Added
 - Add cuda 12.0
