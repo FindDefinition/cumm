@@ -21,5 +21,7 @@
 #include "half.h"
 #include "subint.h"
 #include "tf32.h"
+#ifdef TV_CUDA
 #include "float8.h"
+#endif
 #include <tensorview/dtypes.h>

@@ -26,14 +26,15 @@
  **************************************************************************************************/
 #pragma once
 
-#include <cuComplex.h>
 #if defined(__CUDACC_RTC__)
 #include <cuda/std/cstdint>
 #else
 #include <cstdint>
 #endif
 #include <tensorview/core/all.h>
-
+#ifdef __CUDACC__
+#include <cuComplex.h>
+#endif
 #include "bfloat16.h"
 #include "half.h"
 #include "tf32.h"

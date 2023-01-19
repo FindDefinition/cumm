@@ -50,7 +50,7 @@
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 #ifdef __CUDACC__
-#if (__CUDACC_VER_MAJOR__ >= 11)
+#if (__CUDACC_VER_MAJOR__ >= 10)
 #include <cuda_fp16.h>
 #endif
 #endif

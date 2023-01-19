@@ -35,7 +35,6 @@
 */
 #pragma once
 
-#include <cuda_fp16.h>
 #if !defined(__CUDACC_RTC__)
 #include <cmath>
 #include <cstdint>
@@ -49,9 +48,7 @@
 #include <tensorview/core/all.h>
 
 #ifdef __CUDACC__
-#if (__CUDACC_VER_MAJOR__ >= 11)
-#include <cuda_bf16.h>
-#endif
+#include <cuda_fp16.h>
 #if ((__CUDACC_VER_MAJOR__ == 11 && __CUDACC_VER_MINOR__ >= 8) || __CUDACC_VER_MAJOR__ >= 12)
 #include <cuda_fp8.h>
 #endif
