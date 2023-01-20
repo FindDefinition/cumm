@@ -31,6 +31,7 @@
 #include <tensorview/gemm/dtypes/all.h>
 #if !defined(__CUDACC_RTC__)
 #include <fenv.h>
+#include <cfenv>
 #else 
 #endif 
 namespace tv {

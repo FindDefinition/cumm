@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.5] - 2023-01-20
+### Fixed
+- fix a compile problem in msvc
+
 ## [0.4.4] - 2023-01-19
 ### Fixed
 - fix unsupported arch in cuda 12.0
