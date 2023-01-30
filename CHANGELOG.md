@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.6] - 2023-01-30
+### Fixed
+- fix a small bug in nvrtc
+
 ## [0.4.5] - 2023-01-20
 ### Fixed
 - fix a compile problem in msvc

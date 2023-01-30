@@ -289,6 +289,7 @@ class NVRTCInlineBuilder(InlineBuilder):
 
         if arg is not None:
             is_cpu = arg.is_cpu
+        if is_cpu:
             meta = pccm.cuda.ExternalFunctionMeta()
 
         if arg is None:
