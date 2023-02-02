@@ -79,9 +79,9 @@ constexpr size_t tuple_size_v = tuple_size<_Tp>::value;
 
 template <typename... _Elements>
 TV_HOST_DEVICE_INLINE constexpr tuple<
-    typename __strip_reference_wrapper<_Elements>::__type...>
+    typename __decay_and_strip<_Elements>::__type...>
 make_tuple(_Elements &&...__args) {
-  typedef tuple<typename __strip_reference_wrapper<_Elements>::__type...>
+  typedef tuple<typename __decay_and_strip<_Elements>::__type...>
       __result_type;
   return __result_type(std::forward<_Elements>(__args)...);
 }

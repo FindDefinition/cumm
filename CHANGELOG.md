@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.7] - 2023-02-02
+### Fixed
+- fix a small bug in nvrtc tuple.
+
 ## [0.4.6] - 2023-01-30
 ### Fixed
 - fix a small bug in nvrtc

@@ -738,7 +738,9 @@ class ConvMainUnitTest(pccm.ParameterizedClass):
             }
             """)
         code_main.raw("""
-        TV_THROW_RT_ERR("can't find any suitable algo for your parameters.");
+        TV_THROW_RT_ERR("can't find any suitable algo for your parameters.", 
+            algo_desp.algo, algo_desp.dtype_a, algo_desp.dtype_b, algo_desp.dtype_c,
+            algo_desp.__repr__());
         """)
         return code_main
 
