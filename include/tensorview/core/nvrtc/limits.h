@@ -304,7 +304,8 @@ template <> struct numeric_limits<float> {
   }
 
   static _GLIBCXX_CONSTEXPR float denorm_min() _GLIBCXX_USE_NOEXCEPT {
-    return __FLT_DENORM_MIN__;
+    // TODO opencv breaks __FLT_DENORM_MIN__
+    return __FLT_MIN__;
   }
 
   static _GLIBCXX_USE_CONSTEXPR bool is_iec559 =
@@ -375,7 +376,8 @@ template <> struct numeric_limits<double> {
   }
 
   static _GLIBCXX_CONSTEXPR double denorm_min() _GLIBCXX_USE_NOEXCEPT {
-    return __DBL_DENORM_MIN__;
+    // TODO opencv breaks __DBL_DENORM_MIN__
+    return __DBL_MIN__;
   }
 
   static _GLIBCXX_USE_CONSTEXPR bool is_iec559 =
