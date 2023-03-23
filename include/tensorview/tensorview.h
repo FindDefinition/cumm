@@ -195,6 +195,16 @@ struct ShapeBase : public vecarray<Tindex, MaxDim> {
     return s;
   }
   TV_HOST_DEVICE_INLINE size_t ndim() const { return this->size_; }
+  TV_HOST_DEVICE_INLINE bool empty() const { 
+    if (this->size_ == 0){
+      return true;
+    }
+    for (size_t i = 0; i < this->size_; ++i) {
+      if (this->array_[i] == 0)
+        return true;
+    }
+    return false;
+  }
 
   TV_HOST_DEVICE ShapeBase<MaxDim, Tindex> squeeze() const {
     ShapeBase<MaxDim, Tindex> shape;

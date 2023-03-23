@@ -1041,7 +1041,7 @@ public:
 
   bool is_contiguous() const { return contiguous_; }
 
-  bool empty() const { return !storage_ || storage_->empty(); }
+  bool empty() const { return !storage_ || storage_->empty() || shape().empty(); }
   DType dtype() const { return dtype_; }
   int device() const { return storage_ ? storage_->device(): -1; }
   size_t ndim() const { return shape_.ndim(); }

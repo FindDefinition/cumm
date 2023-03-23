@@ -726,41 +726,55 @@ template <typename T, size_t N, size_t Align> struct slerp {
   }
 };
 
-template <typename T, size_t Align> struct qnlerp {
+template <typename T, size_t N, size_t Align> struct qnlerp {
   TV_HOST_DEVICE_INLINE auto operator()(const array<T, 4, Align> &a,
                                         const array<T, 4, Align> &b, T t) {
     return a.template op<nlerp>(a.template op<dot>(b) < 0 ? -b : b, t);
   }
 };
 
-template <typename T, size_t Align> struct qslerp {
+template <typename T, size_t N, size_t Align> struct qslerp {
   TV_HOST_DEVICE_INLINE auto operator()(const array<T, 4, Align> &a,
                                         const array<T, 4, Align> &b, T t) {
     return a.template op<slerp>(a.template op<dot>(b) < 0 ? -b : b, t);
   }
 };
 
-template <typename T, size_t Align> struct qconj {
+template <typename T, size_t N, size_t Align> struct qconj {
   TV_HOST_DEVICE_INLINE constexpr array<T, 4, Align>
   operator()(const array<T, 4, Align> &q) {
     return {-q[0], -q[1], -q[2], q[3]};
   }
 };
 
-template <typename T, size_t Align> struct qinv {
+template <typename T, size_t N, size_t Align> struct qinv {
   TV_HOST_DEVICE_INLINE constexpr array<T, 4, Align>
   operator()(const array<T, 4, Align> &q) {
     return q.template op<qconj>() / q.template op<length2>();
   }
 };
 
-template <typename T, size_t Align> struct qexp {
+template <typename T, size_t N, size_t Align> struct qexp {
   TV_HOST_DEVICE_INLINE constexpr array<T, 4, Align>
   operator()(const array<T, 4, Align> &q) {
     const auto v = slice<0, 3>(q);
     const auto vv = v.template op<length>();
     return MathScalarOp<T>::exp(q.w) *
            array<T, 4, Align>{v * (vv > 0 ? MathScalarOp<T>::sin(vv) / vv : 0), MathScalarOp<T>::cos(vv)};
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct normlineproj {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3, Align>
+  operator()(const array<T, 3, Align> &self, const array<T, 3, Align> &origin, const array<T, 3, Align> &norm_dir) {
+    return origin + (self - origin).template op<dot>(norm_dir) * norm_dir;
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct lineproj {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3, Align>
+  operator()(const array<T, 3, Align> &self, const array<T, 3, Align> &origin, const array<T, 3, Align> &dir) {
+    return self.template op<normlineproj>(origin, dir.template op<normalize>());
   }
 };
 

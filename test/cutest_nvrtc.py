@@ -123,13 +123,16 @@ def test_nvrtc3():
     theta = np.radians(30)
     c, s = np.cos(theta), np.sin(theta)
     R = np.array(((c, -s, 0), (s, c, 0), (0, 0, 1)), np.float32)
+    origin = np.array([0, 1, 0], np.float32)
+    normdir = np.array([1, 0, 0], np.float32)
+    pp = np.array([1, 1, 1], np.float32)
 
     inliner.kernel_raw("wtf", inliner.get_1d_param(1), f"""
     namespace op = tv::arrayops;
 
     auto tr = $t;
     auto tr2 = $R;
-    auto q4 = tr2.op<op::rotation_quat_matrix>();
+    auto q4 = tr2.op<op::rotation_quat>();
     auto p = reinterpret_cast<tv::array<float, 3>*>($a)[0];
     auto length = p.op<op::l2norm>();
 
@@ -149,6 +152,8 @@ def test_nvrtc3():
     b[1] = p[0] * tr[1][0] + p[1] * tr[1][1] + p[2] * tr[1][2] + tr[1][3];
     b[2] = p[0] * tr[2][0] + p[1] * tr[2][1] + p[2] * tr[2][2] + tr[2][3];
     reinterpret_cast<tv::array<float, 3>*>($b_out)[0] = b;
+
+    auto lineprojp = $pp.op<op::lineproj>($origin, $normdir);
     """)
     # print(inliner.get_nvrtc_module("wtf2").get_ptx())
     binary = pickle.dumps(inliner.get_nvrtc_module("wtf"))
@@ -253,4 +258,4 @@ def test_cpu_v2():
     print(1)
 
 if __name__ == "__main__":
-    test_cpu_v2()
+    test_nvrtc3()
