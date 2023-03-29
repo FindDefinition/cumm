@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.4.8] - 2023-03-29
+### Fixed
+- fix a small bug in tv::Tensor::empty.
+
 ## [0.4.7] - 2023-02-02
 ### Fixed
 - fix a small bug in nvrtc tuple.
