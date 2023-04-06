@@ -318,7 +318,7 @@ class ThrustLib(pccm.Class):
             self.build_meta.add_public_includes(thrust_include)
 
 
-class PyTorchLib(pccm.Class):
+class PyTorchLibNoPybind(pccm.Class):
     def __init__(self):
         super().__init__()
         spec = importlib.util.find_spec("torch")
@@ -337,14 +337,16 @@ class PyTorchLib(pccm.Class):
         self.build_meta.libraries.extend(torch_libs + torch_cuda_libs)
         self.build_meta.libpaths.extend(torch_lib_paths)
         self.build_meta.add_public_cflags("nvcc,clang++,g++", "-D_GLIBCXX_USE_CXX11_ABI=0")
-
         self.add_include("torch/script.h")
-        self.add_include("torch/extension.h") # include this to add pybind for torch.Tensor
-
         self.add_include("ATen/cuda/CUDAContext.h")
         self.add_include("ATen/ATen.h")
-        self.add_include("tensorview/torch_utils.h")
 
+class PyTorchLib(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(PyTorchLibNoPybind)
+        self.add_include("torch/extension.h") # include this to add pybind for torch.Tensor
+        self.add_include("tensorview/torch_utils.h")
 
 class TensorView(pccm.Class):
     def __init__(self):
@@ -598,6 +600,7 @@ class TensorViewNVRTC(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("tensorview/core/all.h")
+        self.add_include("tensorview/tensorview.h")
         self.add_include("tensorview/core/arrayops/simple.h")
         if not CUMM_CPU_ONLY_BUILD:
             # here we can't depend on GemmKernelFlags
@@ -610,6 +613,12 @@ class TensorViewNVRTC(pccm.Class):
             #     nvrtc_include = PACKAGE_ROOT / "nvrtc_include"
             #     self.build_meta.add_public_includes(nvrtc_include)
 
+class TensorViewViewClass(pccm.Class):
+    """a class that contains tensorview/tensorview.h.
+    """
+    def __init__(self):
+        super().__init__()
+        self.add_include("tensorview/tensorview.h")
 
 class TensorViewCore(pccm.Class):
     def __init__(self):
@@ -729,3 +738,33 @@ class CppTimer(pccm.Class):
         self.add_include("tensorview/profile/cuda_profiler.h")
         self.build_meta.add_public_cflags("g++,clang++,nvcc", "-DTV_USE_LIBRT")
         self.build_meta.add_libraries("rt")
+
+class TensorViewCPULLVM(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.build_meta.add_public_includes(TENSORVIEW_INCLUDE_PATH)
+        self.add_include("array")
+
+        self.add_include("tensorview/core/all.h")
+        self.add_include("tensorview/tensor.h")
+        self.add_include("tensorview/check.h")
+        self.add_include("tensorview/profile/all.h")
+        # self.build_meta.add_global_cflags("g++,clang++", "-g")
+        # currently llvmlite can't handle iostream, so
+        # we must disable it by -DTV_LLVM_JIT for tensorview library
+        self.build_meta.add_global_cflags("g++,clang++", "-DTV_LLVM_JIT")
+
+class TensorViewLLVM(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.build_meta.add_global_cflags("nvcc", "--expt-relaxed-constexpr")
+        self.build_meta.add_global_cflags("cl",  "/O2")
+        self.build_meta.add_global_cflags("g++,clang++", "-O3")
+
+        if not CUMM_CPU_ONLY_BUILD:
+            self.add_dependency(CUDALibs, TensorViewCPULLVM)
+            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_CUDA")
+            self.build_meta.add_public_cflags("cl", "/DTV_CUDA")
+        else:
+            self.add_dependency(TensorViewCPULLVM)
+

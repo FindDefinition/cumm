@@ -15,6 +15,7 @@
 import contextlib
 from dataclasses import dataclass
 from enum import Enum
+import enum
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
@@ -82,19 +83,27 @@ _SIMPLE_TYPES_TO_TV_DTYPE = {
     "at::Half": float16,
 }  # type: Dict[str, int]
 
-_VALID_CONTAINER_TYPES = {"tv::array", "std::array"}
+_VALID_CONTAINER_TYPES = {"tv::array", "std::array", "tv::TensorView"}
+
+class NVRTCArgBaseType(enum.IntEnum):
+    Scalar = 0
+    Pointer = 1
+    Array = 2
+    TensorView = 3
 
 def div_up(a, b):
     return (a + b - 1) // b 
 
 @dataclass
 class NVRTCArgMeta:
+    base_type: NVRTCArgBaseType
     valid: bool
     simple_type: int
     shape: List[int]
 
     is_simple_ptr: bool = False
     is_scalar: bool = False
+    count: Optional[int] = None
 
 
 class NVRTCKernelMeta:
@@ -107,7 +116,7 @@ class NVRTCKernelMeta:
         ]
         self.simple_types: List[Optional[int]] = []
         self.arg_metas: List[NVRTCArgMeta] = []
-        for meta in self.arg_types:
+        for arg, meta in zip(args, self.arg_types):
             simple_tv_type = -1
             is_simple_ptr = False
             valid = meta.name != ""
@@ -133,11 +142,19 @@ class NVRTCKernelMeta:
                     is_simple_ptr = True
                     simple_tv_type = _SIMPLE_TYPES_TO_TV_DTYPE[meta.name]
             is_scalar = len(shape) == 0
+            base_type = NVRTCArgBaseType.Scalar if is_scalar else NVRTCArgBaseType.Array
+            if meta.name == "tv::TensorView":
+                base_type = NVRTCArgBaseType.TensorView
+                assert len(shape) == 1, "only support 1d tensorview (e.g. tv::Tensorview<float, N>)"
             if len(shape) == 0:
                 shape = [1]
             # shape = shape[::-1]
             self.arg_metas.append(
-                NVRTCArgMeta(valid, simple_tv_type, shape, is_simple_ptr, is_scalar))
+                NVRTCArgMeta(base_type, valid, simple_tv_type, shape, is_simple_ptr, is_scalar))
+            if isinstance(arg.array, int):
+                self.arg_metas[-1].count = arg.array
+            elif isinstance(arg.array, str):
+                raise NotImplementedError("don't support string array", arg)
 
     def __repr__(self) -> str:
         return f"NVRTCKernelMeta[name={self.name},ns={self.ns},args={self.arg_metas}]"
@@ -231,7 +248,7 @@ class NVRTCModule:
     def run_kernel(self, name: str, launch: LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],
                                 Tuple[float, ...], Tuple[int, ...]]):
-        metas: List[NVRTCArgMeta] = [NVRTCArgMeta(False, -1, [])] * len(args)
+        metas: List[NVRTCArgMeta] = [NVRTCArgMeta(NVRTCArgBaseType.Scalar, False, -1, [])] * len(args)
         if self.name_to_meta:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
             assert len(args) == len(self.name_to_meta[name].args)
@@ -253,6 +270,19 @@ class NVRTCModule:
                             f"your tensor {arg.shape}|{cur_dtype}"
                             f" dtype not equal to {expected_dtype}")
                     kernel_args.append((arg, _NVRTCModule.kTensor))
+                    continue
+                elif meta.base_type == NVRTCArgBaseType.TensorView:
+                    if not isinstance(arg, Tensor):
+                        raise ValueError("your arg must be tensor")
+                    assert arg.ndim == meta.shape[0],f"your tensor ndim {arg.ndim} must equal to f{meta.shape[0]}"
+                    if not arg.dtype == meta.simple_type:
+                        cur_dtype = get_npdtype_from_tvdtype(arg.dtype)
+                        expected_dtype = get_npdtype_from_tvdtype(
+                            meta.simple_type)
+                        raise ValueError(
+                            f"your tensor {arg.shape}|{cur_dtype}"
+                            f" dtype not equal to {expected_dtype}")
+                    kernel_args.append((arg, _NVRTCModule.kTensorView))
                     continue
                 else:
                     # we can't ensure arg isn't tv::Tensor.

@@ -446,6 +446,8 @@ public:
     CUstream stream = reinterpret_cast<CUstream>(stream_int);
     std::vector<void *> params;
     std::vector<const void *> tensor_ptrs(args.size());
+    std::vector<tv::Tensor> tensor_view_datas;
+
     int cnt = 0;
     for (auto &arg : args) {
       auto &ten = std::get<0>(arg);
@@ -464,8 +466,23 @@ public:
       }
       case ArgType::kArray: {
         TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
+        // const check is performed in python
         params.push_back(const_cast<void *>(
             reinterpret_cast<const void *>(ten.const_raw_data())));
+        break;
+      }
+      case ArgType::kTensorView: {
+        TV_ASSERT_INVALID_ARG(ten.device() == 0 && ten.ndim() <= 10, "array tensor must be GPU and <= 10 dim");
+        tv::DispatchInt<tv::mp_list_int_range<1, 11>>()(ten.ndim(), [&](auto I){
+          constexpr auto V = int(I);
+          auto tview = ten.tview<const float, V, tv::DefaultPtrTraits, TV_GLOBAL_INDEX, false>();
+          using tview_t = std::decay_t<decltype(tview)>;
+          tv::Tensor storage = tv::empty({sizeof(tview_t)}, tv::uint8, tv::kDeviceCPU);
+          auto tview_data_ptr = reinterpret_cast<tview_t*>(storage.raw_data());
+          tview_data_ptr[0] = tview;
+          tensor_view_datas.push_back(storage);
+          params.push_back(storage.raw_data());
+        });
         break;
       }
       default:

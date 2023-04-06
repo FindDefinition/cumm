@@ -504,6 +504,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")
       .value("kTensor", tv::NVRTCModule::ArgType::kTensor)
       .value("kArray", tv::NVRTCModule::ArgType::kArray)
+      .value("kTensorView", tv::NVRTCModule::ArgType::kTensorView)
       .export_values();
 
   py::class_<tv::Tensor, std::shared_ptr<tv::Tensor>>(m, "Tensor")

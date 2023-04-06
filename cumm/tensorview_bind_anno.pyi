@@ -149,7 +149,7 @@ class NVRTCProgram:
 class NVRTCModule:
     kTensor = 0
     kArray = 1
-    kScalar = 2
+    kTensorView = 2
 
     @overload
     def __init__(self,

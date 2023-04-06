@@ -59,6 +59,7 @@ my vscode highlight extension config:
 
 """
 
+import contextlib
 import pccm
 from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME
 from cumm.nvrtc import CummLLVMModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
@@ -69,9 +70,10 @@ from pccm.utils import get_qualname_of_type
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 import numpy as np
 from cumm import dtypes, tensorview as tv
-from cumm.common import TensorViewNVRTC, GemmBasic
+from cumm.common import TensorViewNVRTC, GemmBasic, TensorViewViewClass
 from cumm.gemm.codeops import div_up
 from cumm.tensorview import nullcontext
+from ccimport import compat
 _TORCH_DTYPE_TO_TV: Dict[Any, int] = {}
 TORCH_TENSOR_NAME = "torch.Tensor"
 
@@ -158,6 +160,9 @@ class TVTensorPlugin(InlineBuilderPlugin):
         prefix = ""
         if obj.is_readonly():
             prefix = "const "
+        if user_arg is not None and isinstance(user_arg, _NVRTCInlineParams):
+            if user_arg.capture_tensor_as_tview:
+                return f"tv::TensorView<{prefix}{dtypes.get_dtype_from_tvdtype(obj.dtype, True)}, {obj.ndim}>"
         return f"{prefix}{dtypes.get_dtype_from_tvdtype(obj.dtype, True)}*"
 
 
@@ -190,22 +195,30 @@ class NumpyPlugin(InlineBuilderPlugin):
         return
 
     def type_conversion(self, obj: np.ndarray, user_arg: Optional[Any] = None):
+        # if isinstance(user_arg, _NVRTCInlineParams):
+        #     if user_arg.is_cpu:
+        #         return obj.reshape(-1).tolist()
+        assert obj.size <= 50, "we only support capture small numpy which will be passed by value to kernel"
         return obj.tolist()
 
     def get_cpp_type(self,
                      obj: np.ndarray,
-                     user_arg: Optional[Any] = None) -> str:
+                     user_arg: Optional[Any] = None) -> Union[str, Tuple[str, int]]:
         ndim = obj.ndim
         dtype = obj.dtype
         if dtype is None:
             dtype = obj.dtype
         cpp_type = _NPDTYPE_TO_LIST_TYPE_STR[dtype]
+        # if isinstance(user_arg, _NVRTCInlineParams):
+        #     if user_arg.is_cpu:
+        #         return cpp_type, obj.size
         array_type = ""
         array_type += "tv::array<" * ndim
         array_type += f"{cpp_type}, "
         shape_rev = obj.shape[::-1]
         array_type += ">, ".join(map(str, shape_rev))
-        return array_type + ">"
+        res = array_type + ">"
+        return res
 
 
 class _NVRTCInlineParams:
@@ -215,14 +228,15 @@ class _NVRTCInlineParams:
                  verbose: bool = False,
                  verbose_path: str = "",
                  measure_time: bool = False,
-                 is_cpu: bool = False) -> None:
+                 is_cpu: bool = False,
+                 capture_tensor_as_tview: bool = False) -> None:
         self.mode = mode
         self.launch = launch
         self.verbose = verbose
         self.verbose_path = verbose_path
         self.measure_time = measure_time
         self.is_cpu = is_cpu
-        
+        self.capture_tensor_as_tview = capture_tensor_as_tview
 
 
 _NVRTC_FUNC_NAME = f"{PCCM_INLINE_NAMESPACE}::{PCCM_INLINE_FUNCTION_NAME}"
@@ -248,10 +262,14 @@ class NVRTCInlineBuilder(InlineBuilder):
             param_deps: Optional[List[pccm.ParameterizedClass]] = None,
             measure_build_time: bool = False,
             reload_when_code_change: bool = False,
-            remote_addr: str = ""):
+            remote_addr: str = "",
+            default_deps: Optional[List[Type[pccm.Class]]] = None):
         if plugins is None:
             plugins = _DEFAULT_KERNEL_PLUGINS
-        deps.extend([TensorViewNVRTC, GemmBasic])
+        if default_deps is None:
+            deps.extend([TensorViewNVRTC, GemmBasic])
+        else:
+            deps.extend(default_deps)
         if build_kwargs is None:
             build_kwargs = {}
         super().__init__(deps=deps,
@@ -265,6 +283,8 @@ class NVRTCInlineBuilder(InlineBuilder):
         self.maximum_1d_threads = 512
         self.measure_build_time = measure_build_time
         self._remote_addr = remote_addr
+
+    
 
     def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
         for k, v in self.modules.items():
@@ -284,7 +304,7 @@ class NVRTCInlineBuilder(InlineBuilder):
 
     def handle_container_code(self, code_str: str, code: pccm.FunctionCode,
                               arg: Optional[_NVRTCInlineParams]):
-        is_cpu = False 
+        is_cpu = False
         meta = pccm.cuda.CudaGlobalFunctionMeta(attrs=["__global__"])
 
         if arg is not None:
@@ -295,20 +315,33 @@ class NVRTCInlineBuilder(InlineBuilder):
         if arg is None:
             code.raw(code_str)
             return meta
-        if arg.mode == CUDAMode.KernelRaw:
-            code.raw(code_str)
-            return meta
-        if not is_cpu:
-            with code.for_(
-                    f"auto {self.index_name} : tv::KernelLoopX<int>({_CUMM_KERNEL_1D_SIZE_NAME})"
-            ):
+        trycatch_ctx = contextlib.nullcontext()
+        if is_cpu:
+            code.raw(f"""
+            int __pccm_error_code = 0;
+            """)
+            trycatch_ctx = code.block("try", end=f"""
+            }}catch (const std::exception& e){{
+                tv::printf2("LLVM Inline Function Exception!. Error:", e.what());
+                __pccm_error_code = 1;
+            }}
+            """)
+        with trycatch_ctx:
+            if arg.mode == CUDAMode.KernelRaw:
                 code.raw(code_str)
-        else:
-            with code.for_(
-                    f"size_t i = 0; i <{_CUMM_KERNEL_1D_SIZE_NAME}; ++i"
-            ):
-                code.raw(code_str)
-            code.raw("return 0;")
+            else:
+                if not is_cpu:
+                    with code.for_(
+                            f"auto {self.index_name} : tv::KernelLoopX<int>({_CUMM_KERNEL_1D_SIZE_NAME})"
+                    ):
+                        code.raw(code_str)
+                else:
+                    with code.for_(
+                            f"size_t i = 0; i <{_CUMM_KERNEL_1D_SIZE_NAME}; ++i"
+                    ):
+                        code.raw(code_str)
+        if is_cpu:
+            code.raw("return __pccm_error_code;")
             code.ret("int")
         return meta
 
@@ -328,29 +361,31 @@ class NVRTCInlineBuilder(InlineBuilder):
             ctx = tv.measure_and_print(f"{name} nvrtc build time")
         # with tv.measure_and_print("INLINE"):
         params = create_nvrtc_code([pccm_cls])
-        is_cpu = False 
+        is_cpu = False
         if user_arg is not None:
             is_cpu = user_arg.is_cpu
         if self._remote_addr != "":
             # this should be used only you want to debug
             # different cuda version.
-            import tensorpc 
+            import tensorpc
             with tensorpc.RemoteManager(self._remote_addr) as robj:
                 mod = robj.remote_call("NVRTCCompiler.compile_nvrtc", params)
         else:
             with ctx:
                 if is_cpu:
+                    if not compat.InLinux:
+                        raise NotImplementedError("cpu jit only support linux")
                     mod = CummLLVMModule([pccm_cls],
-                                                verbose=verbose,
-                                                verbose_path=verbose_path)
+                                         verbose=verbose,
+                                         verbose_path=verbose_path)
                 else:
                     if verbose:
                         mod = CummNVRTCModule([pccm_cls],
-                                                verbose=verbose,
-                                                verbose_path=verbose_path)
+                                              verbose=verbose,
+                                              verbose_path=verbose_path)
                     else:
                         mod = CummNVRTCModuleBase.from_params(params)
-            
+
         return mod
 
     def run_func(self,
@@ -366,16 +401,42 @@ class NVRTCInlineBuilder(InlineBuilder):
                    param: tv.LaunchParam,
                    code: Union[str, pccm.FunctionCode],
                    verbose_path: str = "",
-                   disable_cache: bool = False):
+                   disable_cache: bool = False,
+                   capture_tensor_as_tview: bool = False,
+                   *,
+                   _frame_cnt: int = 2):
         verbose = verbose_path != ""
         user_arg = _NVRTCInlineParams(CUDAMode.KernelRaw, param, verbose,
-                                      verbose_path)
+                                      verbose_path, capture_tensor_as_tview=capture_tensor_as_tview)
+        if capture_tensor_as_tview:
+            if not isinstance(code, pccm.FunctionCode):
+                code_pccm = pccm.code()
+                code_pccm.raw(code)
+                code = code_pccm
+            code.add_dependency(TensorViewViewClass)
         return self.inline(name,
                            code,
                            ".cu",
-                           _frame_cnt=2,
+                           _frame_cnt=_frame_cnt,
                            user_arg=user_arg,
                            disable_cache=disable_cache)
+    
+    def kernel_raw_capture_tview(self,
+                                name: str,
+                                param: tv.LaunchParam,
+                                code: Union[str, pccm.FunctionCode],
+                                verbose_path: str = "",
+                                disable_cache: bool = False):
+        """same as kernel_raw except all tensors (tv.Tensor, torch.Tensor)
+        are captured as tv::TensorView with shape/stride support inside kernel.
+        """
+        return self.kernel_raw(name=name, 
+                              param=param, 
+                              code=code, 
+                              verbose_path=verbose_path, 
+                              disable_cache=disable_cache, 
+                              capture_tensor_as_tview=True,
+                              _frame_cnt=3)
 
     def kernel_1d(self,
                   name: str,
@@ -383,29 +444,57 @@ class NVRTCInlineBuilder(InlineBuilder):
                   stream: int,
                   code: Union[str, pccm.FunctionCode],
                   verbose_path: str = "",
-                  disable_cache: bool = False):
+                  disable_cache: bool = False,
+                  capture_tensor_as_tview: bool = False,
+                  _frame_cnt: int = 2):
         verbose = verbose_path != ""
         num = int(num)
         user_arg = _NVRTCInlineParams(CUDAMode.Kernel1D,
                                       self.get_1d_param(num, stream=stream),
-                                      verbose, verbose_path)
+                                      verbose, verbose_path,
+                                      capture_tensor_as_tview=capture_tensor_as_tview)
         additional_args = {
             _CUMM_KERNEL_1D_SIZE_NAME: num,
         }
+        if capture_tensor_as_tview:
+            if not isinstance(code, pccm.FunctionCode):
+                code_pccm = pccm.code()
+                code_pccm.raw(code)
+                code = code_pccm
+            code.add_dependency(TensorViewViewClass)
         return self.inline(name,
                            code,
                            ".cu",
                            additional_args,
-                           _frame_cnt=2,
+                           _frame_cnt=_frame_cnt,
                            user_arg=user_arg,
                            disable_cache=disable_cache)
 
+    def kernel_1d_capture_tview(self,
+                                name: str,
+                                num: int,
+                                stream: int,
+                                code: Union[str, pccm.FunctionCode],
+                                verbose_path: str = "",
+                                disable_cache: bool = False):
+        """same as kernel_1d except all tensors (tv.Tensor, torch.Tensor)
+        are captured as tv::TensorView with shape/stride support inside kernel.
+        """
+        return self.kernel_1d(name=name, 
+                              num=num, 
+                              stream=stream, 
+                              code=code, 
+                              verbose_path=verbose_path, 
+                              disable_cache=disable_cache, 
+                              capture_tensor_as_tview=True,
+                              _frame_cnt=3)
+
     def cpu_kernel_1d(self,
-                  name: str,
-                  num: int,
-                  code: Union[str, pccm.FunctionCode],
-                  verbose_path: str = "",
-                  disable_cache: bool = False):
+                      name: str,
+                      num: int,
+                      code: Union[str, pccm.FunctionCode],
+                      verbose_path: str = "",
+                      disable_cache: bool = False):
         verbose = verbose_path != ""
         num = int(num)
         user_arg = _NVRTCInlineParams(CUDAMode.Kernel1D,
@@ -424,21 +513,27 @@ class NVRTCInlineBuilder(InlineBuilder):
                            disable_cache=disable_cache)
 
     def cpu_kernel_raw(self,
-                   name: str,
-                #    param: tv.LaunchParam,
-                   code: Union[str, pccm.FunctionCode],
-                   verbose_path: str = "",
-                   disable_cache: bool = False):
+                       name: str,
+                       #    param: tv.LaunchParam,
+                       code: Union[str, pccm.FunctionCode],
+                       verbose_path: str = "",
+                       disable_cache: bool = False):
         verbose = verbose_path != ""
-        user_arg = _NVRTCInlineParams(CUDAMode.KernelRaw, 
-                    tv.LaunchParam((1,1,1), (1,1,1)), verbose,
-                    verbose_path, is_cpu=True)
+        user_arg = _NVRTCInlineParams(CUDAMode.KernelRaw,
+                                      tv.LaunchParam(
+                                          (1, 1, 1), (1, 1, 1)), verbose,
+                                      verbose_path, is_cpu=True)
         return self.inline(name,
                            code,
                            ".cu",
                            _frame_cnt=2,
                            user_arg=user_arg,
                            disable_cache=disable_cache)
+
+    def cpu_prepare_libraries(self, *libs: str):
+        import llvmlite.binding as llvm
+        for l in libs:
+            llvm.load_library_permanently(l)
 
     def get_1d_param(self, num: int, smem: int = 0, stream: int = 0):
         if num > self.maximum_1d_threads:
@@ -453,7 +548,8 @@ def main():
     import torch
     from cumm import tensorview as tv
     from cumm.common import TensorViewArrayLinalg, TensorViewNVRTCHashKernel
-    INLINE = NVRTCInlineBuilder([TensorViewArrayLinalg, TensorViewNVRTCHashKernel], reload_when_code_change=True)
+    INLINE = NVRTCInlineBuilder(
+        [TensorViewArrayLinalg, TensorViewNVRTCHashKernel], reload_when_code_change=True)
 
     print(1)
     a = tv.zeros([2], tv.float32, 0)

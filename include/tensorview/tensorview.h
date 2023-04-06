@@ -13,30 +13,38 @@
 // limitations under the License.
 
 #pragma once
-#include "common.h"
 #include "core/const_ops.h"
-#include "dtypes.h"
 #include "mp_helper.h"
 
 #include "core/vecarray.h"
 
 #include "core/defs.h"
 
+#ifdef __CUDACC_RTC__
+#include <tensorview/core/nvrtc_std.h>
+#else
+
+#include "common.h"
+#include "dtypes.h"
 #include "prettyprint.h"
 #include <algorithm>
 #include <cassert>
-
 #include <cstdlib>
-#include <iostream>
 #include <iterator>
 #include <memory>
 #include <sstream>
 #include <type_traits>
 #include <vector>
+#endif
+
 #ifdef TV_CUDA
-#include <cuda.h>
+
 #include <cuda_fp16.h>
+#ifndef __CUDACC_RTC__
+
+#include <cuda.h>
 #include <cuda_runtime_api.h>
+#endif
 #endif
 #if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
 #include <cuda_bf16.h>
@@ -45,11 +53,14 @@
 namespace tv {
 
 #ifdef TV_CUDA
+#ifndef __CUDACC_RTC__
+
 struct GPU {
   GPU(cudaStream_t s = 0) : mStream(s) {}
   virtual cudaStream_t getStream() const { return mStream; }
   cudaStream_t mStream = 0;
 };
+#endif
 #endif
 struct CPU {};
 
@@ -146,6 +157,7 @@ struct ShapeBase : public vecarray<Tindex, MaxDim> {
     }
     this->size_ = shape.ndim();
   }
+#ifndef __CUDACC_RTC__
   template <typename Iterator, typename = detail::_RequireInputIter<Iterator>>
   ShapeBase(Iterator first, Iterator last)
       : vecarray<Tindex, MaxDim>(first, last) {}
@@ -153,7 +165,7 @@ struct ShapeBase : public vecarray<Tindex, MaxDim> {
       : vecarray<Tindex, MaxDim>(arr.begin(), arr.end()) {}
   ShapeBase(const std::vector<int64_t> &arr)
       : vecarray<Tindex, MaxDim>(arr.begin(), arr.end()) {}
-
+#endif
   TV_HOST_DEVICE ShapeBase<MaxDim, Tindex> &
   operator=(const ShapeBase<MaxDim, Tindex> &shape) {
     TV_ASSERT(shape.ndim() <= MaxDim);
@@ -263,6 +275,7 @@ struct ShapeBase : public vecarray<Tindex, MaxDim> {
 };
 
 using Shape = ShapeBase<TV_MAX_DIM, TV_GLOBAL_INDEX>;
+#ifndef __CUDACC_RTC__
 
 template <class... Inds>
 TV_HOST_DEVICE_INLINE unsigned rowArrayIdx(std::vector<TV_GLOBAL_INDEX> &shape,
@@ -291,7 +304,7 @@ inline TV_GLOBAL_INDEX rowArrayIdx(std::vector<TV_GLOBAL_INDEX> &shape,
   }
   return offset;
 }
-
+#endif
 template <class... Inds>
 TV_HOST_DEVICE_INLINE TV_GLOBAL_INDEX rowArrayIdx(const Shape &shape,
                                                   Inds... indexes) {
@@ -682,6 +695,7 @@ struct TensorView {
 
   template <typename T2 = T,
             typename = typename std::enable_if_t<!std::is_const<T2>::value>>
+  TV_HOST_DEVICE_INLINE
   operator std::enable_if_t<!std::is_const<T2>::value, const_type>() {
     return const_type(ptr_, shape_);
   } // conversion function
@@ -871,6 +885,8 @@ struct TensorView {
         ptr_, shape_.squeeze < Rank == -1 ? TV_MAX_DIM : Rank - 1 > (dim));
   }
   TV_HOST_DEVICE_INLINE size_t size() const { return shape_.size(); }
+
+#ifndef __CUDACC_RTC__
   template <typename Os>
   std::string repr(Os &ss, int limit = 1000, int limit_axis = 6) const {
     if (empty())
@@ -944,7 +960,7 @@ struct TensorView {
     std::ostringstream ss;
     return repr(ss);
   }
-
+#endif
 protected:
   template <typename T1> TV_HOST_DEVICE_INLINE Slice to_slice(T1 s) const {
     return Slice{int(s), -1, -1};
@@ -956,6 +972,7 @@ protected:
   tv_shape_t shape_;
   tv_shape_t stride_;
 };
+#ifndef __CUDACC_RTC__
 
 template <typename T> TensorView<T> vector2tv(std::vector<T> &arr) {
   return TensorView<T>(arr.data(), {arr.size()});
@@ -1108,5 +1125,5 @@ TV_HOST_DEVICE void printTensorView(const T *ptr, Shape shape,
                                     const char *format) {
   return printTensorView(TensorView<const T>(ptr, shape), format);
 }
-
+#endif
 } // namespace tv

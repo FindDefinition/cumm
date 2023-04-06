@@ -118,6 +118,12 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <random>
 
 namespace tv {
+
+enum DeviceType {
+  kDeviceCPU = -1,
+  kDeviceCUDA = 0,
+};
+
 namespace detail {
 
 using dtype_collection_t =
@@ -683,10 +689,13 @@ struct Tensor {
 
   template <typename T, int Rank = -1,
             template <class> class PtrTraits = DefaultPtrTraits,
-            typename Tindex = TV_GLOBAL_INDEX>
+            typename Tindex = TV_GLOBAL_INDEX,
+            bool DoTypeCheck = true>
   decltype(auto) tview() const {
     static_assert(Rank == -1 || Rank > 0, "error");
-    template_dtype_check<T>();
+    if (DoTypeCheck){
+      template_dtype_check<T>();
+    }
     return if_constexpr<(Rank > 0)>(
         [&](auto _) {
           // detail::_if_constexpr_workaround<Rank, (Rank > 0)> _val;
@@ -699,7 +708,7 @@ struct Tensor {
           }
           return TensorView<const std::remove_const_t<T>, Rank, PtrTraits,
                             Tindex>(
-              reinterpret_cast<const std::remove_const_t<T> *>(this->data<T>()),
+              reinterpret_cast<const std::remove_const_t<T> *>(this->data<T, DoTypeCheck>()),
               _(shape), _(stride));
         },
         [&](auto _) {
@@ -711,17 +720,20 @@ struct Tensor {
           }
           return TensorView<const std::remove_const_t<T>, Rank, PtrTraits,
                             Tindex>(
-              reinterpret_cast<const std::remove_const_t<T> *>(this->data<T>()),
+              reinterpret_cast<const std::remove_const_t<T> *>(this->data<T, DoTypeCheck>()),
               _(shape), _(stride));
         });
   }
 
   template <typename T, int Rank = -1,
             template <class> class PtrTraits = DefaultPtrTraits,
-            typename Tindex = TV_GLOBAL_INDEX>
+            typename Tindex = TV_GLOBAL_INDEX,
+            bool DoTypeCheck = true>
   decltype(auto) tview() {
     static_assert(Rank == -1 || Rank > 0, "error");
-    template_dtype_check<T>();
+    if (DoTypeCheck){
+      template_dtype_check<T>();
+    }
     return if_constexpr<(Rank > 0)>(
         [&](auto _) {
           // detail::_if_constexpr_workaround<Rank, (Rank > 0)> _val;
@@ -733,7 +745,7 @@ struct Tensor {
             stride[i] = stride_[i];
           }
           return TensorView<T, Rank, PtrTraits, Tindex>(
-              reinterpret_cast<T *>(this->data<T>()), _(shape), _(stride));
+              reinterpret_cast<T *>(this->data<T, DoTypeCheck>()), _(shape), _(stride));
         },
         [&](auto _) {
           ShapeBase<TV_MAX_DIM, Tindex> shape(this->ndim()),
@@ -743,7 +755,7 @@ struct Tensor {
             stride[i] = stride_[i];
           }
           return TensorView<T, Rank, PtrTraits, Tindex>(
-              reinterpret_cast<T *>(this->data<T>()), _(shape), _(stride));
+              reinterpret_cast<T *>(this->data<T, DoTypeCheck>()), _(shape), _(stride));
         });
   }
 
@@ -1186,22 +1198,26 @@ public:
     return *this;
   }
 
-  template <typename T> T *data() {
+  template <typename T, bool DoTypeCheck = true> T *data() {
     if (empty()) {
       return nullptr;
     }
-    template_dtype_check<T>();
+    if (DoTypeCheck){
+      template_dtype_check<T>();
+    }
     if (!std::is_const<T>::value){
       writable_check();
     }
     return reinterpret_cast<T *>(raw_data(false));
   }
 
-  template <typename T> const T *data() const {
+  template <typename T, bool DoTypeCheck = true> const T *data() const {
     if (empty()) {
       return nullptr;
     }
-    template_dtype_check<T>();
+    if (DoTypeCheck){
+      template_dtype_check<T>();
+    }
     return reinterpret_cast<const T *>(raw_data());
   }
 

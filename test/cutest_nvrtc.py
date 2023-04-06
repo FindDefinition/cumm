@@ -74,19 +74,19 @@ def test_nvrtc2():
     values = tv.zeros([5000], tv.int32, 0)
     kv = tv.zeros([5000, 2], tv.int32, 0)
 
-    inliner.kernel_1d("wtf", keys.dim(0), 0, f"""
+    inliner.kernel_1d_capture_tview("wtf", keys.dim(0), 0, f"""
     tv::printf2_once(tv::hash::LinearHashTableSplit<int, int>::empty_key);
-    $keys[i] = tv::hash::LinearHashTableSplit<int, int>::empty_key;
-    $kv[i * 2] = tv::hash::LinearHashTable<int, int>::empty_key;
+    $keys(i) = tv::hash::LinearHashTableSplit<int, int>::empty_key;
+    $kv(i, 0) = tv::hash::LinearHashTable<int, int>::empty_key;
     """)
-    inliner.kernel_1d("wtf2", 1, 0, f"""
-    tv::hash::LinearHashTableSplit<int, int> table($keys, $values, 2500);
+    inliner.kernel_1d_capture_tview("wtf2", 1, 0, f"""
+    tv::hash::LinearHashTableSplit<int, int> table($keys.data(), $values.data(), 2500);
     tv::hash::LinearHashTable<int, int> table2(
-        reinterpret_cast<tv::hash::LinearHashTable<int, int>::value_type*>($kv), 2500);
+        reinterpret_cast<tv::hash::LinearHashTable<int, int>::value_type*>($kv.data()), 2500);
 
     table.insert(5, 1);
     table2.insert(5, 1);
-    """, verbose_path="/home/yy/Projects/cumm/build")
+    """)
 
     inliner.kernel_1d("wtf3", 1, 0, f"""
     namespace op = tv::arrayops;
@@ -231,7 +231,7 @@ def test_cpu_v1():
 
 def test_cpu_v2():
     from pccm.builder.inliner import InlineBuilder
-    inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
+    inliner = NVRTCInlineBuilder([TensorViewArrayLinalg, TensorView], root=PACKAGE_ROOT.parent)
     # init driver
     a = tv.zeros([3], tv.float32, -1)
     t = np.zeros((4, 4), np.float32)
@@ -239,23 +239,15 @@ def test_cpu_v2():
     cc = tv.zeros([3], tv.float32, -1)
     theta = np.radians(30)
     c, s = np.cos(theta), np.sin(theta)
-    R = np.array(((c, -s, 0), (s, c, 0), (0, 0, 1)), np.float32)
+    R = np.array(((c, -s, 0), (s, c, 0), (0, 0, 1)), np.float32)# .reshape(-1)
+    R2 = np.random.uniform(-1, 1, size=[2, 3])
     # inliner = InlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
     # cpu_kernel_raw
     inliner.cpu_kernel_raw("wtf3", f"""
-    namespace op = tv::arrayops;
-    tv::array_nd<float, 4, 4> wf;
-    auto tr = $t;
-    auto p = reinterpret_cast<tv::array<float, 3>*>($a)[0];
-    tv::array<float, 3> b;
-    tv::printf2(b[0], "WTF");
-    b[0] = p[0] * tr[0][0] + p[1] * tr[0][1] + p[2] * tr[0][2] + tr[0][3];
-    b[1] = p[0] * tr[1][0] + p[1] * tr[1][1] + p[2] * tr[1][2] + tr[1][3];
-    b[2] = p[0] * tr[2][0] + p[1] * tr[2][1] + p[2] * tr[2][2] + tr[2][3];
-    reinterpret_cast<tv::array<float, 3>*>($b_out)[0] = b;
+    tv::ssprint($R, sizeof(decltype($R)), $R2);
     """)
     breakpoint()
     print(1)
 
 if __name__ == "__main__":
-    test_nvrtc3()
+    test_nvrtc2()

@@ -108,6 +108,33 @@ template <typename _Tp> struct add_cv {
   typedef typename add_const<typename add_volatile<_Tp>::type>::type type;
 };
 
+template <typename _Tp> using remove_const_t = typename remove_const<_Tp>::type;
+
+/// Alias template for remove_volatile
+template <typename _Tp>
+using remove_volatile_t = typename remove_volatile<_Tp>::type;
+
+/// Alias template for remove_cv
+template <typename _Tp> using remove_cv_t = typename remove_cv<_Tp>::type;
+
+/// Alias template for add_const
+template <typename _Tp> using add_const_t = typename add_const<_Tp>::type;
+
+/// Alias template for add_volatile
+template <typename _Tp> using add_volatile_t = typename add_volatile<_Tp>::type;
+
+/// Alias template for add_cv
+template <typename _Tp> using add_cv_t = typename add_cv<_Tp>::type;
+/// is_const
+template <typename> struct is_const : public false_type {};
+
+template <typename _Tp> struct is_const<_Tp const> : public true_type {};
+
+/// is_volatile
+template <typename> struct is_volatile : public false_type {};
+
+template <typename _Tp> struct is_volatile<_Tp volatile> : public true_type {};
+
 template <typename _Tp, typename> struct __remove_pointer_helper {
   typedef _Tp type;
 };
