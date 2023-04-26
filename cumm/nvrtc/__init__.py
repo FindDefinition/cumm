@@ -16,7 +16,7 @@ from cumm import PACKAGE_ROOT
 from cumm import tensorview as tv
 from cumm.common import TensorViewKernel, _get_cuda_include_lib
 from cumm.core_cc.tensorview_bind import Tensor
-import numpy as np 
+import numpy as np
 
 LLVM_IS_INITED = False
 LAZY_LOAD_LIBRARIES: Set[str] = set()
@@ -26,6 +26,7 @@ LLVM_GLOBAL_ENGINE = None
 _cudadevrt_libname = "libcudadevrt.a"
 if compat.InWindows:
     _cudadevrt_libname = "cudadevrt.lib"
+
 
 def get_cudadevrt_path():
     _, lib64 = _get_cuda_include_lib()
@@ -38,16 +39,19 @@ def get_cudadevrt_path():
             return c
     return None
 
+
 def cufilt(name: str):
     res = tv.cufilt(name)
     if res:
-        return res 
+        return res
     else:
         # if fail, use cu++filt.
         # in windows, gcc-style demangle isn't available.
         # so we can only use subprocess before cuda 11.4.
-        res = subprocess.check_output(["cu++filt", name]).decode("utf-8").strip()
-        return res 
+        res = subprocess.check_output(["cu++filt",
+                                       name]).decode("utf-8").strip()
+        return res
+
 
 def _lazy_load_llvm():
     import llvmlite.binding as llvm
@@ -66,8 +70,8 @@ def _lazy_load_llvm():
         # llvm.load_library_permanently("librt.so")
         # llvm.load_library_permanently("libpthread.so")
 
+        LLVM_IS_INITED = True
 
-        LLVM_IS_INITED = True 
 
 def _lazy_load_lib_for_llvm(libs: List[str], libpaths: List[str]):
     import llvmlite.binding as llvm
@@ -85,9 +89,10 @@ def _lazy_load_lib_for_llvm(libs: List[str], libpaths: List[str]):
                     if lib_candidate.exists():
                         llvm.load_library_permanently(str(lib_candidate))
                         loaded = True
-                        break 
+                        break
                 if not loaded:
                     raise
+
 
 def create_execution_engine(lazy_load_llvm: bool):
     """
@@ -123,6 +128,7 @@ def compile_ir(engine, llvm_ir):
     engine.run_static_constructors()
     return mod
 
+
 def compile_bitcode(engine, llvm_bitcode):
     """
     Compile the LLVM IR string with the given engine.
@@ -139,6 +145,7 @@ def compile_bitcode(engine, llvm_bitcode):
     engine.run_static_constructors()
     return mod
 
+
 @dataclasses.dataclass
 class NVRTCModuleParams:
     code: str
@@ -151,13 +158,26 @@ class NVRTCModuleParams:
     includes: List[str] = dataclasses.field(default_factory=list)
     libraries: List[str] = dataclasses.field(default_factory=list)
     libpaths: List[str] = dataclasses.field(default_factory=list)
+    debug_code: str = ""
+
+def _unique_list_keep_order(seq: list):
+    if compat.Python3_7AndLater:
+        # https://www.peterbe.com/plog/fastest-way-to-uniquify-a-list-in-python-3.6
+        # only python 3.7 language std ensure the preserve-order dict
+        return list(dict.fromkeys(seq))
+    else:
+        # https://stackoverflow.com/questions/480214/how-do-you-remove-duplicates-from-a-list-whilst-preserving-order
+        seen = set()
+        seen_add = seen.add
+        return [x for x in seq if not (x in seen or seen_add(x))]
 
 def create_nvrtc_code(cus: List[pccm.Class],
-                 namespace_root: Optional[Union[str, Path]] = None,
-                 cudadevrt_path: str = "",
-                 custom_names: Optional[List[str]] = None,
-                 std: str = "c++14",
-                 cpu_code: bool = False) -> NVRTCModuleParams:
+                      namespace_root: Optional[Union[str, Path]] = None,
+                      cudadevrt_path: str = "",
+                      custom_names: Optional[List[str]] = None,
+                      std: str = "c++14",
+                      cpu_code: bool = False,
+                      add_arch_flag: bool = True) -> NVRTCModuleParams:
     cg = CodeGenerator([])
     user_cus = cg.build_graph(cus, namespace_root)
     # iterate cus and get all kernels
@@ -176,15 +196,17 @@ def create_nvrtc_code(cus: List[pccm.Class],
                     continue
                 # is global function. firstly check types
                 meta = tv.NVRTCKernelMeta(meta.name, cu_ns,
-                                            decl.code.arguments)
+                                          decl.code.arguments)
                 func_qualname = meta.name
                 if cu_ns:
                     func_qualname = f"{cu_ns}::{meta.name}"
                 name_to_meta[func_qualname] = meta
 
     # generate code for nvrtc
-    header_dict, _, _ = cg.code_generation(user_cus,
-                                            global_header_only=True)
+    outer_code = list(
+        pccm.core.CodeGenerator.generate_cu_code_v2(
+            cus[0], True, global_header_only=True)[0].values())[0].to_string()
+    header_dict, _, _ = cg.code_generation(user_cus, global_header_only=True)
     header_code_dict = {k: v.to_string() for k, v in header_dict.items()}
     final_code = ""
     for k, _ in header_dict.items():
@@ -197,8 +219,11 @@ def create_nvrtc_code(cus: List[pccm.Class],
     global_cflags = extern_build_meta.get_global_cflags()
     local_cflags = extern_build_meta.get_local_cflags()
     if not cpu_code:
-        arch = tv.get_compute_capability()
-        opts.append(f"--gpu-architecture=sm_{arch[0]}{arch[1]}")
+        if add_arch_flag:
+            # if we use CummNVRTCModule to compile ptx for optix, 
+            # we can't add arch flag
+            arch = tv.get_compute_capability()
+            opts.append(f"--gpu-architecture=sm_{arch[0]}{arch[1]}")
         if cudadevrt_path and Path(cudadevrt_path).exists():
             opts.append("--relocatable-device-code=true")
         if "nvcc" in global_cflags:
@@ -215,9 +240,9 @@ def create_nvrtc_code(cus: List[pccm.Class],
         if "clang++" in local_cflags:
             opts.extend(local_cflags["clang++"])
     # print(opts)
-    opts = list(set(opts))
-
-    includes = []
+    
+    opts = _unique_list_keep_order(opts)
+    includes: List[str] = []
     for inc in extern_build_meta.get_global_includes():
         opts.append("-I")
         opts.append(str(inc))
@@ -229,12 +254,21 @@ def create_nvrtc_code(cus: List[pccm.Class],
     name_exprs = list(name_to_meta.keys())
     if custom_names is not None:
         name_exprs.extend(custom_names)
-    return NVRTCModuleParams(final_code, header_code_dict,
-        opts, name_exprs, name_to_meta, "kernel.cu", cudadevrt_path,
-        includes=includes, libraries=extern_build_meta.libraries,
-        libpaths=extern_build_meta.libpaths)
+    return NVRTCModuleParams(final_code,
+                             header_code_dict,
+                             opts,
+                             name_exprs,
+                             name_to_meta,
+                             "kernel.cu",
+                             cudadevrt_path,
+                             includes=includes,
+                             libraries=extern_build_meta.libraries,
+                             libpaths=list(map(str, extern_build_meta.libpaths)),
+                             debug_code=outer_code)
+
 
 class CummNVRTCModuleBase(tv.NVRTCModule):
+
     def __init__(self,
                  code: str,
                  headers: Optional[Dict[str, str]] = None,
@@ -305,24 +339,29 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                         continue
                     const_values[name] = 0
 
-
         self.const_values = const_values
 
     @classmethod
     def from_params(cls, params: NVRTCModuleParams):
-        return cls(params.code,
-                params.headers,
-                params.opts,
-                name_exprs=params.name_exprs,
-                name_to_meta=params.name_to_meta,
-                cudadevrt_path=params.cudadevrt_path)
+        try:
+            return cls(params.code,
+                       params.headers,
+                       params.opts,
+                       name_exprs=params.name_exprs,
+                       name_to_meta=params.name_to_meta,
+                       cudadevrt_path=params.cudadevrt_path)
+        except RuntimeError:
+            print("Build Error. Kernel Code:\n{}".format(params.debug_code))
+            raise
 
     @property
     def kernels(self):
         assert self.name_to_meta is not None
         return list(self.name_to_meta.keys())
 
+
 class CummNVRTCModule(CummNVRTCModuleBase):
+
     def __init__(self,
                  cus: List[pccm.Class],
                  namespace_root: Optional[Union[str, Path]] = None,
@@ -330,8 +369,10 @@ class CummNVRTCModule(CummNVRTCModuleBase):
                  cudadevrt_path: str = "",
                  custom_names: Optional[List[str]] = None,
                  verbose_path: str = "",
-                 std: str = "c++14") -> None:
-        mod_params = create_nvrtc_code(cus, namespace_root, cudadevrt_path, custom_names, std)
+                 std: str = "c++14",
+                 add_arch_flag: bool = True) -> None:
+        mod_params = create_nvrtc_code(cus, namespace_root, cudadevrt_path,
+                                       custom_names, std, add_arch_flag=add_arch_flag)
         if verbose:
             if verbose_path:
                 verbose_path_p = Path(verbose_path)
@@ -344,33 +385,43 @@ class CummNVRTCModule(CummNVRTCModuleBase):
                 for k, v in mod_params.headers.items():
                     print(k)
                     print(v)
-        super().__init__(mod_params.code,
-                         mod_params.headers,
-                         mod_params.opts,
-                         name_exprs=mod_params.name_exprs,
-                         name_to_meta=mod_params.name_to_meta,
-                         cudadevrt_path=cudadevrt_path)
-        
+        try:
+            super().__init__(mod_params.code,
+                            mod_params.headers,
+                            mod_params.opts,
+                            name_exprs=mod_params.name_exprs,
+                            name_to_meta=mod_params.name_to_meta,
+                            cudadevrt_path=cudadevrt_path)
+        except RuntimeError:
+            print("Build Error. Kernel Code:\n{}".format(mod_params.debug_code))
+            raise
+
 
 def _array_struct_nested(shape, type):
     if shape:
+
         class Array(ctypes.Structure):
-            _fields_ = (
-                ("array_", _array_struct_nested(shape[1:], type) * shape[0]),
-            )
+            _fields_ = (("array_",
+                         _array_struct_nested(shape[1:], type) * shape[0]), )
 
         return Array
     else:
         return type
 
+
 class CummLLVMModule:
+
     def __init__(self,
                  cus: List[pccm.Class],
                  namespace_root: Optional[Union[str, Path]] = None,
                  verbose: bool = False,
                  verbose_path: str = "",
                  std: str = "c++14") -> None:
-        self.mod_params: NVRTCModuleParams = create_nvrtc_code(cus, namespace_root, "", [], std, cpu_code=True)
+        self.mod_params: NVRTCModuleParams = create_nvrtc_code(cus,
+                                                               namespace_root,
+                                                               "", [],
+                                                               std,
+                                                               cpu_code=True)
         if verbose:
             if verbose_path:
                 verbose_path_p = Path(verbose_path)
@@ -394,7 +445,8 @@ class CummLLVMModule:
         _lazy_load_llvm()
         # use clang++ to get ir
         opts = self.mod_params.opts
-        _lazy_load_lib_for_llvm(self.mod_params.libraries, self.mod_params.libpaths)
+        _lazy_load_lib_for_llvm(self.mod_params.libraries,
+                                self.mod_params.libpaths)
         with tempfile.TemporaryDirectory() as fdir:
             inc_dir = Path(fdir) / "include"
             for k, v in self.mod_params.headers.items():
@@ -412,16 +464,26 @@ class CummLLVMModule:
                 # https://groups.google.com/g/llvm-dev/c/WUMwGnaaaSc
                 # https://stackoverflow.com/questions/68869921/lli-is-generating-run-time-error-for-clang-generated-ir-while-the-generated-ex
                 if self._use_llvm_bit_code:
-                    subprocess.check_output(["clang++", "-emit-llvm", "-fno-use-cxa-atexit", "-c", f2.name, *opts, "-O3", "-I", str(inc_dir), "-o", str(out_name)])
+                    subprocess.check_output([
+                        "clang++", "-emit-llvm", "-fno-use-cxa-atexit", "-c",
+                        f2.name, *opts, "-O3", "-I",
+                        str(inc_dir), "-o",
+                        str(out_name)
+                    ])
                 else:
-                    subprocess.check_output(["clang++", "-S", "-emit-llvm", "-fno-use-cxa-atexit", "-c", f2.name, *opts, "-O3", "-I", str(inc_dir), "-o", str(out_name)])
+                    subprocess.check_output([
+                        "clang++", "-S", "-emit-llvm", "-fno-use-cxa-atexit",
+                        "-c", f2.name, *opts, "-O3", "-I",
+                        str(inc_dir), "-o",
+                        str(out_name)
+                    ])
             # read ir and pass to llvmlite
             with out_name.open("rb" if self._use_llvm_bit_code else "r") as f:
                 llvm_ir = f.read()
         # print(llvm_ir)
         # with open("/home/yy/Projects/cumm/build/dev_llvm_ir.ll", "w") as f:
         #     f.write(llvm_ir)
-        assert LLVM_GLOBAL_ENGINE is not None 
+        assert LLVM_GLOBAL_ENGINE is not None
         # self._llvm_engine = create_execution_engine()
         self._llvm_engine = LLVM_GLOBAL_ENGINE
 
@@ -430,13 +492,13 @@ class CummLLVMModule:
         else:
             self._llvm_mod = compile_ir(self._llvm_engine, llvm_ir)
         # breakpoint()
-    
+
     def _get_loaded_llvm_mod(self):
-        assert self._llvm_mod is not None 
+        assert self._llvm_mod is not None
         return self._llvm_mod
 
     def _get_loaded_llvm_engine(self):
-        assert self._llvm_engine is not None 
+        assert self._llvm_engine is not None
         return self._llvm_engine
 
     def run_kernel(self, name: str, launch: tv.LaunchParam,
@@ -444,11 +506,12 @@ class CummLLVMModule:
                                 Tuple[float, ...], Tuple[int, ...]]):
         if self._llvm_mod is None:
             self.load()
-        metas: List[tv.NVRTCArgMeta] = [tv.NVRTCArgMeta(False, -1, [])] * len(args)
+        metas: List[tv.NVRTCArgMeta] = [tv.NVRTCArgMeta(False, -1, [])
+                                        ] * len(args)
         if self.name_to_meta:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
             assert len(args) == len(self.name_to_meta[name].args)
-            metas = self.name_to_meta[name].arg_metas        
+            metas = self.name_to_meta[name].arg_metas
         from pccm.builder.inliner import PCCM_INLINE_FUNCTION_NAME
         mod = self._get_loaded_llvm_mod()
         func_mangle_name = ""
@@ -456,7 +519,8 @@ class CummLLVMModule:
             if PCCM_INLINE_FUNCTION_NAME in func.name:
                 func_mangle_name = func.name
         assert func_mangle_name != ""
-        func_ptr = self._get_loaded_llvm_engine().get_function_address(func_mangle_name)
+        func_ptr = self._get_loaded_llvm_engine().get_function_address(
+            func_mangle_name)
         # breakpoint()
         assert func_ptr != 0, f"get function {name} failed."
         # cfunc = ctypes.CFUNCTYPE(c_double, c_double, c_double)(func_ptr)
@@ -487,22 +551,30 @@ class CummLLVMModule:
                         if not meta.is_scalar:
                             assert meta.count is None, "don't support non-scalar array"
                             assert not isinstance(arg, Tensor)
-                            dtype = tv.get_npdtype_from_tvdtype(meta.simple_type)
+                            dtype = tv.get_npdtype_from_tvdtype(
+                                meta.simple_type)
                             arg_array = np.array(arg, dtype=dtype)
                             if not arg_array.shape:
                                 arg_array = arg_array.reshape(1)
-                            assert list(arg_array.shape) == meta.shape, f"{arg_array.shape}"
-                            ctype = _array_struct_nested(arg_array.shape, np.ctypeslib.as_ctypes_type(dtype))
-                            cfunc_args.append(ctype.from_buffer_copy(memoryview(arg_array)))
+                            assert list(arg_array.shape
+                                        ) == meta.shape, f"{arg_array.shape}"
+                            ctype = _array_struct_nested(
+                                arg_array.shape,
+                                np.ctypeslib.as_ctypes_type(dtype))
+                            cfunc_args.append(
+                                ctype.from_buffer_copy(memoryview(arg_array)))
                             cfunc_types.append(ctype)
                             continue
                         else:
                             # scalar may have count
                             assert not isinstance(arg, Tensor)
-                            dtype = tv.get_npdtype_from_tvdtype(meta.simple_type)
+                            dtype = tv.get_npdtype_from_tvdtype(
+                                meta.simple_type)
                             ctype = np.ctypeslib.as_ctypes_type(dtype)
                             if meta.count is not None:
-                                assert isinstance(arg, list), f"only support np.ndarray -> type[] format, {type(arg)}"
+                                assert isinstance(
+                                    arg, list
+                                ), f"only support np.ndarray -> type[] format, {type(arg)}"
                                 ctype = ctype * meta.count
                                 # arg = ctype.from_buffer_copy(memoryview(arg_array))
                                 arg = ctype(*arg)
@@ -539,8 +611,10 @@ class CummLLVMModule:
         res = cfunc_type(*cfunc_args)
         # print(res)
         if res != 0:
-            raise RuntimeError("LLVM run failed. see error logged to stdout before.")
-        return res 
+            raise RuntimeError(
+                "LLVM run failed. see error logged to stdout before.")
+        return res
+
 
 if __name__ == "__main__":
     print(_array_struct_nested([4, 4], ctypes.c_float))

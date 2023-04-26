@@ -20,9 +20,9 @@ import traceback
 from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
 import tensorpc
 
-from tensorpc.apps.flow import flowapp
+from tensorpc.flow import flowapp
 
-from tensorpc.apps.flow.flowapp import mui, three
+from tensorpc.flow import mui, three
 import numpy as np
 import inspect
 from cumm import dtypes
@@ -128,9 +128,9 @@ class WarpPanel(three.Group):
             btn = three.ToggleButton(f"W{i}", size, size,
                                      partial(self.on_warp_select, index=i))
             btn.mesh.set_pointer_callback(
-                on_over=three.EventCallback(partial(self.on_warp_over,
+                on_over=three.EventHandler(partial(self.on_warp_over,
                                                     index=i)),
-                on_out=three.EventCallback(partial(self.on_warp_out, index=i)))
+                on_out=three.EventHandler(partial(self.on_warp_out, index=i)))
             btn.props.position = (x, y, 0)
             layout[f"warp_{i}"] = btn
             self.warps_btns.append(btn)
@@ -147,9 +147,9 @@ class WarpPanel(three.Group):
                     str(idx), size, size,
                     partial(self.on_lane_select, index=idx))
 
-                btn.mesh.set_pointer_callback(on_over=three.EventCallback(
+                btn.mesh.set_pointer_callback(on_over=three.EventHandler(
                     partial(self.on_lane_over, index=idx)),
-                                              on_out=three.EventCallback(
+                                              on_out=three.EventHandler(
                                                   partial(self.on_lane_out,
                                                           index=idx)))
 
@@ -195,7 +195,7 @@ class WarpPanel(three.Group):
         for v in self.warps_btns:
             appev += v.mesh.update_event(toggled=False)
             # await v.mesh.set_checked(False)
-        await self.send_app_event_and_wait(appev)
+        await self.send_and_wait(appev)
         self.ee.emit(self.Reset)
 
     async def reset_num_warps(self, num_warps: int):
@@ -921,14 +921,14 @@ class GemmCanvas(three.ItemBox):
         self.mode = mode
         if mode == DesignerTypeV2.SmemWriterA:
             if self.params.trans_a:
-                await self.send_app_event_and_wait(self.update_event(flex_direction="column"))
+                await self.send_and_wait(self.update_event(flex_direction="column"))
             else:
-                await self.send_app_event_and_wait(self.update_event(flex_direction="row"))
+                await self.send_and_wait(self.update_event(flex_direction="row"))
         if mode == DesignerTypeV2.SmemWriterB:
             if self.params.trans_b:
-                await self.send_app_event_and_wait(self.update_event(flex_direction="row"))
+                await self.send_and_wait(self.update_event(flex_direction="row"))
             else:
-                await self.send_app_event_and_wait(self.update_event(flex_direction="column"))
+                await self.send_and_wait(self.update_event(flex_direction="column"))
 
         await self.set_new_layout({**self._get_layout_by_mode(mode)})
 
@@ -1162,11 +1162,11 @@ class TaskItem(mui.FlexBox):
         })
 
     async def set_finish(self):
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.btn.update_event(name="Done", mui_color="success"))
 
     async def set_working(self):
-        await self.send_app_event_and_wait(
+        await self.send_and_wait(
             self.btn.update_event(name="Enter", mui_color="primary"))
 
 

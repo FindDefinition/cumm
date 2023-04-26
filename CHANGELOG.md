@@ -3,6 +3,9 @@
 ## [0.4.9] - 2023-04-06
 ### Added
 - add tv::TensorView capture support in nvrtc inliner
+- add better error support for cumm nvrtc
+### Fixed
+- fix a bug in CummNVRTCModule, we need to keep flag order
 
 ## [0.4.8] - 2023-03-29
 ### Fixed
