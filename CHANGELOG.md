@@ -1,4 +1,7 @@
 # Changelog
+## [0.4.10] - 2023-06-15
+### Fixed
+- fix a bug in when compile code with arch < sm_75
 
 ## [0.4.9] - 2023-04-06
 ### Added

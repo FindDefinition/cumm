@@ -99,7 +99,7 @@ class GlobalLoad(pccm.ParameterizedClass):
             }}
             """)
         else:
-            with code.macro_if_("CUDA_VERSION >= 11040"):
+            with code.macro_if_("CUDA_VERSION >= 11040 && (__CUDA_ARCH__ >= 750)"):
                 self._run(code, self.level, self.prefetch_size)
             with code.macro_else_():
                 self._run(code)
