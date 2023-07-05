@@ -74,7 +74,7 @@ It's recommend to build Linux packages in [official build docker](https://github
 ##### Build in your environment
 
 1. install build-essential, install CUDA
-2. set env for installed cuda version. for example, ```export CUMM_CUDA_VERSION="11.4"```. If you want to build CPU-only, run ```export CUMM_CUDA_VERSION=""```. If ```CUMM_CUDA_VERSION``` isn't set, you need to ensure cuda libraries are inside OS search path, and the built wheel name will be ```cumm```, otherwise ```cumm-cuxxx```
+2. set env for installed cuda version. for example, ```export CUMM_CUDA_VERSION="11.4"```. If you want to build CPU-only, run ```export CUMM_CUDA_VERSION=""``` and ```export CUMM_CPU_ONLY_BUILD="1"```. If ```CUMM_CUDA_VERSION``` isn't set, you need to ensure cuda libraries are inside OS search path, and the built wheel name will be ```cumm```, otherwise ```cumm-cuxxx```
 3. run ```export CUMM_DISABLE_JIT="1"```
 4. run ```python setup.py bdist_wheel```+```pip install dists/xxx.whl```
 
