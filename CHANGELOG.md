@@ -1,4 +1,8 @@
 # Changelog
+## [0.4.11] - 2023-08-09
+### Added
+- add simple perf tools 
+
 ## [0.4.10] - 2023-06-15
 ### Fixed
 - fix a bug in when compile code with arch < sm_75

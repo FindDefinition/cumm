@@ -67,7 +67,7 @@ from pathlib import Path
 from cumm.common import TensorViewKernel
 import enum
 from pccm.utils import get_qualname_of_type
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, ContextManager, Dict, List, Optional, Set, Tuple, Type, Union
 import numpy as np
 from cumm import dtypes, tensorview as tv
 from cumm.common import TensorViewNVRTC, GemmBasic, TensorViewViewClass
@@ -116,7 +116,7 @@ class CUDAMode(enum.Enum):
 def torch_tensor_to_tv(ten,
                        dtype: Optional[int] = None,
                        shape: Optional[List[int]] = None):
-    assert ten.is_contiguous(), "must be contiguous tensor"
+    # assert ten.is_contiguous(), "must be contiguous tensor"
     ptr = ten.data_ptr()
     device = ten.device
     if device.type == "cpu":
@@ -229,7 +229,8 @@ class _NVRTCInlineParams:
                  verbose_path: str = "",
                  measure_time: bool = False,
                  is_cpu: bool = False,
-                 capture_tensor_as_tview: bool = False) -> None:
+                 capture_tensor_as_tview: bool = False,
+                 perf_context: Optional[ContextManager] = None) -> None:
         self.mode = mode
         self.launch = launch
         self.verbose = verbose
@@ -237,6 +238,7 @@ class _NVRTCInlineParams:
         self.measure_time = measure_time
         self.is_cpu = is_cpu
         self.capture_tensor_as_tview = capture_tensor_as_tview
+        self.perf_context = perf_context
 
 
 _NVRTC_FUNC_NAME = f"{PCCM_INLINE_NAMESPACE}::{PCCM_INLINE_FUNCTION_NAME}"
@@ -285,7 +287,6 @@ class NVRTCInlineBuilder(InlineBuilder):
         self._remote_addr = remote_addr
 
     
-
     def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
         for k, v in self.modules.items():
             if name == k[1]:
@@ -394,7 +395,7 @@ class NVRTCInlineBuilder(InlineBuilder):
                  user_args: Optional[_NVRTCInlineParams] = None):
         assert user_args is not None
         launch = user_args.launch
-        return func.run_kernel(_NVRTC_FUNC_NAME, launch, *args)
+        return func.run_kernel(_NVRTC_FUNC_NAME, launch, *args, perf_context=user_args.perf_context)
 
     def kernel_raw(self,
                    name: str,
@@ -403,11 +404,13 @@ class NVRTCInlineBuilder(InlineBuilder):
                    verbose_path: str = "",
                    disable_cache: bool = False,
                    capture_tensor_as_tview: bool = False,
+                   perf_context: Optional[ContextManager] = None,
                    *,
                    _frame_cnt: int = 2):
         verbose = verbose_path != ""
         user_arg = _NVRTCInlineParams(CUDAMode.KernelRaw, param, verbose,
-                                      verbose_path, capture_tensor_as_tview=capture_tensor_as_tview)
+                                      verbose_path, capture_tensor_as_tview=capture_tensor_as_tview,
+                                      perf_context=perf_context)
         if capture_tensor_as_tview:
             if not isinstance(code, pccm.FunctionCode):
                 code_pccm = pccm.code()
@@ -446,13 +449,16 @@ class NVRTCInlineBuilder(InlineBuilder):
                   verbose_path: str = "",
                   disable_cache: bool = False,
                   capture_tensor_as_tview: bool = False,
+                  perf_context: Optional[ContextManager] = None,
+                  *,
                   _frame_cnt: int = 2):
         verbose = verbose_path != ""
         num = int(num)
         user_arg = _NVRTCInlineParams(CUDAMode.Kernel1D,
                                       self.get_1d_param(num, stream=stream),
                                       verbose, verbose_path,
-                                      capture_tensor_as_tview=capture_tensor_as_tview)
+                                      capture_tensor_as_tview=capture_tensor_as_tview,
+                                      perf_context=perf_context)
         additional_args = {
             _CUMM_KERNEL_1D_SIZE_NAME: num,
         }

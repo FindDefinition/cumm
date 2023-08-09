@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from enum import Enum
 import enum
 from functools import partial
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union, ContextManager
 
 import numpy as np
 from pccm import Argument
@@ -247,7 +247,8 @@ class NVRTCModule:
 
     def run_kernel(self, name: str, launch: LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],
-                                Tuple[float, ...], Tuple[int, ...]]):
+                                Tuple[float, ...], Tuple[int, ...]],
+                   perf_context: Optional[ContextManager] = None):
         metas: List[NVRTCArgMeta] = [NVRTCArgMeta(NVRTCArgBaseType.Scalar, False, -1, [])] * len(args)
         if self.name_to_meta:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
@@ -316,7 +317,10 @@ class NVRTCModule:
             else:
                 assert isinstance(arg, Tensor)
                 kernel_args.append((arg, _NVRTCModule.kTensor))
-
+        if perf_context is not None:
+            with perf_context:
+                return self._mod.run_kernel(name, launch.blocks, launch.threads,
+                                            launch.smem, launch.stream, kernel_args)
         return self._mod.run_kernel(name, launch.blocks, launch.threads,
                                     launch.smem, launch.stream, kernel_args)
 

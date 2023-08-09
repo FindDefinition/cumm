@@ -5,6 +5,7 @@ from cumm.constants import PACKAGE_ROOT, TENSORVIEW_INCLUDE_PATH
 from cumm.inliner import NVRTCInlineBuilder
 from cumm.common import TensorView, TensorViewCPU, TensorViewNVRTCHashKernel, TensorViewArrayLinalg, EigenLib
 import numpy as np 
+from cumm.perftools import perf_context
 # @lineprof.lineprof_wrapper_cpp
 def test_nvrtc():
 
@@ -87,7 +88,7 @@ def test_nvrtc2():
     table.insert(5, 1);
     table2.insert(5, 1);
     """)
-
+    
     inliner.kernel_1d("wtf3", 1, 0, f"""
     namespace op = tv::arrayops;
     tv::array<float, 3> a{{2.010012, 0.530250, 0.630409}};
@@ -108,7 +109,7 @@ def test_nvrtc2():
     tv::array_nd<float, 4, 4> imu2enu{{}};
     auto corners2 = corners.op<op::transform_3d>(imu2enu);
 
-    """)
+    """, perf_context=perf_context("wtf3"))
 
     print(a.cpu().numpy())
 
