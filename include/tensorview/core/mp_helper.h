@@ -113,6 +113,19 @@ template <class F> constexpr F mp_for_each_impl(mp_list<>, F &&f) {
   return std::forward<F>(f);
 }
 #endif
+template <class... Ts, class F>
+TV_HOST_DEVICE_INLINE constexpr F mp_for_each_impl_cuda(mp_list<Ts...>, F &&f) {
+  using A = int[sizeof...(Ts)];
+  return (void)A{((void)std::forward<F>(f)(Ts()), 0)...}, std::forward<F>(f);
+
+  // return (void)(std::initializer_list<int>{(f(Ts()), 0)...}),
+  //        std::forward<F>(f);
+}
+
+template <class F> TV_HOST_DEVICE_INLINE constexpr F mp_for_each_impl_cuda(mp_list<>, F &&f) {
+  return std::forward<F>(f);
+}
+
 } // namespace detail
 
 template <class... T>
@@ -497,6 +510,11 @@ template <class L, class F> constexpr F mp_for_each(F &&f) {
   return detail::mp_for_each_impl(mp_rename<L, mp_list>(), std::forward<F>(f));
 }
 #endif
+
+template <class L, class F> TV_HOST_DEVICE_INLINE constexpr F mp_for_each_cuda(F &&f) {
+  return detail::mp_for_each_impl(mp_rename<L, mp_list>(), std::forward<F>(f));
+}
+
 template <unsigned N, unsigned... Ns> struct mp_prod_int {
   static constexpr unsigned value = N * mp_prod_int<Ns...>::value;
 };

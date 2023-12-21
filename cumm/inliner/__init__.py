@@ -198,7 +198,7 @@ class NumpyPlugin(InlineBuilderPlugin):
         # if isinstance(user_arg, _NVRTCInlineParams):
         #     if user_arg.is_cpu:
         #         return obj.reshape(-1).tolist()
-        assert obj.size <= 50, "we only support capture small numpy which will be passed by value to kernel"
+        assert obj.nbytes <= 256, "we only support capture small numpy which will be passed by value to kernel"
         return obj.tolist()
 
     def get_cpp_type(self,
@@ -265,7 +265,8 @@ class NVRTCInlineBuilder(InlineBuilder):
             measure_build_time: bool = False,
             reload_when_code_change: bool = False,
             remote_addr: str = "",
-            default_deps: Optional[List[Type[pccm.Class]]] = None):
+            default_deps: Optional[List[Type[pccm.Class]]] = None,
+            std: str = "c++14"):
         if plugins is None:
             plugins = _DEFAULT_KERNEL_PLUGINS
         if default_deps is None:
@@ -282,6 +283,7 @@ class NVRTCInlineBuilder(InlineBuilder):
                          param_deps=param_deps,
                          reload_when_code_change=reload_when_code_change)
         self.index_name = index_name
+        self.cpp_std = std
         self.maximum_1d_threads = 512
         self.measure_build_time = measure_build_time
         self._remote_addr = remote_addr
@@ -292,6 +294,11 @@ class NVRTCInlineBuilder(InlineBuilder):
             if name == k[1]:
                 return v.func
         return None
+    
+    def get_nvrtc_kernel_attrs(self, name: str) -> Dict[str, int]:
+        nvrtc_mod = self.get_nvrtc_module(name)
+        assert nvrtc_mod is not None
+        return nvrtc_mod.get_kernel_attrs(nvrtc_mod.get_lowered_name(_NVRTC_FUNC_NAME))
 
     def get_save_root(self,
                       path: Path,
@@ -361,7 +368,7 @@ class NVRTCInlineBuilder(InlineBuilder):
         if self.measure_build_time:
             ctx = tv.measure_and_print(f"{name} nvrtc build time")
         # with tv.measure_and_print("INLINE"):
-        params = create_nvrtc_code([pccm_cls])
+        params = create_nvrtc_code([pccm_cls], std=self.cpp_std)
         is_cpu = False
         if user_arg is not None:
             is_cpu = user_arg.is_cpu
@@ -378,12 +385,14 @@ class NVRTCInlineBuilder(InlineBuilder):
                         raise NotImplementedError("cpu jit only support linux")
                     mod = CummLLVMModule([pccm_cls],
                                          verbose=verbose,
-                                         verbose_path=verbose_path)
+                                         verbose_path=verbose_path,
+                                         std=self.cpp_std)
                 else:
                     if verbose:
                         mod = CummNVRTCModule([pccm_cls],
                                               verbose=verbose,
-                                              verbose_path=verbose_path)
+                                              verbose_path=verbose_path,
+                                              std=self.cpp_std)
                     else:
                         mod = CummNVRTCModuleBase.from_params(params)
 
@@ -541,9 +550,11 @@ class NVRTCInlineBuilder(InlineBuilder):
         for l in libs:
             llvm.load_library_permanently(l)
 
-    def get_1d_param(self, num: int, smem: int = 0, stream: int = 0):
-        if num > self.maximum_1d_threads:
-            threads = self.maximum_1d_threads
+    def get_1d_param(self, num: int, smem: int = 0, stream: int = 0, maximum_1d_threads: Optional[int] = None):
+        if maximum_1d_threads is None:
+            maximum_1d_threads = self.maximum_1d_threads
+        if num > maximum_1d_threads:
+            threads = maximum_1d_threads
         else:
             threads = div_up(num, 32) * 32
         blocks = div_up(num, threads)

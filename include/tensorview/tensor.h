@@ -287,6 +287,48 @@ public:
     return new_storage_ptr;
   }
 
+  std::shared_ptr<TensorStorage<T>> cpu(Context ctx = Context()) {
+    // clone whole storage
+    auto new_storage_ptr =
+        std::make_shared<TensorStorage<T>>(size_, -1, managed_, pinned_);
+    if (size_ == 0) {
+      return new_storage_ptr;
+    }
+    if (device_ == -1) {
+
+      if (pinned_) {
+#ifdef TV_CUDA
+        if (ctx.has_cuda_stream()) {
+          host2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T),
+                    ctx.cuda_stream());
+        } else {
+          host2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T));
+        }
+#else
+        std::copy(ptr_, ptr_ + size_ * sizeof(T), new_storage_ptr->ptr_);
+#endif
+      } else {
+        // use memcpy instead to avoid cuda context init
+        std::copy(ptr_, ptr_ + size_ * sizeof(T), new_storage_ptr->ptr_);
+      }
+    }
+#ifdef TV_CUDA
+    else {
+      if (ctx.has_cuda_stream()) {
+        dev2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T),
+                ctx.cuda_stream());
+      } else {
+        dev2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T));
+      }
+    }
+#else
+    else {
+      TV_THROW_RT_ERR("only support cpu tensor");
+    }
+#endif
+    return new_storage_ptr;
+  }
+
 private:
   size_t size_ = 0;
   T *ptr_ = nullptr;
@@ -602,6 +644,7 @@ struct Tensor {
     shape_ = shape;
     stride_ = stride;
     contiguous_ = compute_is_contiguous();
+    TV_ASSERT_RT_ERR(contiguous_, "stride must be contiguous when you create tensor from shape");
   }
 
   Tensor(TensorShape shape, DType dtype, int device = -1, bool pinned = false,
@@ -1381,8 +1424,20 @@ public:
       // cpu() should always copy tensor.
       return clone();
     }
-    Tensor res(shape_, stride_, dtype_, -1, storage_->managed());
-    res.copy_(*this);
+    Tensor res;
+    if (shape_.ndim() == 2 && this->stride(1) == 1){
+      res = Tensor(shape_, dtype_, -1, storage_->managed());
+      res.copy_2d_pitched_(*this, ctx);
+    }else{
+      if (!contiguous_){
+        void* ptr = nullptr;
+        res = Tensor(ptr, shape_, stride_, dtype_, -1);
+        res.storage_ = storage_->cpu(ctx);
+      }else{
+        res = Tensor(shape_, stride_, dtype_, -1, storage_->managed());
+        res.copy_(*this, ctx);
+      }
+    }
     return res;
   }
 

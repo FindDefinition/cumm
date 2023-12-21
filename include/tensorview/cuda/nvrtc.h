@@ -88,12 +88,12 @@ public:
     TV_NVRTC_SAFE_CALL(nvrtcGetProgramLogSize(prog_, &logSize));
     std::string log(logSize, '0');
     auto nvrtc_compile_res = nvrtcGetProgramLog(prog_, &log[0]);
-    if (compileResult != NVRTC_SUCCESS) {
-      tv::ssprint(log);
-    }
+    // if (compileResult != NVRTC_SUCCESS) {
+    //   tv::ssprint(log);
+    // }
     TV_NVRTC_SAFE_CALL(nvrtc_compile_res);
     compile_log_ = log;
-    TV_ASSERT_RT_ERR(compileResult == NVRTC_SUCCESS, "nvrtc compile failed.");
+    TV_ASSERT_RT_ERR(compileResult == NVRTC_SUCCESS, "nvrtc compile failed. log: \n", log);
     // post check
     predefined_name_expr_map_.clear();
     for (size_t i = 0; i < name_exprs_.size(); ++i) {

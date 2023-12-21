@@ -69,6 +69,8 @@ class InstMma(pccm.ParameterizedClass):
         if self.shape == (1, 1, 1):
             if dabc == (dtypes.float16, dtypes.float16, dtypes.float32):
                 code.raw("d[0] = float(a[0]) * float(b[0]) + c[0];")
+            elif dabc == (dtypes.bfloat16, dtypes.bfloat16, dtypes.float32):
+                code.raw("d[0] = float(a[0]) * float(b[0]) + c[0];")
             else:
                 code.raw("d[0] = a[0] * b[0] + c[0];")
         elif self.shape == (1, 1, 4) or self.shape == (1, 1, 2):
@@ -101,68 +103,131 @@ class InstMma(pccm.ParameterizedClass):
             #endif
             """)
         elif self.shape == (2, 1, 1):
-            assert dabc == (dtypes.float16, dtypes.float16, dtypes.float16)
-            code.raw(f"""
-            #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600))
-                __half2 const & A = reinterpret_cast<__half2 const &>(a);
-                __half2 B = __half2half2(reinterpret_cast<__half const &>(b));
-                __half2 const & C = reinterpret_cast<__half2 const &>(c);
-                __half2 D = __hfma2(A, B, C);
-                d = reinterpret_cast<{core.array_type(self.dtype_c, 2)} &>(D);
-            #else
-                TV_PRAGMA_UNROLL
-                for (int i = 0; i < 2; ++i) {{
-                    d[i] = a[i] * b[0] + c[i];
-                }}
-            #endif
-            """)
+            if dabc == (dtypes.float16, dtypes.float16, dtypes.float16):
+                code.raw(f"""
+                #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600))
+                    __half2 const & A = reinterpret_cast<__half2 const &>(a);
+                    __half2 B = __half2half2(reinterpret_cast<__half const &>(b));
+                    __half2 const & C = reinterpret_cast<__half2 const &>(c);
+                    __half2 D = __hfma2(A, B, C);
+                    d = reinterpret_cast<{core.array_type(self.dtype_c, 2)} &>(D);
+                #else
+                    TV_PRAGMA_UNROLL
+                    for (int i = 0; i < 2; ++i) {{
+                        d[i] = a[i] * b[0] + c[i];
+                    }}
+                #endif
+                """)
+            elif dabc == (dtypes.bfloat16, dtypes.bfloat16, dtypes.bfloat16):
+                code.raw(f"""
+                #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750))
+                    __nv_bfloat162 const & A = reinterpret_cast<__nv_bfloat162 const &>(a);
+                    __nv_bfloat162 B = __half2half2(reinterpret_cast<__nv_bfloat16 const &>(b));
+                    __nv_bfloat162 const & C = reinterpret_cast<__nv_bfloat162 const &>(c);
+                    __nv_bfloat162 D = __hfma2(A, B, C);
+                    d = reinterpret_cast<{core.array_type(self.dtype_c, 2)} &>(D);
+                #else
+                    TV_PRAGMA_UNROLL
+                    for (int i = 0; i < 2; ++i) {{
+                        d[i] = a[i] * b[0] + c[i];
+                    }}
+                #endif
+                """)
+            else:
+                raise NotImplementedError
 
         elif self.shape == (1, 2, 1):
             assert dabc == (dtypes.float16, dtypes.float16, dtypes.float16)
             assert not self.trans_c
-            code.raw(f"""
-            #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600))
-                __half2 const & A = __half2half2(reinterpret_cast<__half const &>(a));
-                __half2 B = reinterpret_cast<__half2 const &>(b);
-                __half2 const & C = reinterpret_cast<__half2 const &>(c);
-                __half2 D = __hfma2(A, B, C);
-                d = reinterpret_cast<{core.array_type(self.dtype_c, 2)} &>(D);
-            #else
-                TV_PRAGMA_UNROLL
-                for (int i = 0; i < 2; ++i) {{
-                    d[i] = a[0] * b[i] + c[i];
-                }}
-            #endif
-            """)
-
-        elif self.shape == (2, 2, 1):
-            assert dabc == (dtypes.float16, dtypes.float16, dtypes.float16)
-            assert self.trans_a and not self.trans_b
-            code.raw(f"""
-            #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600))
-            """)
-            if self.trans_c:
+            if dabc == (dtypes.float16, dtypes.float16, dtypes.float16):
                 code.raw(f"""
-                __half2 const & A = reinterpret_cast<__half2 const &>(a);
-                __half2 Blo = __low2half2(reinterpret_cast<__half2 const &>(b));
-                __half2 Bhi = __high2half2(reinterpret_cast<__half2 const &>(b));
-
-                __half2 const *C = reinterpret_cast<__half2 const *>(&c);
-                __half2 Dlo = __hfma2(A, Blo, C[0]);
-                __half2 Dhi = __hfma2(A, Bhi, C[1]);
+                #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600))
+                    __half2 const & A = __half2half2(reinterpret_cast<__half const &>(a));
+                    __half2 B = reinterpret_cast<__half2 const &>(b);
+                    __half2 const & C = reinterpret_cast<__half2 const &>(c);
+                    __half2 D = __hfma2(A, B, C);
+                    d = reinterpret_cast<{core.array_type(self.dtype_c, 2)} &>(D);
+                #else
+                    TV_PRAGMA_UNROLL
+                    for (int i = 0; i < 2; ++i) {{
+                        d[i] = a[0] * b[i] + c[i];
+                    }}
+                #endif
+                """)
+            elif dabc == (dtypes.bfloat16, dtypes.bfloat16, dtypes.bfloat16):
+                code.raw(f"""
+                #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600))
+                    __nv_bfloat162 const & A = __half2half2(reinterpret_cast<__nv_bfloat16 const &>(a));
+                    __nv_bfloat162 B = reinterpret_cast<__nv_bfloat162 const &>(b);
+                    __nv_bfloat162 const & C = reinterpret_cast<__half2 const &>(c);
+                    __nv_bfloat162 D = __hfma2(A, B, C);
+                    d = reinterpret_cast<{core.array_type(self.dtype_c, 2)} &>(D);
+                #else
+                    TV_PRAGMA_UNROLL
+                    for (int i = 0; i < 2; ++i) {{
+                        d[i] = a[0] * b[i] + c[i];
+                    }}
+                #endif
                 """)
             else:
+                raise NotImplementedError
+
+        elif self.shape == (2, 2, 1):
+            assert self.trans_a and not self.trans_b
+
+            if dabc == (dtypes.float16, dtypes.float16, dtypes.float16):
                 code.raw(f"""
-                __half2 Alo = __low2half2(reinterpret_cast<__half2 const &>(a));
-                __half2 Ahi = __high2half2(reinterpret_cast<__half2 const &>(a));
-                __half2 const & B = reinterpret_cast<__half2 const &>(b);
-                
-                __half2 const *C = reinterpret_cast<__half2 const *>(&c);
-
-                __half2 Dlo = __hfma2(Alo, B, C[0]);
-                __half2 Dhi = __hfma2(Ahi, B, C[1]);
-
+                #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600))
                 """)
+
+                if self.trans_c:
+                    code.raw(f"""
+                    __half2 const & A = reinterpret_cast<__half2 const &>(a);
+                    __half2 Blo = __low2half2(reinterpret_cast<__half2 const &>(b));
+                    __half2 Bhi = __high2half2(reinterpret_cast<__half2 const &>(b));
+
+                    __half2 const *C = reinterpret_cast<__half2 const *>(&c);
+                    __half2 Dlo = __hfma2(A, Blo, C[0]);
+                    __half2 Dhi = __hfma2(A, Bhi, C[1]);
+                    """)
+                else:
+                    code.raw(f"""
+                    __half2 Alo = __low2half2(reinterpret_cast<__half2 const &>(a));
+                    __half2 Ahi = __high2half2(reinterpret_cast<__half2 const &>(a));
+                    __half2 const & B = reinterpret_cast<__half2 const &>(b);
+                    
+                    __half2 const *C = reinterpret_cast<__half2 const *>(&c);
+
+                    __half2 Dlo = __hfma2(Alo, B, C[0]);
+                    __half2 Dhi = __hfma2(Ahi, B, C[1]);
+                    """)
+            elif dabc == (dtypes.bfloat16, dtypes.bfloat16, dtypes.bfloat16):
+                code.raw(f"""
+                #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750))
+                """)
+                if self.trans_c:
+                    code.raw(f"""
+                    __nv_bfloat162 const & A = reinterpret_cast<__nv_bfloat162 const &>(a);
+                    __nv_bfloat162 Blo = __low2half2(reinterpret_cast<__nv_bfloat162 const &>(b));
+                    __nv_bfloat162 Bhi = __high2half2(reinterpret_cast<__nv_bfloat162 const &>(b));
+
+                    __nv_bfloat162 const *C = reinterpret_cast<__nv_bfloat162 const *>(&c);
+                    __nv_bfloat162 Dlo = __hfma2(A, Blo, C[0]);
+                    __nv_bfloat162 Dhi = __hfma2(A, Bhi, C[1]);
+                    """)
+                else:
+                    code.raw(f"""
+                    __nv_bfloat162 Alo = __low2half2(reinterpret_cast<__nv_bfloat162 const &>(a));
+                    __nv_bfloat162 Ahi = __high2half2(reinterpret_cast<__nv_bfloat162 const &>(a));
+                    __nv_bfloat162 const & B = reinterpret_cast<__nv_bfloat162 const &>(b);
+                    
+                    __nv_bfloat162 const *C = reinterpret_cast<__nv_bfloat162 const *>(&c);
+
+                    __nv_bfloat162 Dlo = __hfma2(Alo, B, C[0]);
+                    __nv_bfloat162 Dhi = __hfma2(Ahi, B, C[1]);
+                    """)
+            else:
+                raise NotImplementedError
             code.raw(f"""
             {core.array_type(self.dtype_c, 2)} * D = reinterpret_cast<{core.array_type(self.dtype_c, 2)} *>(&d);
             D[0] = reinterpret_cast<{core.array_type(self.dtype_c, 2)} const &>(Dlo);

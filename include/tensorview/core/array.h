@@ -14,6 +14,7 @@
 
 #pragma once
 #ifdef __GNUC__
+#pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wattributes"
 #endif
 #include <tensorview/core/defs.h>
@@ -818,4 +819,7 @@ operator|(const array<T, N1> &lfs, const array<T, N2> &rfs) {
 }
 
 } // namespace tv
+
+#ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif

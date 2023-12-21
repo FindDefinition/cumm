@@ -768,3 +768,14 @@ class TensorViewLLVM(pccm.Class):
         else:
             self.add_dependency(TensorViewCPULLVM)
 
+class TensorViewNVRTCDev(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_dependency(TensorViewNVRTC)
+
+    @pccm.cuda.static_function(device=True)
+    def device_function(self):
+        code = pccm.code()
+        code.arg("a, b", "float")
+        code.raw("return a + b;")
+        return code.ret("float")

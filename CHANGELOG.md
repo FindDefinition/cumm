@@ -1,4 +1,18 @@
 # Changelog
+
+## [0.5.0] - 2023-11-15
+### Added
+- Add std flag to NVRTCInlinerBuilder
+- add `get_nvrtc_kernel_attrs` to NVRTCInlinerBuilder
+- add prompt for inliner, use `python -m cumm.inliner.cuda` or `python -m cumm.inliner.cpu` (clang must be installed)
+- add rich message print support for nvrtc compile powered by awesome `rich` library. (don't support llvm)
+### Changed
+- change nvrtc tuple impl to support std::tie
+- change supported cuda version, remove cuda 10.2 and 11.6, add cuda 12.1 and 12.2
+- remove python 3.7, add python 3.12.
+### Fixed
+- fix a small bug when using c++17 in nvrtc
+
 ## [0.4.11] - 2023-08-09
 ### Added
 - add simple perf tools 

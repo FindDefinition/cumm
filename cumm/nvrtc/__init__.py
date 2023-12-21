@@ -1,15 +1,19 @@
 import dataclasses
 from pathlib import Path
+import re
 import tempfile
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
+import traceback
+from typing import Any, ContextManager, Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
 import subprocess
+from cumm.utils import richprint
+from cumm.utils.richprint import HAS_RICH_PRINT, print_rich_cpp
 
 import pccm
 from ccimport import compat
 from pccm import Argument
 from pccm.core import CodeGenerator
 from pccm.core.buildmeta import BuildMeta
-from pccm.targets.cuda import CudaGlobalFunctionMeta
+from pccm.targets.cuda import CudaGlobalFunctionMeta, CudaStaticMemberFunctionMeta
 from pccm.core import ExternalFunctionMeta
 import ctypes
 from cumm import PACKAGE_ROOT
@@ -17,7 +21,7 @@ from cumm import tensorview as tv
 from cumm.common import TensorViewKernel, _get_cuda_include_lib
 from cumm.core_cc.tensorview_bind import Tensor
 import numpy as np
-
+from pccm.builder.inliner import PCCM_INLINE_CLASS_NAME, PCCM_INLINE_NAMESPACE
 LLVM_IS_INITED = False
 LAZY_LOAD_LIBRARIES: Set[str] = set()
 
@@ -181,6 +185,7 @@ def create_nvrtc_code(cus: List[pccm.Class],
     cg = CodeGenerator([])
     user_cus = cg.build_graph(cus, namespace_root)
     # iterate cus and get all kernels
+    name_exprs = []
     name_to_meta: Dict[str, tv.NVRTCKernelMeta] = {}
     for cu in user_cus:
         cu_ns = cu.canonical_namespace
@@ -201,6 +206,7 @@ def create_nvrtc_code(cus: List[pccm.Class],
                 if cu_ns:
                     func_qualname = f"{cu_ns}::{meta.name}"
                 name_to_meta[func_qualname] = meta
+                name_exprs.append(func_qualname)
 
     # generate code for nvrtc
     outer_code = list(
@@ -251,7 +257,7 @@ def create_nvrtc_code(cus: List[pccm.Class],
         opts.append("-I")
         opts.append(str(inc))
         includes.append(str(inc))
-    name_exprs = list(name_to_meta.keys())
+    # name_exprs = list(name_to_meta.keys())
     if custom_names is not None:
         name_exprs.extend(custom_names)
     return NVRTCModuleParams(final_code,
@@ -297,11 +303,18 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                 if "[" in name:
                     continue
                 if len(parts) == 7:
+                    vtype = parts[3]
+                    if vtype.startswith(".f"):
+                        continue
                     name = cufilt(name)
                     if not name:
                         continue
                     name = "::".join(name.split("::")[1:])
-                    const_values[name] = int(parts[-1].replace(";", " "))
+                    try:
+                        const_values[name] = int(parts[-1].replace(";", " "))
+                    except:
+                        traceback.print_exc()
+                        continue
                 elif len(parts) == 5:
                     name = cufilt(name[:-1])
                     if not name:
@@ -314,10 +327,17 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                 if "[" in name:
                     continue
                 if len(parts) == 8:
+                    vtype = parts[4]
+                    if vtype.startswith(".f"):
+                        continue
                     name = cufilt(name)
                     if not name:
                         continue
-                    const_values[name] = int(parts[-1].replace(";", " "))
+                    try:
+                        const_values[name] = int(parts[-1].replace(";", " "))
+                    except:
+                        traceback.print_exc()
+                        continue
                 elif len(parts) == 6:
                     name = cufilt(name[:-1])
                     if not name:
@@ -329,10 +349,17 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                 if "[" in name:
                     continue
                 if len(parts) == 7:
+                    vtype = parts[3]
+                    if vtype.startswith(".f"):
+                        continue
                     name = cufilt(name)
                     if not name:
                         continue
-                    const_values[name] = int(parts[-1].replace(";", " "))
+                    try:
+                        const_values[name] = int(parts[-1].replace(";", " "))
+                    except:
+                        traceback.print_exc()
+                        continue
                 elif len(parts) == 5:
                     name = cufilt(name[:-1])
                     if not name:
@@ -350,8 +377,59 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                        name_exprs=params.name_exprs,
                        name_to_meta=params.name_to_meta,
                        cudadevrt_path=params.cudadevrt_path)
-        except RuntimeError:
-            print("Build Error. Kernel Code:\n{}".format(params.debug_code))
+        except RuntimeError as e:
+            try:
+                import rich 
+            except ImportError:
+                print("!!!rich not installed, install rich to get nice nvrtc error log: \"pip install rich Pygments\"")
+            
+            nvrtc_build_log = e.args[0].strip().split("\n")
+            nvrtc_build_log = list(filter(lambda x: x.strip(), nvrtc_build_log))
+            error_lines = []
+            reg = re.compile(r"(.*)\((\d+)\): error: (.*)")
+            file_to_error_lines = {}
+            file_to_contents = {}
+            total_error_line_cnt = 0
+            LINE_THRESHOLD = 300
+            LINE_PRINT_THRESHOLD = 15
+            for i, line in enumerate(nvrtc_build_log):
+                re_search_res = reg.search(line)
+                if re_search_res is not None:
+                    filename = re_search_res.group(1)
+                    lineno = int(re_search_res.group(2))
+                    content = re_search_res.group(3)
+                    # TODO: hard code
+                    if filename not in file_to_error_lines:
+                        file_to_error_lines[filename] = []
+                    if HAS_RICH_PRINT:
+                        nvrtc_build_log[i] = f"[red]{line}[/red]"
+                    if PCCM_INLINE_CLASS_NAME in filename and PCCM_INLINE_NAMESPACE in filename:
+                        file_to_error_lines[filename].append((lineno, line))
+                        if filename not in file_to_contents:
+                            file_to_contents[filename] = params.debug_code
+                    else:
+                        if filename not in file_to_contents:
+                            file_to_contents[filename] = params.headers[filename]
+                        file_to_error_lines[filename].append((lineno, line))
+                    error_lines.append((filename, lineno, content))
+                    total_error_line_cnt += len("\n".join(file_to_contents[filename].split("\n")))
+            if HAS_RICH_PRINT:
+                richprint.rprint("\n".join(nvrtc_build_log))
+            for k, v in file_to_error_lines.items():
+                content = file_to_contents[k]
+                error_highlights = [x[0] for x in v]
+                error_lines = [x[1] for x in v]
+                consumed_highlights: Set[int] = set()
+                if total_error_line_cnt <= LINE_THRESHOLD:
+                    richprint.rprint(f"--{k}--")
+                    print_rich_cpp(content, v)
+                else:
+                    for (highlight, error_line) in zip(error_highlights, error_lines):
+                        if highlight in consumed_highlights:
+                            continue
+                        richprint.rprint(f"[red]{error_line}[/red]")
+                        print_rich_cpp(content, {highlight}, line_range=(highlight - LINE_PRINT_THRESHOLD, highlight + LINE_PRINT_THRESHOLD))
+                        consumed_highlights.update(range(highlight - LINE_PRINT_THRESHOLD, highlight + LINE_PRINT_THRESHOLD))
             raise
 
     @property
@@ -503,10 +581,11 @@ class CummLLVMModule:
 
     def run_kernel(self, name: str, launch: tv.LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],
-                                Tuple[float, ...], Tuple[int, ...]]):
+                                Tuple[float, ...], Tuple[int, ...]],
+                    perf_context: Optional[ContextManager] = None):
         if self._llvm_mod is None:
             self.load()
-        metas: List[tv.NVRTCArgMeta] = [tv.NVRTCArgMeta(False, -1, [])
+        metas: List[tv.NVRTCArgMeta] = [tv.NVRTCArgMeta(tv.NVRTCArgBaseType.Scalar, False, -1, [])
                                         ] * len(args)
         if self.name_to_meta:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"

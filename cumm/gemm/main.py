@@ -144,7 +144,7 @@ def gen_shuffle_params(ts, wts, dss: List[str], stage: int,
     return res
 
 
-def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: str, stage: int,
+def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: Union[List[str], str], stage: int,
                           algo: kernel.GemmAlgo,
                           tensorop: Optional[kernel.TensorOp],
                     is_nvrtc: bool = False):
@@ -158,12 +158,15 @@ def gen_shuffle_params_v2(ts, wts, dss: List[str], ds_for_sab: str, stage: int,
             if not p.skipped():
                 res.append(p)
     if ds_for_sab:
-        p = GemmAlgoParams(ts, wts, stage, ds_for_sab, True, False, False,
-                           algo, tensorop, True, False,
-                           ShuffleStrideType.ShuffleAB,
-                           is_nvrtc=is_nvrtc)
-        if not p.skipped():
-            res.append(p)
+        if isinstance(ds_for_sab, str):
+            ds_for_sab = [ds_for_sab]
+        for ds in ds_for_sab:
+            p = GemmAlgoParams(ts, wts, stage, ds, True, False, False,
+                            algo, tensorop, True, False,
+                            ShuffleStrideType.ShuffleAB,
+                            is_nvrtc=is_nvrtc)
+            if not p.skipped():
+                res.append(p)
     return res
 
 

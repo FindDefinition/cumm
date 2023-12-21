@@ -681,6 +681,18 @@ template <typename T> struct angleaxis_mat<T, 3, 0> {
     res[2][2] = tmp2[2] + c;
     return res;
   }
+  
+  TV_HOST_DEVICE_INLINE array<array<T, 3>, 3>
+  operator()(const array<T, 3> &m_axis) {
+    T angle = m_axis.template op<length>();
+    if (angle == 0){
+      auto res = array<array<T, 3>, 3>{};
+      res[0][0] = res[1][1] = res[2][2] = T(1);
+      return res;
+    }
+    return operator()(m_axis / angle, angle);
+  }
+
 };
 
 template <typename T, size_t N, size_t Align> struct uangle {

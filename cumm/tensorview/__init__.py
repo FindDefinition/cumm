@@ -293,7 +293,7 @@ class NVRTCModule:
                         arg_array = np.array(arg, dtype=dtype)
                         if not arg_array.shape:
                             arg_array = arg_array.reshape(1)
-                        assert list(arg_array.shape) == meta.shape
+                        assert list(arg_array.shape) == meta.shape, f"{arg_array.shape}, {meta.shape}"
                         # auto dtype cast
                         # TODO prevent floats assigned to ints
                         ten = empty(meta.shape, meta.simple_type, -1)

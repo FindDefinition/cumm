@@ -46,6 +46,8 @@ typedef integral_constant<bool, true> true_type;
 /// The type used as a compile-time boolean with false value.
 typedef integral_constant<bool, false> false_type;
 
+template <bool __v> using __bool_constant = integral_constant<bool, __v>;
+
 template <bool _Cond, typename _Iftrue, typename _Iffalse> struct conditional {
   typedef _Iftrue type;
 };
@@ -83,12 +85,20 @@ struct __and_<_B1, _B2> : public conditional<_B1::value, _B2, _B1>::type {};
 template <typename _B1, typename _B2, typename _B3, typename... _Bn>
 struct __and_<_B1, _B2, _B3, _Bn...>
     : public conditional<_B1::value, __and_<_B2, _B3, _Bn...>, _B1>::type {};
+template <typename _Pp>
+struct __not_ : public __bool_constant<!bool(_Pp::value)> {};
 
-template <typename _Tp> struct remove_const { typedef _Tp type; };
+template <typename _Tp> struct remove_const {
+  typedef _Tp type;
+};
 
-template <typename _Tp> struct remove_const<_Tp const> { typedef _Tp type; };
+template <typename _Tp> struct remove_const<_Tp const> {
+  typedef _Tp type;
+};
 
-template <typename _Tp> struct remove_volatile { typedef _Tp type; };
+template <typename _Tp> struct remove_volatile {
+  typedef _Tp type;
+};
 
 template <typename _Tp> struct remove_volatile<_Tp volatile> {
   typedef _Tp type;
@@ -98,10 +108,14 @@ template <typename _Tp> struct remove_cv {
   typedef typename remove_const<typename remove_volatile<_Tp>::type>::type type;
 };
 
-template <typename _Tp> struct add_const { typedef _Tp const type; };
+template <typename _Tp> struct add_const {
+  typedef _Tp const type;
+};
 
 /// add_volatile
-template <typename _Tp> struct add_volatile { typedef _Tp volatile type; };
+template <typename _Tp> struct add_volatile {
+  typedef _Tp volatile type;
+};
 
 /// add_cv
 template <typename _Tp> struct add_cv {
@@ -144,6 +158,30 @@ struct __remove_pointer_helper<_Tp, _Up *> {
   typedef _Up type;
 };
 
+template <typename> struct __is_void_helper : public false_type {};
+
+template <> struct __is_void_helper<void> : public true_type {};
+
+/// is_void
+template <typename _Tp>
+struct is_void : public __is_void_helper<typename remove_cv<_Tp>::type>::type {
+};
+
+template <typename> struct is_lvalue_reference : public false_type {};
+
+template <typename _Tp> struct is_lvalue_reference<_Tp &> : public true_type {};
+
+/// is_rvalue_reference
+template <typename> struct is_rvalue_reference : public false_type {};
+
+template <typename _Tp>
+struct is_rvalue_reference<_Tp &&> : public true_type {};
+
+/// is_reference
+template <typename _Tp>
+struct is_reference
+    : public __or_<is_lvalue_reference<_Tp>, is_rvalue_reference<_Tp>>::type {};
+
 /// remove_pointer
 template <typename _Tp>
 struct remove_pointer
@@ -152,20 +190,30 @@ struct remove_pointer
 template <typename _Tp>
 using remove_pointer_t = typename remove_pointer<_Tp>::type;
 
-template <typename _Tp> struct remove_reference { typedef _Tp type; };
+template <typename _Tp> struct remove_reference {
+  typedef _Tp type;
+};
 
-template <typename _Tp> struct remove_reference<_Tp &> { typedef _Tp type; };
+template <typename _Tp> struct remove_reference<_Tp &> {
+  typedef _Tp type;
+};
 
-template <typename _Tp> struct remove_reference<_Tp &&> { typedef _Tp type; };
+template <typename _Tp> struct remove_reference<_Tp &&> {
+  typedef _Tp type;
+};
 
 /// remove_extent
-template <typename _Tp> struct remove_extent { typedef _Tp type; };
+template <typename _Tp> struct remove_extent {
+  typedef _Tp type;
+};
 
 template <typename _Tp, std::size_t _Size> struct remove_extent<_Tp[_Size]> {
   typedef _Tp type;
 };
 
-template <typename _Tp> struct remove_extent<_Tp[]> { typedef _Tp type; };
+template <typename _Tp> struct remove_extent<_Tp[]> {
+  typedef _Tp type;
+};
 
 /// is_array
 template <typename> struct is_array : public false_type {};
@@ -286,13 +334,24 @@ template <typename _Res, typename... _ArgTypes _GLIBCXX_NOEXCEPT_PARM>
 struct is_function<_Res(_ArgTypes......) const volatile &&
                    _GLIBCXX_NOEXCEPT_QUAL> : public true_type {};
 
-template <typename> struct is_lvalue_reference : public false_type {};
-
-template <typename _Tp> struct is_lvalue_reference<_Tp &> : public true_type {};
-
 template <typename _Up, bool _IsArray = is_array<_Up>::value,
           bool _IsFunction = is_function<_Up>::value>
 struct __decay_selector;
+
+template <typename _Tp>
+struct is_object
+    : public __not_<
+          __or_<is_function<_Tp>, is_reference<_Tp>, is_void<_Tp>>>::type {};
+
+template <typename _Tp>
+struct __is_referenceable
+    : public __or_<is_object<_Tp>, is_reference<_Tp>>::type{};
+
+template <typename _Res, typename... _Args>
+struct __is_referenceable<_Res(_Args...)> : public true_type{};
+
+template <typename _Res, typename... _Args>
+struct __is_referenceable<_Res(_Args......)> : public true_type{};
 
 // NB: DR 705.
 template <typename _Up> struct __decay_selector<_Up, false, false> {
@@ -342,13 +401,17 @@ template <typename _Tp> using decay_t = typename decay<_Tp>::type;
 template <typename, typename> struct is_same : public false_type {};
 
 template <typename _Tp> struct is_same<_Tp, _Tp> : public true_type {};
+template <typename _Tp, typename _Up>
+inline constexpr bool is_same_v = is_same<_Tp, _Up>::value;
 
 // Primary template.
 /// Define a member typedef @c type only if a boolean constant is true.
 template <bool, typename _Tp = void> struct enable_if {};
 
 // Partial specialization for true.
-template <typename _Tp> struct enable_if<true, _Tp> { typedef _Tp type; };
+template <typename _Tp> struct enable_if<true, _Tp> {
+  typedef _Tp type;
+};
 
 template <typename... _Cond>
 using _Require = typename enable_if<__and_<_Cond...>::value>::type;
@@ -425,6 +488,167 @@ struct tuple_element<__i, const volatile _Tp> {
 
 template <std::size_t __i, typename _Tp>
 using tuple_element_t = typename tuple_element<__i, _Tp>::type;
+
+// https://github.com/NVIDIA/cccl/blob/main/libcudacxx/include/cuda/std/detail/libcxx/include/__type_traits/is_assignable.h
+template <typename, typename _Tp> struct __select_2nd {
+  typedef _Tp type;
+};
+
+template <class _Tp, class _Arg>
+typename __select_2nd<decltype((declval<_Tp>() = declval<_Arg>())),
+                      true_type>::type TV_HOST_DEVICE_INLINE
+__is_assignable_test(int);
+
+template <class, class>
+TV_HOST_DEVICE_INLINE false_type __is_assignable_test(...);
+
+template <class _Tp, class _Arg,
+          bool = is_void<_Tp>::value || is_void<_Arg>::value>
+struct __is_assignable_imp
+    : public decltype((__is_assignable_test<_Tp, _Arg>(0))) {};
+
+template <class _Tp, class _Arg>
+struct __is_assignable_imp<_Tp, _Arg, true> : public false_type {};
+
+template <class _Tp, class _Arg>
+struct is_assignable : public __is_assignable_imp<_Tp, _Arg> {};
+
+template <class _Tp, class _Arg>
+constexpr bool is_assignable_v = is_assignable<_Tp, _Arg>::value;
+
+template <typename... _Elements> class tuple;
+
+template <typename> struct __is_tuple_like_impl : false_type {};
+
+template <typename... _Tps>
+struct __is_tuple_like_impl<tuple<_Tps...>> : true_type {};
+template <typename _Tp>
+using __remove_cvref_t =
+    typename remove_cv<typename remove_reference<_Tp>::type>::type;
+
+template <typename _Tp, bool = __is_referenceable<_Tp>::value>
+struct __is_move_assignable_impl;
+
+template <typename _Tp>
+struct __is_move_assignable_impl<_Tp, false> : public false_type {};
+
+template <typename _Tp>
+struct __is_move_assignable_impl<_Tp, true>
+    : public is_assignable<_Tp &, _Tp &&> {};
+
+/// is_move_assignable
+template <typename _Tp>
+struct is_move_assignable : public __is_move_assignable_impl<_Tp> {};
+
+/// is_constructible
+template <typename _Tp, typename... _Args>
+struct is_constructible
+    : public __bool_constant<__is_constructible(_Tp, _Args...)> {};
+
+template <typename _Tp, bool = __is_referenceable<_Tp>::value>
+struct __is_move_constructible_impl;
+
+template <typename _Tp>
+struct __is_move_constructible_impl<_Tp, false> : public false_type {};
+
+template <typename _Tp>
+struct __is_move_constructible_impl<_Tp, true>
+    : public is_constructible<_Tp, _Tp &&> {};
+
+/// is_move_constructible
+template <typename _Tp>
+struct is_move_constructible : public __is_move_constructible_impl<_Tp> {};
+
+template <typename _Tp, typename _Up>
+struct __is_nt_assignable_impl
+    : public integral_constant<bool,
+                               noexcept(declval<_Tp>() = declval<_Up>())> {};
+
+/// is_nothrow_assignable
+template <typename _Tp, typename _Up>
+struct is_nothrow_assignable
+    : public __and_<is_assignable<_Tp, _Up>,
+                    __is_nt_assignable_impl<_Tp, _Up>> {};
+
+template <bool, bool, class _Tp, class... _Args>
+struct __libcpp_is_nothrow_constructible;
+
+template <class _Tp, class... _Args>
+struct __libcpp_is_nothrow_constructible</*is constructible*/ true,
+                                         /*is reference*/ false, _Tp, _Args...>
+    : public integral_constant<bool, noexcept(_Tp(declval<_Args>()...))> {};
+
+template <class _Tp>
+TV_HOST_DEVICE_INLINE void __implicit_conversion_to(_Tp) noexcept {}
+
+template <class _Tp, class _Arg>
+struct __libcpp_is_nothrow_constructible</*is constructible*/ true,
+                                         /*is reference*/ true, _Tp, _Arg>
+    : public integral_constant<bool, noexcept(__implicit_conversion_to<_Tp>(
+                                         declval<_Arg>()))> {};
+
+template <class _Tp, bool _IsReference, class... _Args>
+struct __libcpp_is_nothrow_constructible</*is constructible*/ false,
+                                         _IsReference, _Tp, _Args...>
+    : public false_type {};
+
+template <class _Tp, class... _Args>
+struct is_nothrow_constructible
+    : __libcpp_is_nothrow_constructible<is_constructible<_Tp, _Args...>::value,
+                                        is_reference<_Tp>::value, _Tp,
+                                        _Args...> {};
+
+template <class _Tp, size_t _Ns>
+struct is_nothrow_constructible<_Tp[_Ns]>
+    : __libcpp_is_nothrow_constructible<is_constructible<_Tp>::value,
+                                        is_reference<_Tp>::value, _Tp> {};
+
+template <typename _Tp, bool = __is_referenceable<_Tp>::value>
+struct __is_nt_move_assignable_impl;
+
+template <typename _Tp>
+struct __is_nt_move_assignable_impl<_Tp, false> : public false_type {};
+
+template <typename _Tp>
+struct __is_nt_move_assignable_impl<_Tp, true>
+    : public is_nothrow_assignable<_Tp &, _Tp &&> {};
+
+/// is_nothrow_move_assignable
+template <typename _Tp>
+struct is_nothrow_move_assignable : public __is_nt_move_assignable_impl<_Tp> {};
+
+template <typename _Tp, bool = __is_referenceable<_Tp>::value>
+struct __is_nothrow_move_constructible_impl;
+
+template <typename _Tp>
+struct __is_nothrow_move_constructible_impl<_Tp, false> : public false_type {};
+
+template <typename _Tp>
+struct __is_nothrow_move_constructible_impl<_Tp, true>
+    : public is_nothrow_constructible<_Tp, _Tp &&> {};
+
+/// is_nothrow_move_constructible
+template <typename _Tp>
+struct is_nothrow_move_constructible
+    : public __is_nothrow_move_constructible_impl<_Tp> {};
+
+// Internal type trait that allows us to sfinae-protect tuple_cat.
+template <typename _Tp>
+struct __is_tuple_like
+    : public __is_tuple_like_impl<__remove_cvref_t<_Tp>>::type {};
+
+template <typename _Tp>
+TV_HOST_DEVICE_INLINE typename enable_if<
+    __and_<__not_<__is_tuple_like<_Tp>>, is_move_constructible<_Tp>,
+           is_move_assignable<_Tp>>::value>::type
+swap(_Tp &__a,
+     _Tp &__b) noexcept(__and_<is_nothrow_move_constructible<_Tp>,
+                               is_nothrow_move_assignable<_Tp>>::value) {
+
+  _Tp __tmp = std::move(__a);
+  __a = std::move(__b);
+  __b = std::move(__tmp);
+}
 
 } // namespace std
 #endif
