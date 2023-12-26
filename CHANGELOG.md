@@ -1,4 +1,7 @@
 # Changelog
+## [0.5.1] - 2023-12-26
+### Fixed
+- fix a small bug in `mp_helper.h`
 
 ## [0.5.0] - 2023-11-15
 ### Added

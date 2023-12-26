@@ -512,7 +512,7 @@ template <class L, class F> constexpr F mp_for_each(F &&f) {
 #endif
 
 template <class L, class F> TV_HOST_DEVICE_INLINE constexpr F mp_for_each_cuda(F &&f) {
-  return detail::mp_for_each_impl(mp_rename<L, mp_list>(), std::forward<F>(f));
+  return detail::mp_for_each_impl_cuda(mp_rename<L, mp_list>(), std::forward<F>(f));
 }
 
 template <unsigned N, unsigned... Ns> struct mp_prod_int {
