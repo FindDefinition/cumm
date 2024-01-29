@@ -344,6 +344,14 @@ class Tensor:
         ...
 
     @overload
+    def copy_storage_(self, other: "Tensor") -> None:
+        ...
+
+    @overload
+    def copy_storage_(self, other: "Tensor", ctx: Context) -> None:
+        ...
+
+    @overload
     def zero_(self) -> "Tensor":
         ...
 

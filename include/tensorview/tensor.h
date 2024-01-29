@@ -124,6 +124,8 @@ enum DeviceType {
   kDeviceCUDA = 0,
 };
 
+class Tensor;
+
 namespace detail {
 
 using dtype_collection_t =
@@ -152,7 +154,9 @@ using all_int_tensor_types_t =
     std::tuple<int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t,
                uint64_t>;
 
+
 template <typename T> class TensorStorage {
+  friend Tensor;
 public:
   TensorStorage(size_t size, int device = -1, bool managed = false,
                 bool pinned = false)
@@ -1339,6 +1343,70 @@ public:
       TV_THROW_RT_ERR("only support cpu tensor");
     }
   }
+
+  void copy_storage_(const Tensor &tensor, Context ctx = Context()) {
+    writable_check();
+    TV_ASSERT_RT_ERR(!this->empty() && !tensor.empty(), "must not empty");
+    TV_ASSERT_RT_ERR(this->storage_->size() == tensor.storage_->size(), "storage must have same size", this->shape(), tensor.shape(), this->storage_->size(), tensor.storage_->size());
+    if (this->device() == -1 && tensor.device() == -1) {
+#ifdef TV_CUDA
+      // use memcpy instead to avoid cuda context init
+      if (this->pinned()) {
+        if (ctx.has_cuda_stream()) {
+          host2host(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size(),
+                    ctx.cuda_stream());
+
+        } else {
+          host2host(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size());
+        }
+      } else {
+        std::copy(tensor.storage_->ptr_,
+                  tensor.storage_->ptr_ + this->storage_->size(),
+                  this->storage_->ptr_);
+      }
+#else
+      std::copy(tensor.storage_->ptr_,
+                tensor.storage_->ptr_ + this->storage_->size(),
+                this->storage_->ptr_);
+#endif
+    }
+#ifdef TV_CUDA
+    else if (device() >= 0 && tensor.device() == -1) {
+      if (ctx.has_cuda_stream()) {
+        host2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size(), ctx.cuda_stream());
+
+      } else {
+        host2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size());
+      }
+
+    } else if (device() == -1 && tensor.device() >= 0) {
+      if (ctx.has_cuda_stream()) {
+        dev2host(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size(), ctx.cuda_stream());
+
+      } else {
+        dev2host(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size());
+      }
+    } else if (device() >= 0 && tensor.device() >= 0) {
+      if (ctx.has_cuda_stream()) {
+        dev2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size(), ctx.cuda_stream());
+      } else {
+        dev2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+                    this->storage_->size());
+      }
+    }
+#endif
+    else {
+      TV_THROW_RT_ERR("only support cpu tensor");
+    }
+  }
+
 
   void copy_2d_pitched_(const Tensor &tensor, Context ctx = Context()) {
     writable_check();

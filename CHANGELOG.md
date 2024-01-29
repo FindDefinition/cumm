@@ -1,4 +1,10 @@
 # Changelog
+## [0.5.2] - 2024-01-02
+### Added
+- add `run_in_process` support for inliner to debug some unrecoverable cuda errors such as invalid memory access (700) without restart whole process. this option will copy all tensor data to cpu, copy them to child process (spawn mode), run in child process, and copy back to cpu and main process. this will slow down the performance, but it's very useful for debugging.
+- add macro `TV_ASSERT_WITH_PRINT` to perform print in assert.
+- change inliner function name with user-provided name for debug.
+
 ## [0.5.1] - 2023-12-26
 ### Fixed
 - fix a small bug in `mp_helper.h`

@@ -612,6 +612,9 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("copy_", [](tv::Tensor& t, const tv::Tensor& other, tv::Context ctx) -> void{
       t.copy_(other, ctx);
     }, py::arg("other"), py::arg("ctx") = tv::Context())
+    .def("copy_storage_", [](tv::Tensor& t, const tv::Tensor& other, tv::Context ctx) -> void{
+      t.copy_storage_(other, ctx);
+    }, py::arg("other"), py::arg("ctx") = tv::Context())
     .def("copy_2d_pitched_", [](tv::Tensor& t, const tv::Tensor& other, tv::Context ctx) -> void{
       t.copy_2d_pitched_(other, ctx);
     }, py::arg("other"), py::arg("ctx") = tv::Context())

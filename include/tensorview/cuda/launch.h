@@ -30,27 +30,27 @@ constexpr int CUDA_MAX_GRID = 65535;
 
 // CUDA: number of blocks for threads.
 
-inline int getNumThreads(const int N) {
+inline int64_t getNumThreads(const int64_t N) {
   if (N > CUDA_NUM_THREADS) {
     return CUDA_NUM_THREADS;
   }
   return DivUp(N, 32) * 32;
 }
 
-template <size_t MaxNumThreads> inline int getNumThreadsEx(const int N) {
+template <size_t MaxNumThreads> inline int64_t getNumThreadsEx(const int64_t N) {
   if (N > MaxNumThreads) {
     return MaxNumThreads;
   }
   return DivUp(N, 32) * 32;
 }
 
-inline int getBlocks(const int N) {
+inline int64_t getBlocks(const int64_t N) {
   TV_ASSERT_RT_ERR(N > 0,
                    "CUDA kernel launch blocks must be positive, but got N=", N);
   return DivUp(N, getNumThreads(N));
 }
 
-template <size_t MaxNumThreads> inline int getBlocksEx(const int N) {
+template <size_t MaxNumThreads> inline int64_t getBlocksEx(const int64_t N) {
   TV_ASSERT_RT_ERR(N > 0,
                    "CUDA kernel launch blocks must be positive, but got N=", N);
   return DivUp(N, getNumThreadsEx<MaxNumThreads>(N));

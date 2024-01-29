@@ -120,7 +120,7 @@ template <class T, size_t N> struct type_to_format<T[N]> {
 };
 
 template <size_t N> struct type_to_format<const char[N]> {
-  static constexpr auto value = type_to_format<const char*>::value;
+  static constexpr auto value = type_to_format<const char *>::value;
 };
 
 template <char Sep, class... Ts> struct types_to_format;
@@ -216,7 +216,6 @@ TV_HOST_DEVICE_INLINE void printf2_array(T const (&arg)[N], Ts &&...args) {
   return detail::printf2_array_impl<Sep>(arg, mp_make_list_c_sequence<int, N>{},
                                          std::forward<Ts>(args)...);
 }
-
 
 template <char Sep = ' ', unsigned Tx = 0, class... Ts>
 TV_HOST_DEVICE_INLINE void printf2_array_once(Ts &&...args) {

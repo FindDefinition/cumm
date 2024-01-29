@@ -17,13 +17,15 @@ from dataclasses import dataclass
 from enum import Enum
 import enum
 from functools import partial
+import io
+import traceback
 from typing import Callable, Dict, List, Optional, Tuple, Union, ContextManager
 
 import numpy as np
 from pccm import Argument
 from pccm.middlewares.pybind import (TemplateTypeStmt,
                                      _simple_template_type_parser)
-
+import multiprocessing
 from cumm.core_cc import tensorview_bind
 from cumm.core_cc.tensorview_bind import CUDAKernelTimer, CUDAEvent, Context
 from cumm.core_cc.tensorview_bind import NVRTCModule as _NVRTCModule
@@ -244,6 +246,58 @@ class NVRTCModule:
             name = self.get_lowered_name(name)
         return self._mod.run_kernel(name, launch.blocks, launch.threads,
                                     launch.smem, launch.stream, list(args))
+
+    def run_kernel_in_spawn_process(self, name: str, launch: LaunchParam,
+                   *args: Union[Tensor, int, float, List[int], List[float],
+                                Tuple[float, ...], Tuple[int, ...]], timeout: Optional[float] = None):
+        ctx = multiprocessing.get_context("spawn")
+        arg_kernel_meta = []
+        for arg in args:
+            if isinstance(arg, Tensor):
+                arg_kernel_meta.append((arg.cpu().numpy(), True))
+            else:
+                arg_kernel_meta.append((arg, False))
+        ret_queue = ctx.Queue()
+        proc = ctx.Process(target=self._run_kernel_in_spawn_process_func, args=(ret_queue, name, launch, arg_kernel_meta))
+        proc.daemon = True 
+        proc.start()
+        # must get queue before proc join to avoid dead lock
+        res = ret_queue.get()
+        # TODO how to deal with timeout process (kernel deadlock)?
+        proc.join(timeout)
+        if isinstance(res, str):
+            raise ValueError(f"Error, traceback: \n{res}")
+        else:
+            for arg, (arg_np, is_tensor) in zip(args, res):
+                if isinstance(arg, Tensor):
+                    # use copy_storage_ to avoid strided tensor copy which
+                    # isn't supported
+                    arg.copy_storage_(from_numpy(arg_np))
+        
+
+    def _run_kernel_in_spawn_process_func(self, q: multiprocessing.Queue, name: str, launch: LaunchParam,
+                   arg_proc_metas: List[Tuple[Union[np.ndarray, int, float, List[int], List[float],
+                                Tuple[float, ...], Tuple[int, ...]], bool]]):
+        launch.stream = 0
+        args = []
+        arg_pairs = []
+        for arg, is_tensor in arg_proc_metas:
+            if is_tensor:
+                assert isinstance(arg, np.ndarray)
+                pair = (arg, from_numpy(arg).cuda())
+                arg_pairs.append(pair)
+                args.append(pair[-1])
+            else:
+                args.append(arg)
+        try:
+            self.run_kernel(name, launch, *args)
+            for arg, ten in arg_pairs:
+                arg[:] = ten.cpu().numpy()
+            q.put(arg_proc_metas)
+        except:
+            ss = io.StringIO()
+            traceback.print_exc(file=ss)
+            q.put(ss.getvalue())
 
     def run_kernel(self, name: str, launch: LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],

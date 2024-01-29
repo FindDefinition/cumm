@@ -60,8 +60,9 @@ my vscode highlight extension config:
 """
 
 import contextlib
+import re
 import pccm
-from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME
+from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME, PCCM_INLINE_FUNCTION_NAME_FORMAT
 from cumm.nvrtc import CummLLVMModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
 from pathlib import Path
 from cumm.common import TensorViewKernel
@@ -104,6 +105,7 @@ def _cached_get_torch_dtype_to_tv():
             torch.int8: tv.int8,
             torch.int16: tv.int16,
             torch.uint8: tv.uint8,
+            torch.bfloat16: tv.bfloat16,
         })
     return _TORCH_DTYPE_TO_TV
 
@@ -230,7 +232,8 @@ class _NVRTCInlineParams:
                  measure_time: bool = False,
                  is_cpu: bool = False,
                  capture_tensor_as_tview: bool = False,
-                 perf_context: Optional[ContextManager] = None) -> None:
+                 perf_context: Optional[ContextManager] = None,
+                 run_in_process: bool = False) -> None:
         self.mode = mode
         self.launch = launch
         self.verbose = verbose
@@ -239,9 +242,11 @@ class _NVRTCInlineParams:
         self.is_cpu = is_cpu
         self.capture_tensor_as_tview = capture_tensor_as_tview
         self.perf_context = perf_context
+        self.run_in_process = run_in_process
 
 
 _NVRTC_FUNC_NAME = f"{PCCM_INLINE_NAMESPACE}::{PCCM_INLINE_FUNCTION_NAME}"
+_NVRTC_FUNC_NAME_FORMAT = f"{PCCM_INLINE_NAMESPACE}::{PCCM_INLINE_FUNCTION_NAME_FORMAT}"
 
 _DEFAULT_KERNEL_PLUGINS: Dict[str, InlineBuilderPlugin] = {
     "numpy.ndarray": NumpyPlugin(),
@@ -298,7 +303,7 @@ class NVRTCInlineBuilder(InlineBuilder):
     def get_nvrtc_kernel_attrs(self, name: str) -> Dict[str, int]:
         nvrtc_mod = self.get_nvrtc_module(name)
         assert nvrtc_mod is not None
-        return nvrtc_mod.get_kernel_attrs(nvrtc_mod.get_lowered_name(_NVRTC_FUNC_NAME))
+        return nvrtc_mod.get_kernel_attrs(nvrtc_mod.get_lowered_name(_NVRTC_FUNC_NAME_FORMAT.format(name)))
 
     def get_save_root(self,
                       path: Path,
@@ -398,13 +403,21 @@ class NVRTCInlineBuilder(InlineBuilder):
 
         return mod
 
+    def _get_nvrtc_inline_func_name_for_debug(self, name: str):
+        return _NVRTC_FUNC_NAME_FORMAT.format(re.sub('[^0-9a-zA-Z]', '_', name))
+
     def run_func(self,
+                name: str,
                  func: CummNVRTCModuleBase,
                  *args,
                  user_args: Optional[_NVRTCInlineParams] = None):
         assert user_args is not None
         launch = user_args.launch
-        return func.run_kernel(_NVRTC_FUNC_NAME, launch, *args, perf_context=user_args.perf_context)
+        if user_args.run_in_process:
+            return func.run_kernel_in_spawn_process(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args)
+        else:
+            return func.run_kernel(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args, perf_context=user_args.perf_context)
+
 
     def kernel_raw(self,
                    name: str,
@@ -414,12 +427,13 @@ class NVRTCInlineBuilder(InlineBuilder):
                    disable_cache: bool = False,
                    capture_tensor_as_tview: bool = False,
                    perf_context: Optional[ContextManager] = None,
+                   run_in_process: bool = False,
                    *,
                    _frame_cnt: int = 2):
         verbose = verbose_path != ""
         user_arg = _NVRTCInlineParams(CUDAMode.KernelRaw, param, verbose,
                                       verbose_path, capture_tensor_as_tview=capture_tensor_as_tview,
-                                      perf_context=perf_context)
+                                      perf_context=perf_context, run_in_process=run_in_process)
         if capture_tensor_as_tview:
             if not isinstance(code, pccm.FunctionCode):
                 code_pccm = pccm.code()
@@ -459,15 +473,17 @@ class NVRTCInlineBuilder(InlineBuilder):
                   disable_cache: bool = False,
                   capture_tensor_as_tview: bool = False,
                   perf_context: Optional[ContextManager] = None,
+                  run_in_process: bool = False,
                   *,
-                  _frame_cnt: int = 2):
+                  _frame_cnt: int = 2,
+                  maximum_1d_threads: Optional[int] = None):
         verbose = verbose_path != ""
         num = int(num)
         user_arg = _NVRTCInlineParams(CUDAMode.Kernel1D,
-                                      self.get_1d_param(num, stream=stream),
+                                      self.get_1d_param(num, stream=stream, maximum_1d_threads=maximum_1d_threads),
                                       verbose, verbose_path,
                                       capture_tensor_as_tview=capture_tensor_as_tview,
-                                      perf_context=perf_context)
+                                      perf_context=perf_context, run_in_process=run_in_process)
         additional_args = {
             _CUMM_KERNEL_1D_SIZE_NAME: num,
         }
