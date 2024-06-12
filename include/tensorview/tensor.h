@@ -154,6 +154,18 @@ using all_int_tensor_types_t =
     std::tuple<int8_t, int16_t, int32_t, int64_t, uint8_t, uint16_t, uint32_t,
                uint64_t>;
 
+template <typename T, typename U> 
+struct is_convertible : std::is_convertible<T, U> {};
+
+#ifdef TV_CUDA
+template <typename T> 
+struct is_convertible<T, __half>: std::is_floating_point<T> {};
+#endif
+
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+template <typename T> 
+struct is_convertible<T, __nv_bfloat16>: std::is_floating_point<T> {};
+#endif
 
 template <typename T> class TensorStorage {
   friend Tensor;
@@ -1757,7 +1769,7 @@ public:
         //                         type_s<std::decay_t<Tcur>>, "to",
         //                         type_s<std::decay_t<Tdst>>);
         // }
-        if_constexpr<std::is_convertible<Tcur, Tdst>::value>(
+        if_constexpr<detail::is_convertible<Tcur, Tdst>::value>(
             [&](auto _) {
               auto ptr = this->data<Tcur>();
               tensor =

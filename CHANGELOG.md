@@ -1,4 +1,8 @@
 # Changelog
+## [0.5.3] - 2024-06-12
+### Fixed 
+- fix compile problem in cuda 12.x
+
 ## [0.5.2] - 2024-01-02
 ### Added
 - add `run_in_process` support for inliner to debug some unrecoverable cuda errors such as invalid memory access (700) without restart whole process. this option will copy all tensor data to cpu, copy them to child process (spawn mode), run in child process, and copy back to cpu and main process. this will slow down the performance, but it's very useful for debugging.
