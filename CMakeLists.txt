@@ -51,7 +51,7 @@ if(${CUDAToolkit_FOUND})
     target_compile_options(${PROJECT_NAME} INTERFACE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>) 
 
   endif()
-  target_compile_definitions(${PROJECT_NAME} INTERFACE TV_CUDA)
+  target_compile_definitions(${PROJECT_NAME} INTERFACE TV_ENABLE_HARDWARE_ACC)
   if (NOT CUMM_DISABLE_CMAKE_INSTALL)
     install( 
       TARGETS ${PROJECT_NAME} ${PROJECT_NAME}_cpu

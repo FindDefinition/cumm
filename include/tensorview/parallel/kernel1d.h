@@ -135,7 +135,7 @@ void kernel_1d_impl(Context ctx, int device, size_t size, F &&f,
         });
     TV_CHECK_CUDA_ERR_V2("launch failed.");
 #else
-    TV_THROW_INVALID_ARG("your code doesn't compile with TV_CUDA, or your code "
+    TV_THROW_INVALID_ARG("your code doesn't compile with TV_ENABLE_HARDWARE_ACC, or your code "
                          "isn't compiled by nvcc.")
 #endif
   }
@@ -174,7 +174,7 @@ void kernel_1d_impl_cuda(Context ctx, int device, size_t size, F &&f,
         });
     TV_CHECK_CUDA_ERR_V2("launch failed.");
 #else
-    TV_THROW_INVALID_ARG("your code doesn't compile with TV_CUDA, or your code "
+    TV_THROW_INVALID_ARG("your code doesn't compile with TV_ENABLE_HARDWARE_ACC, or your code "
                          "isn't compiled by nvcc.")
 #endif
   }

@@ -366,8 +366,8 @@ class TensorView(pccm.Class):
 
         if not CUMM_CPU_ONLY_BUILD:
             self.add_dependency(CUDALibs, TensorViewCPU)
-            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_CUDA")
-            self.build_meta.add_public_cflags("cl", "/DTV_CUDA")
+            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_ENABLE_HARDWARE_ACC")
+            self.build_meta.add_public_cflags("cl", "/DTV_ENABLE_HARDWARE_ACC")
         else:
             self.add_dependency(TensorViewCPU)
 
@@ -618,10 +618,8 @@ class TensorViewNVRTC(pccm.Class):
             self.build_meta.add_public_includes(include, TENSORVIEW_INCLUDE_PATH)
 
             self.add_include("tensorview/cuda/kernel_utils.h")
-            self.build_meta.add_public_cflags("nvcc", "-DTV_CUDA")
+            self.build_meta.add_public_cflags("nvcc", "-DTV_ENABLE_HARDWARE_ACC")
         if compat.InMacOS:
-
-            self.build_meta.add_public_cflags("nvcc", "-D__CUDACC_NVRTC__")
             self.build_meta.add_public_includes(TENSORVIEW_INCLUDE_PATH)
         else:
             self.add_include("tensorview/tensorview.h")
@@ -783,8 +781,8 @@ class TensorViewLLVM(pccm.Class):
 
         if not CUMM_CPU_ONLY_BUILD:
             self.add_dependency(CUDALibs, TensorViewCPULLVM)
-            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_CUDA")
-            self.build_meta.add_public_cflags("cl", "/DTV_CUDA")
+            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_ENABLE_HARDWARE_ACC")
+            self.build_meta.add_public_cflags("cl", "/DTV_ENABLE_HARDWARE_ACC")
         else:
             self.add_dependency(TensorViewCPULLVM)
 

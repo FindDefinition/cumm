@@ -14,14 +14,14 @@
 
 #pragma once
 #include <tensorview/core/defs.h>
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 // #include <cuda.h>
 #include <cuda_fp16.h>
 #endif
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11000 && defined(TV_HARDWARE_ACC_CUDA))
 #include <cuda_bf16.h>
 #endif
-#if (CUDA_VERSION >= 11080 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11080 && defined(TV_HARDWARE_ACC_CUDA))
 #include <cuda_fp8.h>
 #endif
 
@@ -63,17 +63,6 @@ enum DType {
   unknown = -1
 };
 
-/*
-#if defined(TV_CUDA)
-using half_t = __half;
-using half2_t = __half2;
-#endif
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
-using bfloat16_t = __nv_bfloat16;
-using bfloat162_t = __nv_bfloat162;
-#endif
-*/
-
 namespace detail {
 
 TV_HOST_DEVICE_INLINE constexpr bool strings_equal(char const *a, char const *b) {
@@ -111,17 +100,17 @@ template <typename T> struct TypeToDtype {
 template <> struct TypeToDtype<int32_t> {
   static constexpr DType dtype = int32;
 };
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 template <> struct TypeToDtype<__half> {
   static constexpr DType dtype = float16;
 };
 #endif
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11000 && defined(TV_HARDWARE_ACC_CUDA))
 template <> struct TypeToDtype<__nv_bfloat16> {
   static constexpr DType dtype = bfloat16;
 };
 #endif
-#if (CUDA_VERSION >= 11080 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11080 && defined(TV_HARDWARE_ACC_CUDA))
 template <> struct TypeToDtype<__nv_fp8_e5m2> {
   static constexpr DType dtype = float_e5m2;
 };

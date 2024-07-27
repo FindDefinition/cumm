@@ -334,7 +334,7 @@ struct alignas(2) half_t {
   half_t() : storage(0) {}
 
   /// Reinterpret cast from CUDA's half type
-#if defined(TV_CUDA)
+#if defined(TV_HARDWARE_ACC_CUDA)
   TV_HOST_DEVICE_INLINE
   explicit half_t(half const &x)
       : storage(reinterpret_cast<uint16_t const &>(x)) {}
@@ -355,7 +355,7 @@ struct alignas(2) half_t {
   TV_HOST_DEVICE_INLINE
   explicit half_t(unsigned x) { storage = convert(x).storage; }
 
-#if defined(TV_CUDA)
+#if defined(TV_HARDWARE_ACC_CUDA)
   /// Assignment
   TV_HOST_DEVICE_INLINE
   half_t &operator=(half const &x) {
@@ -379,7 +379,7 @@ struct alignas(2) half_t {
   TV_HOST_DEVICE_INLINE
   operator bool() const { return (convert(*this) != 0.0f); }
 
-#if defined(TV_CUDA)
+#if defined(TV_HARDWARE_ACC_CUDA)
   /// Bitcasts to CUDA's half type
   TV_HOST_DEVICE_INLINE
   half to_half() const { return reinterpret_cast<half const &>(storage); }

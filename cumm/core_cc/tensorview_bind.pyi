@@ -1,9 +1,9 @@
 from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from pccm.stubs import EnumValue, EnumClassValue, enum
-class AppleMetalImpl:
+class TensorViewBind:
     @staticmethod
     def hello() -> None: ...
-class TensorViewBind:
+class AppleMetalImpl:
     @staticmethod
     def hello() -> None: ...
 # Copyright 2021 Yan Yan

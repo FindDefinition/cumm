@@ -19,10 +19,10 @@
 #include <tensorview/core/defs.h>
 #include <tensorview/cuda/driverops.h>
 #include <unordered_map>
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 #include <cuda.h>
 #endif
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 #include "Metal/Metal.hpp"
 #endif
 
@@ -31,7 +31,7 @@ namespace tv {
 enum class ContextType : int { kCudaStream = 1, kCublasLt = 2, kCudnn = 3, kAppleMetal = 4 };
 
 namespace detail {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 template <class T>
 std::unique_ptr<T, void (*)(T *)> make_apple_mtl_ptr(T *ptr) {
   return std::unique_ptr<T, void (*)(T *)>(ptr, [](T *ptr) {
@@ -45,7 +45,7 @@ std::unique_ptr<T, void (*)(T *)> make_apple_mtl_ptr(T *ptr) {
 
 }
 
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 
 struct AppleMetalContext {
     MTL::Device* device_ptr_ = nullptr;
@@ -98,7 +98,7 @@ private:
 
 public:
   ContextCore() {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     ContextManager stream_mgr;
     stream_mgr.creater = []() -> std::uintptr_t {
       cudaStream_t stream_cuda;
@@ -110,7 +110,7 @@ public:
     };
     ctx_mgrs_[ContextType::kCudaStream] = stream_mgr;
 #endif
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     ContextManager mtl_compute_ctx_mgr;
     mtl_compute_ctx_mgr.creater = []() -> std::uintptr_t {
       auto* ptr = new AppleMetalContext();
@@ -189,7 +189,7 @@ public:
     return *this;
   }
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
   Context &set_cuda_stream(cudaStream_t stream) {
     check_ptr_valid();
     context_ptr_->create_raw_item(ContextType::kCudaStream,
@@ -203,7 +203,7 @@ public:
 #endif
 
   Context &set_cuda_stream_int(std::uintptr_t stream) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     check_ptr_valid();
     context_ptr_->create_raw_item(ContextType::kCudaStream,
                                   stream);
@@ -211,17 +211,17 @@ public:
     return *this;
   }
   void synchronize_stream() {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     check_ptr_valid();
     checkCudaErrors(cudaStreamSynchronize(cuda_stream()));
 #endif
   }
   void synchronize() {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     check_ptr_valid();
     checkCudaErrors(cudaStreamSynchronize(cuda_stream()));
 #else 
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     check_ptr_valid();
     if (has_item(ContextType::kAppleMetal)) {
       auto* ptr = reinterpret_cast<AppleMetalContext*>(context_ptr_->get_item(ContextType::kAppleMetal));
@@ -236,7 +236,7 @@ public:
 
   std::uintptr_t cuda_stream_int() {
     check_ptr_valid();
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     return reinterpret_cast<std::uintptr_t>(cuda_stream());
 #else 
     return 0;
@@ -251,7 +251,7 @@ public:
     return context_ptr_->get_item(type);
   }
   Context &create_apple_metal_context() {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 
     check_ptr_valid();
     context_ptr_->create_item(ContextType::kAppleMetal);

@@ -14,7 +14,7 @@
 
 #pragma once
 #include "core.h"
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 #include <cublasLt.h>
 #endif
 
@@ -36,7 +36,7 @@ struct BlasContext : Context {
     context_ptr_->register_manager(ContextType::kCublasLt, cublaslt_mgr);
   }
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
   bool has_cublaslt_handle() {
     check_ptr_valid();
     return context_ptr_->has_item(ContextType::kCublasLt);

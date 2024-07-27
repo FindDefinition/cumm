@@ -447,7 +447,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         code.arg("m", "pybind11::module_")
         if not compat.InWindows:
             code.code_after_include = f"""
-#if !defined(TV_CUDA) || (CUDA_VERSION < 11040)
+#if !defined(TV_HARDWARE_ACC_CUDA) || (CUDA_VERSION < 11040)
 #include <cxxabi.h>
 #endif
             """
@@ -692,7 +692,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
       return reinterpret_cast<std::uintptr_t>(ten.raw_data());
     })
 
-#if defined(TV_CUDA)
+#if defined(TV_ENABLE_HARDWARE_ACC)
     .def("cuda", py::overload_cast<tv::Context>(&tv::Tensor::cuda, py::const_), py::arg("ctx") = tv::Context())
 #endif
 #if (PYBIND11_VERSION_MAJOR > 2 || (PYBIND11_VERSION_MAJOR == 2 && PYBIND11_VERSION_MINOR >= 6))
@@ -740,7 +740,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   m.def("full_float", [](std::vector<int64_t> shape, float val, int dtype, int device, bool pinned, bool managed){
     return tv::full(shape, val, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
   m.def("zeros_managed", [](std::vector<int64_t> shape, int dtype){
     return tv::zeros(shape, tv::DType(dtype), 0, false, true);
   }, py::arg("shape"), py::arg("dtype") = 0); 
@@ -755,7 +755,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     if (index == -1){
       checkCudaErrors(cudaGetDevice(&index));
     }
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     cudaDeviceProp prop;
     checkCudaErrors(cudaGetDeviceProperties(&prop, index));
     return std::make_tuple(prop.major, prop.minor);
@@ -774,14 +774,14 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     return tv::bit_size(tv::DType(dtype)) / 8;
   }); 
   m.def("check_cuda_error", [](){
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     TV_CHECK_CUDA_ERR_V2("error");
 #endif
   }); 
 
   m.def("cat_first_axis", &tv::cat_first_axis);
   m.def("is_cpu_only", [](){
-#if defined(TV_CUDA)
+#if defined(TV_ENABLE_HARDWARE_ACC)
     return false;
 #else
     return true;

@@ -15,7 +15,7 @@
 #pragma once
 #include <tensorview/core/defs.h>
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 #include <cuda_runtime_api.h>
 #endif
 #include <chrono>
@@ -142,7 +142,7 @@ public:
 
 };
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 
 class CUDAEventCore {
 private:
@@ -429,7 +429,7 @@ public:
     }
   }
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
   CUDAKernelTimerGuard(std::string name, CUDAKernelTimer timer,
                        cudaStream_t stream = nullptr, bool print_exit = false): CUDAKernelTimerGuard(name, timer, reinterpret_cast<std::uintptr_t>(stream), print_exit){}
 #endif
@@ -449,7 +449,7 @@ public:
   }
 };
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 inline auto measure_and_print_guard(std::string name, cudaStream_t stream = nullptr){
   return std::make_shared<CUDAKernelTimerGuard>(name, CUDAKernelTimer(true), stream, true);
 };

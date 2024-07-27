@@ -37,7 +37,7 @@
 #include <vector>
 #endif
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 
 #include <cuda_fp16.h>
 #ifndef __CUDACC_RTC__
@@ -46,13 +46,13 @@
 #include <cuda_runtime_api.h>
 #endif
 #endif
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11000 && defined(TV_HARDWARE_ACC_CUDA))
 #include <cuda_bf16.h>
 #endif
 
 namespace tv {
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 #ifndef __CUDACC_RTC__
 
 struct GPU {

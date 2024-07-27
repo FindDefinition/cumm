@@ -170,7 +170,7 @@ template <typename T> struct MathScalarOp {
 #endif
 };
 
-#ifdef TV_CUDA_CC
+#ifdef TV_HARDWARE_ACC_CUDA
 template <> struct MathScalarOp<float> {
 
   TV_HOST_DEVICE_INLINE static float copysign(float x, float y) {

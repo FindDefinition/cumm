@@ -15,7 +15,7 @@
 #pragma once
 // #include <cstdint>
 // #include <cstddef>
-#if (defined(__clang__) && defined(__CUDA__)) || defined(__NVCC__) || defined(__CUDACC__)
+#if ((defined(__clang__) && defined(__CUDA__)) || defined(__NVCC__) || defined(__CUDACC__)) && !defined(__CUDACC_RTC__)
 #define TV_CUDA_CC
 #define TV_HOST_DEVICE_INLINE __forceinline__ __device__ __host__
 #define TV_DEVICE_INLINE __forceinline__ __device__
@@ -90,7 +90,15 @@
 #endif
 
 #ifdef TV_CUDA
-#define TV_ENABLE_HARDWARE_ACCELERATION
+#define TV_ENABLE_HARDWARE_ACC
+#endif
+
+#ifdef TV_ENABLE_HARDWARE_ACC
+#ifdef __APPLE__
+#define TV_HARDWARE_ACC_METAL
+#else 
+#define TV_HARDWARE_ACC_CUDA
+#endif
 #endif
 
 #ifndef TV_MAX_DIM

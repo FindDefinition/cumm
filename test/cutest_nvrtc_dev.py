@@ -15,7 +15,6 @@ def test_nvrtc_std():
     
     inliner.kernel_1d("nvrtc_std", 1, 0, 
                       f"""
-    assert(int(i) < 0);
     float x = 0.356632;
     float y = 0.346854;
     float z = 0.998650;

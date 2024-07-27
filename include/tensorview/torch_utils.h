@@ -18,13 +18,13 @@
 #include <tensorview/tensor.h>
 #include <tensorview/tensorview.h>
 #include <torch/script.h>
-#if defined(TV_CUDA)
+#if defined(TV_HARDWARE_ACC_CUDA)
 #include <ATen/cuda/CUDAContext.h>
 #endif
 
 namespace tv {
 
-#if defined(TV_CUDA)
+#if defined(TV_HARDWARE_ACC_CUDA)
 struct TorchGPU : public tv::GPU {
   virtual cudaStream_t getStream() const override {
     return at::cuda::getCurrentCUDAStream();

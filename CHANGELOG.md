@@ -2,6 +2,8 @@
 ## [0.6.0] - 2024-07-28
 ### Added 
 - add cuda-like kernel in apple silicon, only RTC compile is supported.
+### Changed
+- BREAKING CHANGE: rename macro `TV_CUDA` to `TV_ENABLE_HARDWARE_ACC`
 
 ## [0.5.3] - 2024-06-12
 ### Fixed 

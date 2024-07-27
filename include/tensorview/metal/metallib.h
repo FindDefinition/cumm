@@ -20,14 +20,14 @@
 
 #include <unordered_map>
 #include <vector>
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 #include "Metal/Metal.hpp"
 #endif
 #include <tensorview/cuda/nvrtc.h>
 
 namespace tv {
 namespace detail {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 inline MTL::DataType tv_dtype_to_mtl_data_type(tv::DType t) {
   switch (t) {
   case DType::bool_:
@@ -66,7 +66,7 @@ class MetalModule {
 public:
   using ArgType = NVRTCModule::ArgType;
   MetalModule(tv::Tensor binary) {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
     auto option =
         detail::make_apple_mtl_ptr(MTL::CompileOptions::alloc()->init());
@@ -80,7 +80,7 @@ public:
 #endif
   }
   MetalModule(std::string code, std::vector<std::string> opts) {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
     auto codeNS = detail::make_apple_mtl_ptr(
         NS::String::string(code.c_str(), NS::ASCIIStringEncoding));
@@ -96,7 +96,7 @@ public:
   void run_kernel(std::string name, std::array<int, 3> blocks,
                   std::array<int, 3> threads, int smem_size, Context ctx,
                   std::vector<std::tuple<tv::Tensor, int>> args) {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     bool sync_op = false;
     if (!ctx.has_item(ContextType::kAppleMetal)) {
       ctx = Context().create_apple_metal_context();
@@ -192,7 +192,7 @@ public:
   }
 
   ~MetalModule() {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     if (mtl_lib_) {
       mtl_lib_->release();
       mtl_lib_ = nullptr;
@@ -205,7 +205,7 @@ public:
   }
 
 private:
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
   MTL::Device *ptr_mtl_device_ = nullptr;
   MTL::Library *mtl_lib_ = nullptr;
 

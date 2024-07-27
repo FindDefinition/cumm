@@ -21,7 +21,7 @@ TODO add CAS
 #if defined(TV_METAL_RTC)
 #include <metal_stdlib>
 #endif
-#if defined(TV_CUDA_CC) && defined(__CUDACC_RTC__)
+#if defined(TV_HARDWARE_ACC_CUDA) && defined(__CUDACC_RTC__)
 #include <tensorview/core/nvrtc_std.h>
 #endif
 
@@ -77,11 +77,12 @@ TV_DEVICE_INLINE vote_t lanemask_lt() {
 
 #if defined(TV_CUDA_CC)
 
-using vote_t = uint32_t TV_DEVICE_INLINE uint warp_size() { return 32; }
+using vote_t = uint32_t;
+TV_DEVICE_INLINE uint32_t warp_size() { return 32; }
 
-TV_DEVICE_INLINE uint warp_index() { return threadIdx.x / 32; }
+TV_DEVICE_INLINE uint32_t warp_index() { return threadIdx.x / 32; }
 
-TV_DEVICE_INLINE uint lane_index() { return threadIdx.x % 32; }
+TV_DEVICE_INLINE uint32_t lane_index() { return threadIdx.x % 32; }
 
 namespace detail {
 TV_DEVICE_INLINE vote_t lanemask_lt() {

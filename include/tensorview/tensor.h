@@ -101,21 +101,21 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <iomanip>
 #include <memory>
 #include <type_traits>
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 #include "cuda/driverops.h"
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 #include <curand.h>
 #endif
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11000 && defined(TV_HARDWARE_ACC_CUDA))
 #include <cuda_bf16.h>
 #endif
-#if (CUDA_VERSION >= 11080 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11080 && defined(TV_HARDWARE_ACC_CUDA))
 #include <cuda_fp8.h>
 #endif
 
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 #include "Metal/Metal.hpp"
 #endif
 
@@ -136,16 +136,16 @@ using dtype_collection_t =
     mp_list_c<int, float32, int32, int16, int8, float64, bool_, uint8, float16,
               int64, uint16, uint32, uint64>;
 
-#if defined(TV_CUDA_CC) && CUDA_VERSION < 11000
+#if defined(TV_HARDWARE_ACC_CUDA) && CUDA_VERSION < 11000
 using all_tensor_types_t =
     std::tuple<float, double, int8_t, int16_t, int32_t, int64_t, uint8_t,
                uint16_t, uint32_t, uint64_t, bool, __half>;
-#elif defined(TV_CUDA_CC) && CUDA_VERSION >= 11000
+#elif defined(TV_HARDWARE_ACC_CUDA) && CUDA_VERSION >= 11000
 using all_tensor_types_t =
     std::tuple<float, double, int8_t, int16_t, int32_t, int64_t, uint8_t,
                uint16_t, uint32_t, uint64_t, bool, __half, __nv_bfloat16>;
 #else
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
 using all_tensor_types_t =
     std::tuple<float, double, int8_t, int16_t, int32_t, int64_t, uint8_t,
                uint16_t, uint32_t, uint64_t, bool>;
@@ -168,12 +168,12 @@ using all_int_tensor_types_t =
 template <typename T, typename U> 
 struct is_convertible : std::is_convertible<T, U> {};
 
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
 template <typename T> 
 struct is_convertible<T, __half>: std::is_floating_point<T> {};
 #endif
 
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11000 && defined(TV_HARDWARE_ACC_CUDA))
 template <typename T> 
 struct is_convertible<T, __nv_bfloat16>: std::is_floating_point<T> {};
 #endif
@@ -189,13 +189,13 @@ public:
     } else {
       if (device == -1) {
         if (pinned_) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
           checkCudaErrors(cudaMallocHost(&ptr_, size * sizeof(T)));
 #else
-          TV_THROW_INVALID_ARG("you need to define TV_CUDA to use pinned");
+          TV_THROW_INVALID_ARG("you need to define TV_ENABLE_HARDWARE_ACC to use pinned");
 #endif
         } else {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
           ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
           TV_ASSERT_RT_ERR(ptr_mtl_device_, "Metal device not found");
           ptr_mtl_ = ptr_mtl_device_->newBuffer(size, MTL::ResourceStorageModeShared);
@@ -206,14 +206,13 @@ public:
 #endif
         }
       } else {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
         if (managed) {
           checkCudaErrors(cudaMallocManaged(&this->ptr_, size * sizeof(T)));
         } else {
           checkCudaErrors(cudaMalloc(&ptr_, size * sizeof(T)));
         }
-#endif
-#ifdef __APPLE__
+#elif defined(TV_HARDWARE_ACC_METAL)
           ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
           TV_ASSERT_RT_ERR(ptr_mtl_device_, "Metal device not found");
           ptr_mtl_ = ptr_mtl_device_->newBuffer(size, MTL::ResourceStorageModeShared);
@@ -230,7 +229,7 @@ public:
       if (size == 0) {
         ptr_ = nullptr;
       }
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
       ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
       TV_ASSERT_RT_ERR(ptr_mtl_device_, "Metal device not found");
       ptr_mtl_ = ptr_mtl_device_->newBuffer(ptr, size, MTL::ResourceStorageModeShared, nullptr);
@@ -247,11 +246,11 @@ public:
     }
     if (device_ == -1) {
       if (pinned_) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
         cudaFreeHost(ptr_);
 #endif
       } else {
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
         if (ptr_mtl_ != nullptr){
           ptr_mtl_->release();
           ptr_mtl_ = nullptr;
@@ -265,10 +264,10 @@ public:
 #endif
       }
     } else {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
       cudaFree(ptr_);
 #endif
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
       if (ptr_mtl_ != nullptr){
         ptr_mtl_->release();
         ptr_mtl_ = nullptr;
@@ -282,7 +281,7 @@ public:
   };
 
   inline size_t size() const { return size_; }
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
   const void* apple_metal_buffer_ptr() const {
     return ptr_mtl_;
   }
@@ -302,14 +301,14 @@ public:
   void zero_(int64_t offset, int64_t length, Context ctx = Context()) {
     TV_ASSERT_RT_ERR(length <= size_ - offset, "eror");
     int target_device = device_;
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     target_device = 0; // for apple m cpu, all buffer are shared.
 #endif
     if (target_device == -1) {
       std::memset(data() + offset, 0, length);
       // std::fill(data(), data() + size_, 0);
     } else {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
       if (ctx.has_cuda_stream()) {
         checkCudaErrors(cudaMemsetAsync(data() + offset * sizeof(T), 0,
                                         length * sizeof(T), ctx.cuda_stream()));
@@ -317,8 +316,7 @@ public:
         checkCudaErrors(
             cudaMemset(data() + offset * sizeof(T), 0, length * sizeof(T)));
       }
-#else
-#ifdef __APPLE__
+#elif defined(TV_HARDWARE_ACC_METAL)
       bool sync_op = false;
       if (!ctx.has_item(ContextType::kAppleMetal)){
         ctx = Context().create_apple_metal_context();
@@ -337,7 +335,6 @@ public:
 #else
       TV_THROW_INVALID_ARG("don't compiled with cuda");
 #endif
-#endif
     }
   }
 
@@ -351,14 +348,14 @@ public:
       return new_storage_ptr;
     }
     int target_device = device_;
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     target_device = 0; // for apple m cpu, all buffer are shared.
 #endif
 
     if (target_device == -1) {
 
       if (pinned_) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
         if (ctx.has_cuda_stream()) {
           host2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T),
                     ctx.cuda_stream());
@@ -373,7 +370,7 @@ public:
         std::copy(ptr_, ptr_ + size_ * sizeof(T), new_storage_ptr->ptr_);
       }
     }
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     else {
       if (ctx.has_cuda_stream()) {
         dev2dev(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T),
@@ -382,8 +379,7 @@ public:
         dev2dev(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T));
       }
     }
-#else
-#ifdef __APPLE__
+#elif defined(TV_HARDWARE_ACC_METAL)
       bool sync_op = false;
       if (!ctx.has_item(ContextType::kAppleMetal)){
         ctx = Context().create_apple_metal_context();
@@ -402,15 +398,13 @@ public:
     else {
       TV_THROW_RT_ERR("only support cpu tensor");
     }
-
-#endif
 #endif
     return new_storage_ptr;
   }
 
   std::shared_ptr<TensorStorage<T>> cpu(Context ctx = Context()) {
     // clone whole storage
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     auto res = clone(ctx);
     res->device_ = -1;
     return res;
@@ -423,7 +417,7 @@ public:
     if (device_ == -1) {
 
       if (pinned_) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
         if (ctx.has_cuda_stream()) {
           host2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T),
                     ctx.cuda_stream());
@@ -438,7 +432,7 @@ public:
         std::copy(ptr_, ptr_ + size_ * sizeof(T), new_storage_ptr->ptr_);
       }
     }
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     else {
       if (ctx.has_cuda_stream()) {
         dev2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T),
@@ -464,7 +458,7 @@ private:
   int device_ = -1;
   bool managed_ = false;
   bool pinned_ = false;
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
   MTL::Buffer* ptr_mtl_ = nullptr;
   MTL::Device* ptr_mtl_device_ = nullptr;
 #endif
@@ -529,7 +523,7 @@ template <class Tsrc, class Tdst> struct ConvertTmpType {
   static constexpr bool kSpec = false;
 };
 
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA_CC))
+#if (CUDA_VERSION >= 11000 && defined(TV_HARDWARE_ACC_CUDA))
 template <class T> struct ConvertTmpType<T, __nv_bfloat16> {
   using type = float;
   static constexpr bool kSpec = true;
@@ -1313,13 +1307,13 @@ public:
   template <typename T> Tensor &fill_template_(T val, Context ctx) {
     writable_check();
     auto target_device = this->device();
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     target_device = -1;
 #endif
     if (target_device == -1) {
       std::fill(this->data_ptr<T>(), this->data_ptr<T>() + this->size(), val);
     } else {
-#if defined(TV_CUDA_CC) && (TV_USE_CUDA_DRIVER)
+#if defined(TV_HARDWARE_ACC_CUDA) && (TV_USE_CUDA_DRIVER)
       auto tview = this->tview<T, -1, tv::DefaultPtrTraits, int64_t>();
       if (ctx.has_cuda_stream()) {
         tv::FillDev<T, -1, tv::DefaultPtrTraits, int64_t>::run_async(
@@ -1337,7 +1331,7 @@ public:
     if (device == -1) {
       return cpu(ctx);
     } else {
-#if defined(TV_ENABLE_HARDWARE_ACCELERATION)
+#if defined(TV_ENABLE_HARDWARE_ACC)
       return cuda(ctx);
 #else
       TV_THROW_INVALID_ARG("don't compiled with cuda");
@@ -1350,7 +1344,7 @@ public:
 
   Tensor &fill_(int val, Context ctx = Context()) {
     auto target_device = this->device();
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     target_device = -1;
 #endif
     using int_types_t =
@@ -1420,7 +1414,7 @@ public:
     TV_ASSERT_RT_ERR(this->size() == tensor.size(), "must have same size");
     TV_ASSERT_RT_ERR(this->dtype() == tensor.dtype(), "must have same dtype",
                      dtype_str(this->dtype()), dtype_str(tensor.dtype()));
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     // use apple metal api to copy
     bool sync_op = is_cpu(); // always sync if cpu to simulate cuda behavior
     if (!ctx.has_item(ContextType::kAppleMetal)){
@@ -1448,7 +1442,7 @@ public:
 #else 
     
     if (this->device() == -1 && tensor.device() == -1) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
       // use memcpy instead to avoid cuda context init
       if (this->pinned()) {
         if (ctx.has_cuda_stream()) {
@@ -1471,7 +1465,7 @@ public:
                 raw_data());
 #endif
     }
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     else if (device() >= 0 && tensor.device() == -1) {
       if (ctx.has_cuda_stream()) {
         host2dev(raw_data(), tensor.raw_data(),
@@ -1511,7 +1505,7 @@ public:
     writable_check();
     TV_ASSERT_RT_ERR(!this->empty() && !tensor.empty(), "must not empty");
     TV_ASSERT_RT_ERR(this->storage_->size() == tensor.storage_->size(), "storage must have same size", this->shape(), tensor.shape(), this->storage_->size(), tensor.storage_->size());
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     // use apple metal api to copy
     bool sync_op = false;
     if (!ctx.has_item(ContextType::kAppleMetal)){
@@ -1534,7 +1528,7 @@ public:
 #else 
 
     if (this->device() == -1 && tensor.device() == -1) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
       // use memcpy instead to avoid cuda context init
       if (this->pinned()) {
         if (ctx.has_cuda_stream()) {
@@ -1557,7 +1551,7 @@ public:
                 this->storage_->ptr_);
 #endif
     }
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     else if (device() >= 0 && tensor.device() == -1) {
       if (ctx.has_cuda_stream()) {
         host2dev(this->storage_->ptr_, tensor.storage_->ptr_,
@@ -1608,7 +1602,7 @@ public:
     if (this->contiguous_ && tensor.contiguous_){
       return copy_(tensor, ctx);
     }
-#ifdef __APPLE__
+#ifdef TV_HARDWARE_ACC_METAL
     TV_THROW_INVALID_ARG("copy 2d non-contiguous array not implemented for apple metal");
 #endif
 
@@ -1617,13 +1611,13 @@ public:
     auto dst_pitch = this->stride(0) * detail::sizeof_dtype(dtype_);
     auto src_pitch = tensor.stride(0) * detail::sizeof_dtype(dtype_);
     if (this->device() == -1 && tensor.device() == -1) {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
       checkCudaErrors(cudaMemcpy2D(dst, dst_pitch, src, src_pitch, w, h, cudaMemcpyHostToHost));
 #else
       TV_THROW_INVALID_ARG("not implemented for cpu tensor")
 #endif
     }
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
     else if (device() >= 0 && tensor.device() == -1) {
       if (ctx.has_cuda_stream()) {
         checkCudaErrors(cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, 
@@ -1698,7 +1692,7 @@ public:
     return res;
   }
 
-#if defined(TV_ENABLE_HARDWARE_ACCELERATION)
+#if defined(TV_ENABLE_HARDWARE_ACC)
   Tensor cuda(Context ctx = Context()) const {
     if (empty()){
       return Tensor();
@@ -1842,7 +1836,7 @@ public:
           tensor_tv[i] = distr(generator);
         }
       } else {
-#if defined(TV_CUDA_CC)
+#if defined(TV_HARDWARE_ACC_CUDA)
         curandGenerator_t gen;
         auto status = curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT);
         if (status != CURAND_STATUS_SUCCESS) {
@@ -2004,7 +1998,7 @@ template <typename Os> Os &operator<<(Os &os, const Tensor &tensor) {
     if (std::is_same<T, float>::value || std::is_same<T, double>::value) {
       ss << std::setprecision(4);
     }
-#if defined(TV_CUDA_CC) && CUDA_VERSION < 11000
+#if defined(TV_HARDWARE_ACC_CUDA) && CUDA_VERSION < 11000
     if_constexpr<std::is_same<T, __half>::value>(
         [&](auto _) {
           auto tensorf = tensor.astype(float32);
@@ -2016,7 +2010,7 @@ template <typename Os> Os &operator<<(Os &os, const Tensor &tensor) {
           auto tview = tensor.tview<const T, -1, DefaultPtrTraits, int64_t>();
           os << tview.repr(ss);
         });
-#elif defined(TV_CUDA_CC) && CUDA_VERSION >= 11000
+#elif defined(TV_HARDWARE_ACC_CUDA) && CUDA_VERSION >= 11000
     if_constexpr<std::is_same<T, __half>::value || std::is_same<T, __nv_bfloat16>::value>([&](auto _){
       auto tensorf = tensor.astype(float32);
       auto tview = tensorf.tview<const float, -1, DefaultPtrTraits, int64_t>();
@@ -2025,7 +2019,7 @@ template <typename Os> Os &operator<<(Os &os, const Tensor &tensor) {
       auto tview = tensor.tview<const T, -1, DefaultPtrTraits, int64_t>();
       os << tview.repr(ss);
     });
-#elif defined(TV_CUDA_CC) && CUDA_VERSION >= 11080
+#elif defined(TV_HARDWARE_ACC_CUDA) && CUDA_VERSION >= 11080
     if_constexpr<std::is_same<T, __half>::value || std::is_same<T, __nv_bfloat16>::value || std::is_same<T, __nv_fp8_e5m2>::value || std::is_same<T, __nv_fp8_e4m3>::value>([&](auto _){
       auto tensorf = tensor.astype(float32);
       auto tview = tensorf.tview<const float, -1, DefaultPtrTraits, int64_t>();
