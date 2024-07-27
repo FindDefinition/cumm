@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple
 import pccm
 from ccimport import compat
 
-from cumm.constants import CUMM_CPU_ONLY_BUILD, TENSORVIEW_INCLUDE_PATH
+from cumm.constants import CUMM_APPLE_METAL_CPP_ROOT, CUMM_CPU_ONLY_BUILD, TENSORVIEW_INCLUDE_PATH
 from cumm.constants import PACKAGE_ROOT
 
 def get_executable_path(executable: str) -> str:
@@ -283,10 +283,18 @@ class GenericKernelFlags(pccm.Class):
 class CUDALibs(pccm.Class):
     def __init__(self):
         super().__init__()
-        self.add_dependency(GenericKernelFlags)
-        include, lib64 = _get_cuda_include_lib()
-        self.build_meta.libraries.extend(["cudart"])
-        self.build_meta.libpaths.append(lib64)
+        if compat.InMacOS:
+            path = Path.home() / "metal-cpp"
+            if CUMM_APPLE_METAL_CPP_ROOT is not None:
+                path = Path(CUMM_APPLE_METAL_CPP_ROOT)
+            assert path.exists(), "if you use mac os, you must download metal-cpp and save it to home folder or use CUMM_APPLE_METAL_CPP_ROOT."
+            self.build_meta.add_includes(str(path))
+            self.build_meta.add_ldflags("clang++", "-framework Metal", "-framework CoreGraphics")
+        else:
+            self.add_dependency(GenericKernelFlags)
+            include, lib64 = _get_cuda_include_lib()
+            self.build_meta.libraries.extend(["cudart"])
+            self.build_meta.libpaths.append(lib64)    
 
 class TensorViewHeader(pccm.Class):
     def __init__(self):
@@ -600,15 +608,24 @@ class TensorViewNVRTC(pccm.Class):
     def __init__(self):
         super().__init__()
         self.add_include("tensorview/core/all.h")
-        self.add_include("tensorview/tensorview.h")
-        self.add_include("tensorview/core/arrayops/simple.h")
+        self.add_include("tensorview/core/arrayops/linalg.h")
+        self.add_include("tensorview/parallel/ops.h")
+
         if not CUMM_CPU_ONLY_BUILD:
             # here we can't depend on GemmKernelFlags
             # because nvrtc don't support regular arch flags.
             include, lib64 = _get_cuda_include_lib()
             self.build_meta.add_public_includes(include, TENSORVIEW_INCLUDE_PATH)
+
             self.add_include("tensorview/cuda/kernel_utils.h")
             self.build_meta.add_public_cflags("nvcc", "-DTV_CUDA")
+        if compat.InMacOS:
+
+            self.build_meta.add_public_cflags("nvcc", "-D__CUDACC_NVRTC__")
+            self.build_meta.add_public_includes(TENSORVIEW_INCLUDE_PATH)
+        else:
+            self.add_include("tensorview/tensorview.h")
+
             # if compat.InLinux:
             #     nvrtc_include = PACKAGE_ROOT / "nvrtc_include"
             #     self.build_meta.add_public_includes(nvrtc_include)
@@ -709,6 +726,9 @@ class PyBind11(pccm.Class):
         self.add_include("pybind11/numpy.h")
         # self.add_include("pybind11/eigen.h")
         self.add_include("pybind11/stl_bind.h")
+
+        if compat.InMacOS:
+            self.build_meta.add_ldflags("clang++", "-Wl,-undefined,dynamic_lookup")
 
 
 class BoostGeometryLib(pccm.Class):

@@ -67,7 +67,7 @@ template <> struct MortonCore<64> {
 template <typename T> struct Morton;
 
 template <> struct Morton<uint32_t> : public detail::MortonCore<32> {
-  static constexpr int kNumBits = 32;
+  static constexpr TV_METAL_CONSTANT int kNumBits = 32;
   TV_HOST_DEVICE_INLINE static uint32_t encode(uint32_t x, uint32_t y,
                                                uint32_t z) {
     return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) |
@@ -83,7 +83,7 @@ template <> struct Morton<uint32_t> : public detail::MortonCore<32> {
 };
 
 // template <> struct Morton<int64_t> : public detail::MortonCore<64> {
-//   static constexpr int kNumBits = 64;
+//   static constexpr TV_METAL_CONSTANT int kNumBits = 64;
 //   TV_HOST_DEVICE_INLINE static uint64_t encode(int32_t x, int32_t y,
 //                                                int32_t z) {
 //     auto abs_x = x >= 0 ? x : -x;
@@ -117,7 +117,7 @@ template <> struct Morton<uint32_t> : public detail::MortonCore<32> {
 // };
 
 template <> struct Morton<uint64_t> : public detail::MortonCore<64> {
-  static constexpr int kNumBits = 64;
+  static constexpr TV_METAL_CONSTANT int kNumBits = 64;
   TV_HOST_DEVICE_INLINE static uint64_t encode(uint32_t x, uint32_t y,
                                                uint32_t z) {
     return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) |
@@ -185,15 +185,16 @@ namespace detail {
 
 template <typename T> struct FNVInternal;
 template <> struct FNVInternal<uint32_t> {
-  constexpr static uint32_t defaultOffsetBasis = 0x811C9DC5;
-  constexpr static uint32_t prime = 0x01000193;
+  constexpr static TV_METAL_CONSTANT uint32_t defaultOffsetBasis = 0x811C9DC5;
+  constexpr static TV_METAL_CONSTANT uint32_t prime = 0x01000193;
 };
 
 template <> struct FNVInternal<uint64_t> {
-  constexpr static uint64_t defaultOffsetBasis = 0xcbf29ce484222325;
-  constexpr static uint64_t prime = 0x100000001b3;
+  constexpr static TV_METAL_CONSTANT uint64_t defaultOffsetBasis = 0xcbf29ce484222325;
+  constexpr static TV_METAL_CONSTANT uint64_t prime = 0x100000001b3;
 };
 
+#ifdef TV_CUDA_CC
 static constexpr bool kIsUint64SameAsULL =
     std::is_same<uint64_t, unsigned long long>::value;
 
@@ -203,7 +204,7 @@ struct FNVInternal<
   constexpr static unsigned long long defaultOffsetBasis = 0xcbf29ce484222325;
   constexpr static unsigned long long prime = 0x100000001b3;
 };
-
+#endif
 } // namespace detail
 
 template <typename K>
@@ -211,7 +212,7 @@ struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
   using key_type = tv::hash::to_unsigned_t<K>;
   TV_HOST_DEVICE_INLINE static key_type hash(key_type key) {
     key_type ret = detail::FNVInternal<key_type>::defaultOffsetBasis;
-    key_type key_u = *(reinterpret_cast<key_type *>(&key));
+    key_type key_u = *(reinterpret_cast<TV_METAL_THREAD key_type *>(&key));
     // const char* key_ptr = reinterpret_cast<const char*>(&key);
     TV_PRAGMA_UNROLL
     for (size_t i = 0; i < sizeof(K); ++i) {

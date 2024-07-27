@@ -1,5 +1,8 @@
 from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from pccm.stubs import EnumValue, EnumClassValue, enum
+class AppleMetalImpl:
+    @staticmethod
+    def hello() -> None: ...
 class TensorViewBind:
     @staticmethod
     def hello() -> None: ...
@@ -38,6 +41,15 @@ class Context:
 
     def set_cuda_stream(self, stream: int) -> "Context":
         ... 
+
+    def create_apple_metal_context(self) -> None:
+        ...
+
+    def has_apple_metal_context(self) -> bool:
+        ...
+
+    def synchronize(self) -> None:
+        ...
 
 class CUDAEvent:
     def __init__(self, name: str = "") -> None:
@@ -155,6 +167,7 @@ class NVRTCModule:
     kTensor = 0
     kArray = 1
     kTensorView = 2
+    kScalar = 3
 
     @overload
     def __init__(self,
@@ -186,6 +199,20 @@ class NVRTCModule:
         ...
 
     def get_kernel_attributes(self, name: str) -> Dict[str, int]:
+        ...
+
+class MetalModule:
+    @overload
+    def __init__(self, binary: "Tensor"):
+        ...
+
+    @overload
+    def __init__(self, code: str, opts: List[str]):
+        ...
+
+    def run_kernel(self, name: str, blocks: List[int], threads: List[int],
+                   smem_size: int, ctx: Context, args: List[Tuple[Tensor,
+                                                                 int]]):
         ...
 
 

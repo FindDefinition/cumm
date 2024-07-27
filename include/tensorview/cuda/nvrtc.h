@@ -20,7 +20,7 @@
 
 #include <unordered_map>
 #include <vector>
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 #include <cuda.h>
 #include <nvrtc.h>
 #include <tensorview/cuda/driver.h>
@@ -68,7 +68,7 @@ public:
       header_ptr = header_buffers.data();
       header_name_ptr = header_names.data();
     }
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     TV_NVRTC_SAFE_CALL(nvrtcCreateProgram(&prog_,                // prog
                                           code_.c_str(),         // buffer
                                           program_name_.c_str(), // name
@@ -206,7 +206,7 @@ public:
   }
 
   ~NVRTCProgram() {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     if (prog_) {
       nvrtcDestroyProgram(&prog_);
     }
@@ -217,7 +217,7 @@ public:
     if (!ptx_.empty()){
       return ptx_;
     }
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     if (prog_ == nullptr) {
       TV_ASSERT_RT_ERR(!ptx_.empty(), "PTX is empty!!!");
       return ptx_;
@@ -237,7 +237,7 @@ public:
     if (!cubin_.empty()){
       return cubin_;
     }
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 #if (CUDA_VERSION < 11000)
     TV_THROW_RT_ERR("cubin not implemented for CUDA < 11");
 #else 
@@ -264,7 +264,7 @@ public:
   std::vector<std::string> name_exprs() const { return name_exprs_; }
 
   std::string get_lowered_name(std::string name) const {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     if (prog_ == nullptr) {
       TV_ASSERT_RT_ERR(predefined_name_expr_map_.find(name) !=
                            predefined_name_expr_map_.end(),
@@ -283,7 +283,7 @@ public:
   }
 
 private:
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
   nvrtcProgram prog_ = nullptr;
 #endif
   std::string code_;
@@ -301,7 +301,7 @@ private:
 
 class NVRTCModule {
 public:
-  enum ArgType { kTensor = 0, kArray = 1, kTensorView = 2 };
+  enum ArgType { kTensor = 0, kArray = 1, kTensorView = 2, kScalar = 3 };
 
   NVRTCModule(std::shared_ptr<NVRTCProgram> program,
               std::string cudadevrt_path = "")
@@ -330,7 +330,7 @@ public:
   }
 
   NVRTCModule &load() {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     if (module_ != nullptr) {
       TV_THROW_RT_ERR("this module is already compiled");
     }
@@ -362,7 +362,7 @@ public:
 #endif
     return *this;
   }
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 
   CUfunction kernel(std::string name) {
 
@@ -375,7 +375,7 @@ public:
 #endif
   std::unordered_map<std::string, int> get_kernel_attributes(std::string name) {
     std::unordered_map<std::string, int> res;
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     auto k = kernel(name);
     int pi;
     TV_CUDA_RESULT_CHECK(wrapper_.cuDrvFuncGetAttribute(
@@ -410,7 +410,7 @@ public:
   }
 
   void set_max_dynamic_shared_size_bytes(std::string name, int size) {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     auto k = kernel(name);
     TV_CUDA_RESULT_CHECK_V2(wrapper_.cuDrvFuncSetAttribute(
         k, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, size), 
@@ -419,7 +419,7 @@ public:
   }
 
   void set_preferred_smem_carveout(std::string name, int carveout) {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     TV_ASSERT_INVALID_ARG(carveout > 0 && carveout <= 100, "carveout must in (0, 100]")
     auto k = kernel(name);
     TV_CUDA_RESULT_CHECK_V2(wrapper_.cuDrvFuncSetAttribute(
@@ -439,7 +439,7 @@ public:
                   std::array<int, 3> threads, int smem_size,
                   std::uintptr_t stream_int,
                   std::vector<std::tuple<tv::Tensor, int>> args) {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     if (module_ == nullptr) {
       load();
     }
@@ -464,6 +464,7 @@ public:
         cnt += 1;
         break;
       }
+      case ArgType::kScalar:
       case ArgType::kArray: {
         TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
         // const check is performed in python
@@ -503,7 +504,7 @@ public:
         threads[2], "Smem:", smem_size);
 #endif
   }
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
   const CUDADriverWrapper &get_driver_wrapper() { return wrapper_; }
 
   CUresult cuDrvLaunchKernel(CUfunction f, uint32_t gridDimX, uint32_t gridDimY,
@@ -527,7 +528,7 @@ public:
 #endif
 
   ~NVRTCModule() {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     if (module_ != nullptr) {
       wrapper_.cuDrvModuleUnload(module_);
     }
@@ -543,7 +544,7 @@ private:
   std::string cudadevrt_path_;
   std::string ptx_name_;
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
   CUmodule module_ = nullptr;
   CUDADriverWrapper wrapper_;
   CUlinkState linkState_ = nullptr;

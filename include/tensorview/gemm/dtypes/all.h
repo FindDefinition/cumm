@@ -18,7 +18,7 @@
 #include "half.h"
 #include "subint.h"
 #include "tf32.h"
-#ifdef TV_CUDA
+#if defined(TV_CUDA)
 #include "float8.h"
 #include "complex.h"
 #endif

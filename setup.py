@@ -31,7 +31,7 @@ DESCRIPTION = 'CUda Matrix Multiply library'
 URL = 'https://github.com/FindDefinition/cumm'
 EMAIL = 'yanyan.sub@outlook.com'
 AUTHOR = 'Yan Yan'
-REQUIRES_PYTHON = '>=3.6'
+REQUIRES_PYTHON = '>=3.8'
 VERSION = None
 
 # What packages are required for this module to be executed?
@@ -166,8 +166,8 @@ if disable_jit is not None and disable_jit == "1":
         'build_ext': PCCMBuild,
     }
     from cumm.csrc.arrayref import ArrayPtr
-    from cumm.tensorview_bind import TensorViewBind
-    cus = [ArrayPtr(), TensorViewBind()]
+    from cumm.tensorview_bind import TensorViewBind, AppleMetalImpl
+    cus = [ArrayPtr(), TensorViewBind(), AppleMetalImpl()]
 
     if cuda_ver is None or (cuda_ver is not None and cuda_ver != ""):
         pass
@@ -175,7 +175,8 @@ if disable_jit is not None and disable_jit == "1":
         PCCMExtension(cus,
                       "cumm/core_cc",
                       Path(__file__).resolve().parent / "cumm",
-                      extcallback=CopyHeaderCallback())
+                      extcallback=CopyHeaderCallback(),
+                      std="c++17" if compat.InMacOS else "c++14",)
     ]
 else:
     cmdclass = {

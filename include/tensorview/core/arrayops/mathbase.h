@@ -13,7 +13,7 @@
 // limitations under the License.
 #pragma once
 #include <tensorview/core/defs.h>
-#ifndef __CUDACC_RTC__
+#ifndef TV_PARALLEL_RTC
 #include <cmath>
 #endif
 #ifdef __CUDACC__
@@ -21,6 +21,9 @@
 #if (__CUDACC_VER_MAJOR__ >= 11)
 #include <cuda_bf16.h>
 #endif
+#endif
+#ifdef TV_APP_RTC
+#include <metal_stdlib>
 #endif
 
 namespace tv {
@@ -32,9 +35,9 @@ template <typename T> struct MathScalarOp {
   static T copysign(T x, T y) { return std::copysign(x, y); }
 
   static T atan2(T y, T x) { return std::atan2(y, x); }
-
+#ifndef TV_METAL_RTC
   static T scalbn(T x, int n) { return std::scalbn(x, n); }
-
+#endif
   static T pow(T x, T n) { return std::pow(x, n); }
 
   static T fmod(T x, T n) { return std::fmod(x, n); }

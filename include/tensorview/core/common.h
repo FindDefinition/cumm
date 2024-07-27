@@ -24,8 +24,10 @@
 #endif
 #include <boost/stacktrace.hpp>
 #endif
-#ifdef TV_CUDA
+#if defined(TV_CUDA)
+#ifndef __APPLE__
 #include <cuda.h>
+#endif
 #endif
 // llvmlite currently don't support iostream
 #ifndef TV_LLVM_JIT

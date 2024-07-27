@@ -216,12 +216,12 @@ def test_nvrtc_problem():
 def test_cpu_v0():
     inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent)
     # init driver
-    a = tv.zeros([1], tv.float32, 0)
-    keys = tv.zeros([5000], tv.int32, 0)
-    values = tv.zeros([5000], tv.int32, 0)
-    kv = tv.zeros([5000, 2], tv.int32, 0)
+    a = tv.zeros([1], tv.float32, -1)
+    keys = tv.zeros([5000], tv.int32, -1)
+    values = tv.zeros([5000], tv.int32, -1)
+    kv = tv.zeros([5000, 2], tv.int32, -1)
 
-    inliner.cpu_kernel_1d("wtf3", 1, 0, f"""
+    inliner.cpu_kernel_1d("wtf3", 1, f"""
     namespace op = tv::arrayops;
     tv::array<float, 3> a{{2.010012, 0.530250, 0.630409}};
     tv::printf2("DEBUG", a.op<op::min>());
@@ -269,4 +269,4 @@ def test_cpu_v2():
     print(1)
 
 if __name__ == "__main__":
-    test_nvrtc2()
+    test_cpu_v0()

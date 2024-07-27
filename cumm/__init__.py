@@ -20,13 +20,14 @@ from pccm.utils import project_is_editable, project_is_installed
 from .__version__ import __version__
 from .constants import CUMM_CPU_ONLY_BUILD, CUMM_DISABLE_JIT, PACKAGE_NAME
 from cumm.constants import PACKAGE_ROOT
-
+from ccimport import compat
 if project_is_installed(PACKAGE_NAME) and project_is_editable(
         PACKAGE_NAME) and not CUMM_DISABLE_JIT:
     from cumm.csrc.arrayref import ArrayPtr
-    from cumm.tensorview_bind import TensorViewBind
-    pccm.builder.build_pybind([ArrayPtr(), TensorViewBind()],
+    from cumm.tensorview_bind import TensorViewBind, AppleMetalImpl
+    pccm.builder.build_pybind([ArrayPtr(), TensorViewBind(), AppleMetalImpl()],
                               PACKAGE_ROOT / "core_cc",
                               namespace_root=PACKAGE_ROOT,
                               load_library=False,
+                              std="c++17" if compat.InMacOS else "c++14",
                               verbose=False)

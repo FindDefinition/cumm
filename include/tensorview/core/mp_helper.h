@@ -25,8 +25,12 @@
 #define MP_HELPER_H_
 #include "defs.h"
 
-#ifdef __CUDACC_RTC__
+#ifdef TV_PARALLEL_RTC
+#ifdef __APPLE__
+#include "nvrtc_std.h"
+#else 
 #include "nvrtc/type_traits.h"
+#endif
 #else
 #include "cc17.h"
 #include <cstddef>
@@ -40,11 +44,11 @@ namespace tv {
 namespace detail {
 
 template <std::size_t I, typename T, T N, T... Ns> struct mp_nth_c_impl {
-  constexpr static T value = mp_nth_c_impl<I - 1, T, Ns...>::value;
+  constexpr static T TV_METAL_CONSTANT value = mp_nth_c_impl<I - 1, T, Ns...>::value;
 };
 
 template <typename T, T N, T... Ns> struct mp_nth_c_impl<0, T, N, Ns...> {
-  constexpr static T value = N;
+  constexpr static T TV_METAL_CONSTANT value = N;
 };
 
 template <std::size_t I, typename T, class... Ts> struct mp_nth_impl {
@@ -68,10 +72,10 @@ template <std::size_t I, typename T>
 using mp_at = typename detail::mp_at_impl<I, T>::type;
 
 template <std::size_t I, typename T>
-constexpr auto mp_at_c = mp_at<I, T>::value;
+constexpr auto TV_METAL_CONSTANT mp_at_c = mp_at<I, T>::value;
 
 template <std::size_t I, typename T, T... Ns>
-constexpr T mp_nth_c = detail::mp_nth_c_impl<I, T, Ns...>::value;
+constexpr T TV_METAL_CONSTANT mp_nth_c = detail::mp_nth_c_impl<I, T, Ns...>::value;
 
 template <std::size_t I, class... Ts>
 using mp_nth_t = typename detail::mp_nth_impl<I, Ts...>::type;
@@ -80,7 +84,7 @@ template <class... T> struct mp_list {
   template <std::size_t I> using at = mp_nth_t<I, T...>;
 
   template <std::size_t I>
-  static constexpr typename mp_nth_t<I, T...>::value_type at_c =
+  static constexpr typename mp_nth_t<I, T...>::value_type TV_METAL_CONSTANT at_c =
       mp_nth_t<I, T...>::value;
 
   static TV_HOST_DEVICE_INLINE constexpr std::size_t size() {
@@ -99,7 +103,7 @@ template <int... I>
 using mp_list_int = mp_list<std::integral_constant<int, I>...>;
 
 namespace detail {
-#ifndef __CUDACC_RTC__
+#ifndef TV_PARALLEL_RTC
 template <class... Ts, class F>
 constexpr F mp_for_each_impl(mp_list<Ts...>, F &&f) {
   using A = int[sizeof...(Ts)];
@@ -113,6 +117,8 @@ template <class F> constexpr F mp_for_each_impl(mp_list<>, F &&f) {
   return std::forward<F>(f);
 }
 #endif
+
+#ifndef TV_METAL_RTC
 template <class... Ts, class F>
 TV_HOST_DEVICE_INLINE constexpr F mp_for_each_impl_cuda(mp_list<Ts...>, F &&f) {
   using A = int[sizeof...(Ts)];
@@ -125,7 +131,7 @@ TV_HOST_DEVICE_INLINE constexpr F mp_for_each_impl_cuda(mp_list<Ts...>, F &&f) {
 template <class F> TV_HOST_DEVICE_INLINE constexpr F mp_for_each_impl_cuda(mp_list<>, F &&f) {
   return std::forward<F>(f);
 }
-
+#endif
 } // namespace detail
 
 template <class... T>
@@ -152,7 +158,7 @@ template <template <class...> class A, class... T, template <class...> class B>
 struct mp_rename_v_impl<A<T...>, B> {
   // unlike mp_rename_t, B is a templated type. we must use xx::value
   // because B can't be a templated non-type template parameter.
-  static constexpr auto value = B<T...>::value;
+  static constexpr auto TV_METAL_CONSTANT value = B<T...>::value;
 };
 
 template <class L, class T> struct mp_append_impl;
@@ -238,7 +244,7 @@ using mp_if =
 // mp_valid in boost/mp11
 
 namespace detail {
-
+#ifndef TV_METAL_RTC
 template <template <class...> class F, class... T> struct mp_valid_impl {
   template <template <class...> class G, class = G<T...>>
   TV_HOST_DEVICE_INLINE static mp_true check(int);
@@ -246,13 +252,15 @@ template <template <class...> class F, class... T> struct mp_valid_impl {
 
   using type = decltype(check<F>(0));
 };
-
+#endif
 } // namespace detail
+#ifndef TV_METAL_RTC
 
 template <template <class...> class F, class... T>
 using mp_valid = typename detail::mp_valid_impl<F, T...>::type;
-
+#endif
 // mp_defer in boost/mp11
+#ifndef TV_METAL_RTC
 
 // mp_defer
 namespace detail {
@@ -454,6 +462,7 @@ struct mp_concat_impl
 
 template <class... L>
 using mp_concat = typename detail::mp_concat_impl<L...>::type;
+#endif
 
 namespace detail {
 
@@ -472,6 +481,7 @@ using mp_assign = typename detail::mp_assign_impl<L1, L2>::type;
 
 // mp_clear<L>
 template <class L> using mp_clear = mp_assign<L, mp_list<>>;
+#ifndef TV_METAL_RTC
 
 namespace detail {
 
@@ -493,7 +503,7 @@ using mp_repeat_c = typename detail::mp_repeat_c_impl<L, N>::type;
 template <class L, class N>
 using mp_repeat =
     typename detail::mp_repeat_c_impl<L, std::size_t{N::value}>::type;
-
+#endif
 template <class L, class T>
 using mp_insert_front = typename detail::mp_insert_front_impl<L, T>::type;
 
@@ -501,26 +511,28 @@ template <class A, template <class...> class B>
 using mp_rename = typename detail::mp_rename_impl<A, B>::type;
 
 template <class A, template <class...> class B>
-constexpr auto mp_rename_v = detail::mp_rename_v_impl<A, B>::value;
+constexpr auto TV_METAL_CONSTANT mp_rename_v = detail::mp_rename_v_impl<A, B>::value;
 
 template <class L> using mp_size = mp_rename<L, mp_length>;
 
-#ifndef __CUDACC_RTC__
+#ifndef TV_PARALLEL_RTC
 template <class L, class F> constexpr F mp_for_each(F &&f) {
   return detail::mp_for_each_impl(mp_rename<L, mp_list>(), std::forward<F>(f));
 }
 #endif
+#ifndef TV_METAL_RTC
 
 template <class L, class F> TV_HOST_DEVICE_INLINE constexpr F mp_for_each_cuda(F &&f) {
   return detail::mp_for_each_impl_cuda(mp_rename<L, mp_list>(), std::forward<F>(f));
 }
+#endif
 
 template <unsigned N, unsigned... Ns> struct mp_prod_int {
-  static constexpr unsigned value = N * mp_prod_int<Ns...>::value;
+  static constexpr unsigned TV_METAL_CONSTANT value = N * mp_prod_int<Ns...>::value;
 };
 
 template <unsigned N> struct mp_prod_int<N> {
-  static constexpr unsigned value = N;
+  static constexpr unsigned TV_METAL_CONSTANT value = N;
 };
 
 namespace detail {
@@ -550,7 +562,7 @@ template <class L, class Init>
 using mp_reduce_sum = mp_reduce<detail::mp_sum_op_impl, L, Init>;
 
 template <class T, T... Ns>
-constexpr T mp_reduce_sum_v =
+constexpr T TV_METAL_CONSTANT mp_reduce_sum_v =
     mp_reduce_sum<mp_list_c<T, Ns...>, std::integral_constant<T, T(0)>>::value;
 
 namespace detail {
@@ -596,12 +608,12 @@ namespace detail {
 
 template <class T, T Start, T... Is>
 constexpr auto TV_HOST_DEVICE_INLINE
-mp_make_list_c_range_impl(mp_list_c<T, Is...> const &)
+mp_make_list_c_range_impl(mp_list_c<T, Is...> const )
     -> decltype(mp_list_c<T, (Is + Start)...>{});
 
 template <class T, T... Is>
 constexpr auto TV_HOST_DEVICE_INLINE
-mp_make_list_c_sequence_reverse_impl(mp_list_c<T, Is...> const &)
+mp_make_list_c_sequence_reverse_impl(mp_list_c<T, Is...> const )
     -> decltype(mp_list_c<T, sizeof...(Is) - 1U - Is...>{});
 } // namespace detail
 
@@ -670,9 +682,8 @@ template <typename T>
 using return_type_t = decltype(detail::result_type_helper(std::declval<T>()));
 
 template <typename T>
-constexpr std::size_t argument_size_v =
+constexpr TV_METAL_CONSTANT std::size_t argument_size_v =
     decltype(detail::func_argument_size_helper(std::declval<T>()))::value;
-
 // #endif
 
 } // namespace tv

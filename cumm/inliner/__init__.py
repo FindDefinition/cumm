@@ -63,7 +63,7 @@ import contextlib
 import re
 import pccm
 from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME, PCCM_INLINE_FUNCTION_NAME_FORMAT
-from cumm.nvrtc import CummLLVMModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
+from cumm.nvrtc import CummLLVMModule, CummMetalModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
 from pathlib import Path
 from cumm.common import TensorViewKernel
 import enum
@@ -124,6 +124,8 @@ def torch_tensor_to_tv(ten,
     if device.type == "cpu":
         tv_device = -1
     elif device.type == "cuda":
+        tv_device = 0
+    elif device.type == "mps":
         tv_device = 0
     else:
         raise NotImplementedError
@@ -201,15 +203,14 @@ class NumpyPlugin(InlineBuilderPlugin):
         #     if user_arg.is_cpu:
         #         return obj.reshape(-1).tolist()
         assert obj.nbytes <= 256, "we only support capture small numpy which will be passed by value to kernel"
-        return obj.tolist()
+        return obj
 
-    def get_cpp_type(self,
+    @staticmethod
+    def get_cpp_type_static(
                      obj: np.ndarray,
                      user_arg: Optional[Any] = None) -> Union[str, Tuple[str, int]]:
         ndim = obj.ndim
         dtype = obj.dtype
-        if dtype is None:
-            dtype = obj.dtype
         cpp_type = _NPDTYPE_TO_LIST_TYPE_STR[dtype]
         # if isinstance(user_arg, _NVRTCInlineParams):
         #     if user_arg.is_cpu:
@@ -221,6 +222,12 @@ class NumpyPlugin(InlineBuilderPlugin):
         array_type += ">, ".join(map(str, shape_rev))
         res = array_type + ">"
         return res
+
+    def get_cpp_type(self,
+                     obj: np.ndarray,
+                     user_arg: Optional[Any] = None) -> Union[str, Tuple[str, int]]:
+        
+        return self.get_cpp_type_static(obj, user_arg)
 
 
 class _NVRTCInlineParams:
@@ -271,11 +278,14 @@ class NVRTCInlineBuilder(InlineBuilder):
             reload_when_code_change: bool = False,
             remote_addr: str = "",
             default_deps: Optional[List[Type[pccm.Class]]] = None,
-            std: str = "c++14"):
+            std: str = "c++14",
+            context: Optional[tv.Context] = None):
         if plugins is None:
             plugins = _DEFAULT_KERNEL_PLUGINS
         if default_deps is None:
-            deps.extend([TensorViewNVRTC, GemmBasic])
+            deps.extend([TensorViewNVRTC, ])
+            if not compat.InMacOS:
+                deps.append(GemmBasic)
         else:
             deps.extend(default_deps)
         if build_kwargs is None:
@@ -292,8 +302,15 @@ class NVRTCInlineBuilder(InlineBuilder):
         self.maximum_1d_threads = 512
         self.measure_build_time = measure_build_time
         self._remote_addr = remote_addr
+        
+        self.ctx = tv.Context() if context is None else context
+        if compat.InMacOS and not self.ctx.has_apple_metal_context():
+            self.ctx.create_apple_metal_context()
 
     
+    def synchronize(self):
+        self.ctx.synchronize()
+
     def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
         for k, v in self.modules.items():
             if name == k[1]:
@@ -319,15 +336,49 @@ class NVRTCInlineBuilder(InlineBuilder):
                               arg: Optional[_NVRTCInlineParams]):
         is_cpu = False
         meta = pccm.cuda.CudaGlobalFunctionMeta(attrs=["__global__"])
-
         if arg is not None:
             is_cpu = arg.is_cpu
         if is_cpu:
             meta = pccm.cuda.ExternalFunctionMeta()
-
+        if not is_cpu and compat.InMacOS:
+            meta = pccm.cuda.CudaGlobalFunctionMeta(attrs=["kernel"])
         if arg is None:
             code.raw(code_str)
             return meta
+        if not is_cpu and compat.InMacOS:
+            # metal 
+            func_const_cnt = 0
+            new_args: List[pccm.Argument] = []
+            func_constants: List[str] = []
+            for prev_arg in code.arguments:
+                if isinstance(prev_arg.userdata, np.ndarray):
+                    new_name = f"__cumm_metal_arg_{prev_arg.name}"
+                    cpp_type_scalar = _NPDTYPE_TO_LIST_TYPE_STR[prev_arg.userdata.dtype]
+                    cpp_type_arr = NumpyPlugin.get_cpp_type_static(prev_arg.userdata)
+                    prev_arg.type_str = f"constant {cpp_type_scalar}*"
+                    code.raw(f"thread {cpp_type_arr} {prev_arg.name} = reinterpret_cast<constant {cpp_type_arr}*>({new_name})[0];")
+                    prev_arg.name = new_name
+                    new_args.append(prev_arg)
+                elif get_qualname_of_type(type(prev_arg.userdata)) == TORCH_TENSOR_NAME:
+                    prev_arg.type_str = f"device {prev_arg.type_str}"
+                    new_args.append(prev_arg)
+                elif isinstance(prev_arg.userdata, tv.Tensor):
+                    prev_arg.type_str = f"device {prev_arg.type_str}"
+                    new_args.append(prev_arg)
+                else:
+                    assert isinstance(prev_arg.userdata, (int, float, bool))
+                    dtype = "int64_t"
+                    if isinstance(prev_arg.userdata, float):
+                        dtype = "float"
+                    elif isinstance(prev_arg.userdata, bool):
+                        dtype = "bool"
+                    func_constants.append(f"constant {dtype} {prev_arg.name} [[function_constant({func_const_cnt})]];")
+                    func_const_cnt += 1
+            if arg.mode != CUDAMode.KernelRaw:
+                code.arguments = new_args + [
+                    pccm.Argument(self.index_name, "uint32_t", attributes=["thread_position_in_grid"])
+                ]
+            code.code_before_func_def = "\n".join(func_constants)
         trycatch_ctx = contextlib.nullcontext()
         if is_cpu:
             code.raw(f"""
@@ -344,10 +395,13 @@ class NVRTCInlineBuilder(InlineBuilder):
                 code.raw(code_str)
             else:
                 if not is_cpu:
-                    with code.for_(
-                            f"auto {self.index_name} : tv::KernelLoopX<int>({_CUMM_KERNEL_1D_SIZE_NAME})"
-                    ):
+                    if compat.InMacOS:
                         code.raw(code_str)
+                    else:
+                        with code.for_(
+                                f"auto {self.index_name} : tv::KernelLoopX<int>({_CUMM_KERNEL_1D_SIZE_NAME})"
+                        ):
+                            code.raw(code_str)
                 else:
                     with code.for_(
                             f"size_t i = 0; i <{_CUMM_KERNEL_1D_SIZE_NAME}; ++i"
@@ -386,20 +440,26 @@ class NVRTCInlineBuilder(InlineBuilder):
         else:
             with ctx:
                 if is_cpu:
-                    if not compat.InLinux:
+                    if not compat.InLinux and not compat.InMacOS:
                         raise NotImplementedError("cpu jit only support linux")
                     mod = CummLLVMModule([pccm_cls],
                                          verbose=verbose,
                                          verbose_path=verbose_path,
                                          std=self.cpp_std)
                 else:
-                    if verbose:
-                        mod = CummNVRTCModule([pccm_cls],
-                                              verbose=verbose,
-                                              verbose_path=verbose_path,
-                                              std=self.cpp_std)
+                    if compat.InMacOS:
+                        mod = CummMetalModule([pccm_cls],
+                                            verbose=verbose,
+                                            verbose_path=verbose_path,
+                                            std=self.cpp_std)
                     else:
-                        mod = CummNVRTCModuleBase.from_params(params)
+                        if verbose:
+                            mod = CummNVRTCModule([pccm_cls],
+                                                verbose=verbose,
+                                                verbose_path=verbose_path,
+                                                std=self.cpp_std)
+                        else:
+                            mod = CummNVRTCModuleBase.from_params(params)
 
         return mod
 
@@ -408,16 +468,20 @@ class NVRTCInlineBuilder(InlineBuilder):
 
     def run_func(self,
                 name: str,
-                 func: CummNVRTCModuleBase,
+                 func: Union[CummNVRTCModuleBase, CummMetalModule],
                  *args,
                  user_args: Optional[_NVRTCInlineParams] = None):
         assert user_args is not None
-        launch = user_args.launch
-        if user_args.run_in_process:
-            return func.run_kernel_in_spawn_process(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args)
-        else:
+        launch = user_args.launch.copy()
+        launch.ctx = self.ctx
+        if isinstance(func, CummMetalModule):
             return func.run_kernel(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args, perf_context=user_args.perf_context)
 
+        else:
+            if user_args.run_in_process:
+                return func.run_kernel_in_spawn_process(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args)
+            else:
+                return func.run_kernel(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args, perf_context=user_args.perf_context)
 
     def kernel_raw(self,
                    name: str,
@@ -487,6 +551,8 @@ class NVRTCInlineBuilder(InlineBuilder):
         additional_args = {
             _CUMM_KERNEL_1D_SIZE_NAME: num,
         }
+        if compat.InMacOS:
+            additional_args.clear()
         if capture_tensor_as_tview:
             if not isinstance(code, pccm.FunctionCode):
                 code_pccm = pccm.code()
@@ -573,7 +639,10 @@ class NVRTCInlineBuilder(InlineBuilder):
             threads = maximum_1d_threads
         else:
             threads = div_up(num, 32) * 32
-        blocks = div_up(num, threads)
+        if compat.InMacOS:
+            blocks = num # for metal, the grid size is the same as block size
+        else:
+            blocks = div_up(num, threads)
         return tv.LaunchParam((blocks, 1, 1), (threads, 1, 1), smem, stream)
 
 

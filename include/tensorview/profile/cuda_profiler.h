@@ -13,8 +13,9 @@
 // limitations under the License.
 
 #pragma once
+#include <tensorview/core/defs.h>
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 #include <cuda_runtime_api.h>
 #endif
 #include <chrono>
@@ -141,7 +142,7 @@ public:
 
 };
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 
 class CUDAEventCore {
 private:
@@ -428,7 +429,7 @@ public:
     }
   }
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
   CUDAKernelTimerGuard(std::string name, CUDAKernelTimer timer,
                        cudaStream_t stream = nullptr, bool print_exit = false): CUDAKernelTimerGuard(name, timer, reinterpret_cast<std::uintptr_t>(stream), print_exit){}
 #endif
@@ -448,7 +449,7 @@ public:
   }
 };
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 inline auto measure_and_print_guard(std::string name, cudaStream_t stream = nullptr){
   return std::make_shared<CUDAKernelTimerGuard>(name, CUDAKernelTimer(true), stream, true);
 };

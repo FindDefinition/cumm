@@ -29,6 +29,8 @@ import multiprocessing
 from cumm.core_cc import tensorview_bind
 from cumm.core_cc.tensorview_bind import CUDAKernelTimer, CUDAEvent, Context
 from cumm.core_cc.tensorview_bind import NVRTCModule as _NVRTCModule
+from cumm.core_cc.tensorview_bind import MetalModule as _MetalModule
+
 from cumm.core_cc.tensorview_bind import NVRTCProgram, Tensor, check_cuda_error
 from . import gemm, utils
 
@@ -166,14 +168,120 @@ class LaunchParam:
                  blocks: Union[Tuple[int, ...], List[int]],
                  threads: Union[Tuple[int, ...], List[int]],
                  smem: int = 0,
-                 stream: int = 0) -> None:
+                 stream: int = 0,
+                 ctx: Optional[Context] = None) -> None:
         self.blocks = list(blocks)
         self.threads = list(threads)
         assert len(blocks) == 3
         assert len(threads) == 3
         self.smem = smem
         self.stream = stream
+        self.ctx = ctx
 
+    def copy(self):
+        return LaunchParam(self.blocks, self.threads, self.smem, self.stream, self.ctx)
+
+
+def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: LaunchParam,
+                *args: Union[Tensor, int, float, List[int], List[float],
+                            Tuple[float, ...], Tuple[int, ...]],
+                perf_context: Optional[ContextManager] = None,
+                name_to_meta: Optional[Dict[str, NVRTCKernelMeta]] = None,
+                lower_name: Optional[str] = None):
+    metas: List[NVRTCArgMeta] = [NVRTCArgMeta(NVRTCArgBaseType.Scalar, False, -1, [])] * len(args)
+    if name_to_meta:
+        assert name in name_to_meta, f"can't find your kernel {name}, available: {name_to_meta.keys()}"
+        assert len(args) == len(name_to_meta[name].args)
+        metas = name_to_meta[name].arg_metas
+    if lower_name is not None:
+        name = lower_name
+    kernel_args: List[Tuple[Tensor, int]] = []
+    for arg, meta in zip(args, metas):
+        if meta.valid:
+            # print(meta.shape)
+            if meta.is_simple_ptr:
+                if not isinstance(arg, Tensor):
+                    raise ValueError("your arg must be tensor")
+                if not arg.dtype == meta.simple_type:
+                    cur_dtype = get_npdtype_from_tvdtype(arg.dtype)
+                    expected_dtype = get_npdtype_from_tvdtype(
+                        meta.simple_type)
+                    raise ValueError(
+                        f"your tensor {arg.shape}|{cur_dtype}"
+                        f" dtype not equal to {expected_dtype}")
+                kernel_args.append((arg, _NVRTCModule.kTensor))
+                continue
+            elif meta.base_type == NVRTCArgBaseType.TensorView:
+                if not isinstance(arg, Tensor):
+                    raise ValueError("your arg must be tensor")
+                assert arg.ndim == meta.shape[0],f"your tensor ndim {arg.ndim} must equal to f{meta.shape[0]}"
+                if not arg.dtype == meta.simple_type:
+                    cur_dtype = get_npdtype_from_tvdtype(arg.dtype)
+                    expected_dtype = get_npdtype_from_tvdtype(
+                        meta.simple_type)
+                    raise ValueError(
+                        f"your tensor {arg.shape}|{cur_dtype}"
+                        f" dtype not equal to {expected_dtype}")
+                kernel_args.append((arg, _NVRTCModule.kTensorView))
+                continue
+            else:
+                # we can't ensure arg isn't tv::Tensor.
+                if not isinstance(arg, Tensor):
+                    assert not isinstance(arg, Tensor)
+                    dtype = get_npdtype_from_tvdtype(meta.simple_type)
+                    if isinstance(arg, np.ndarray):
+                        arg_array = arg.astype(dtype)
+                        arg_type = _NVRTCModule.kArray
+                    else:
+                        assert isinstance(arg, (int, bool, float))
+                        arg_type = _NVRTCModule.kScalar
+                        arg_array = np.array(arg, dtype=dtype)
+                    if not arg_array.shape:
+                        arg_array = arg_array.reshape(1)
+                    assert list(arg_array.shape) == meta.shape, f"{arg_array.shape}, {meta.shape}"
+                    # auto dtype cast
+                    # TODO prevent floats assigned to ints
+                    ten = empty(meta.shape, meta.simple_type, -1)
+                    ten.numpy_view()[:] = arg_array
+                    kernel_args.append((ten, arg_type))
+                    continue
+        # meta isn't valid, use regular dtypes.
+        if isinstance(arg, (int, float)):
+            dtype = float32
+            if isinstance(arg, int):
+                dtype = int64
+            ten = full([1], arg, dtype)
+            kernel_args.append((ten, _NVRTCModule.kScalar))
+        elif isinstance(arg, (list, tuple)):
+            raise NotImplementedError("don't support list or tuple, you must use np.ndarray")
+            dtype = np.float32
+            if isinstance(arg[0], int):
+                dtype = np.int64
+            arg_np = np.array(arg, dtype=dtype)
+            ten = from_numpy(arg_np).clone()
+            kernel_args.append((ten, _NVRTCModule.kArray))
+        elif isinstance(arg, np.ndarray):
+            ten = from_numpy(arg).clone()
+            kernel_args.append((ten, _NVRTCModule.kArray))
+        else:
+            assert isinstance(arg, Tensor)
+            kernel_args.append((arg, _NVRTCModule.kTensor))
+    if perf_context is not None:
+        with perf_context:
+            if isinstance(mod, _NVRTCModule):
+                return mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.stream, kernel_args)
+            else:
+                assert launch.ctx is not None 
+                return mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.ctx, kernel_args)
+    if isinstance(mod, _NVRTCModule):
+        return mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.stream, kernel_args)
+    else:
+        assert launch.ctx is not None 
+        return mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.ctx, kernel_args)
 class NVRTCModule:
     def __init__(self,
                  code: Union[str, NVRTCProgram],
@@ -308,75 +416,10 @@ class NVRTCModule:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
             assert len(args) == len(self.name_to_meta[name].args)
             metas = self.name_to_meta[name].arg_metas
+        lower_name = None 
         if self._name_exprs:
-            name = self.get_lowered_name(name)
-        kernel_args: List[Tuple[Tensor, int]] = []
-        for arg, meta in zip(args, metas):
-            if meta.valid:
-                # print(meta.shape)
-                if meta.is_simple_ptr:
-                    if not isinstance(arg, Tensor):
-                        raise ValueError("your arg must be tensor")
-                    if not arg.dtype == meta.simple_type:
-                        cur_dtype = get_npdtype_from_tvdtype(arg.dtype)
-                        expected_dtype = get_npdtype_from_tvdtype(
-                            meta.simple_type)
-                        raise ValueError(
-                            f"your tensor {arg.shape}|{cur_dtype}"
-                            f" dtype not equal to {expected_dtype}")
-                    kernel_args.append((arg, _NVRTCModule.kTensor))
-                    continue
-                elif meta.base_type == NVRTCArgBaseType.TensorView:
-                    if not isinstance(arg, Tensor):
-                        raise ValueError("your arg must be tensor")
-                    assert arg.ndim == meta.shape[0],f"your tensor ndim {arg.ndim} must equal to f{meta.shape[0]}"
-                    if not arg.dtype == meta.simple_type:
-                        cur_dtype = get_npdtype_from_tvdtype(arg.dtype)
-                        expected_dtype = get_npdtype_from_tvdtype(
-                            meta.simple_type)
-                        raise ValueError(
-                            f"your tensor {arg.shape}|{cur_dtype}"
-                            f" dtype not equal to {expected_dtype}")
-                    kernel_args.append((arg, _NVRTCModule.kTensorView))
-                    continue
-                else:
-                    # we can't ensure arg isn't tv::Tensor.
-                    if not isinstance(arg, Tensor):
-                        assert not isinstance(arg, Tensor)
-                        dtype = get_npdtype_from_tvdtype(meta.simple_type)
-                        arg_array = np.array(arg, dtype=dtype)
-                        if not arg_array.shape:
-                            arg_array = arg_array.reshape(1)
-                        assert list(arg_array.shape) == meta.shape, f"{arg_array.shape}, {meta.shape}"
-                        # auto dtype cast
-                        # TODO prevent floats assigned to ints
-                        ten = empty(meta.shape, meta.simple_type, -1)
-                        ten.numpy_view()[:] = arg_array
-                        kernel_args.append((ten, _NVRTCModule.kArray))
-                        continue
-            # meta isn't valid, use regular dtypes.
-            if isinstance(arg, (int, float)):
-                dtype = float32
-                if isinstance(arg, int):
-                    dtype = int64
-                ten = full([1], arg, dtype)
-                kernel_args.append((ten, _NVRTCModule.kArray))
-            elif isinstance(arg, (list, tuple)):
-                dtype = np.float32
-                if isinstance(arg[0], int):
-                    dtype = np.int64
-                arg_np = np.array(arg, dtype=dtype)
-                ten = from_numpy(arg_np).clone()
-                kernel_args.append((ten, _NVRTCModule.kArray))
-            else:
-                assert isinstance(arg, Tensor)
-                kernel_args.append((arg, _NVRTCModule.kTensor))
-        if perf_context is not None:
-            with perf_context:
-                return self._mod.run_kernel(name, launch.blocks, launch.threads,
-                                            launch.smem, launch.stream, kernel_args)
-        return self._mod.run_kernel(name, launch.blocks, launch.threads,
-                                    launch.smem, launch.stream, kernel_args)
+            lower_name = self.get_lowered_name(name)
+        return _run_kernel(self._mod, name, launch, *args, perf_context=perf_context, name_to_meta=self.name_to_meta, lower_name=lower_name)
 
     @property
     def program(self):
@@ -389,7 +432,63 @@ class NVRTCModule:
         return full([1], val, dtype)
 
     def arg_scalar(self, val, dtype: int):
-        return (full([1], val, dtype), _NVRTCModule.kArray)
+        return (full([1], val, dtype), _NVRTCModule.kScalar)
+
+    def arg_tensor(self, ten: Tensor):
+        return (ten, _NVRTCModule.kTensor)
+
+    def arg_array(self, arr, dtype: int):
+        arg_array = np.array(arr)
+        ten = empty(list(arg_array.shape), dtype, -1)
+        ten.numpy_view()[:] = arg_array
+        return (ten, _NVRTCModule.kArray)
+
+class MetalModule:
+    def __init__(self,
+                 binary: bytes,
+                 name_to_meta: Optional[Dict[str, NVRTCKernelMeta]] = None) -> None:
+        binary_np = np.frombuffer(binary, dtype=np.uint8)
+        binary_ten = from_numpy(binary_np)
+        self.name_to_meta = name_to_meta
+
+        self._mod = _MetalModule(binary_ten)
+
+    def get_cpp_object(self):
+        return self._mod
+
+    def get_1d_launch_param(self, num: int, smem: int = 0, stream: int = 0):
+        if num > 1024:
+            threads = 1024
+        else:
+            threads = div_up(num, 32) * 32
+        blocks = div_up(num, threads)
+        return LaunchParam((blocks, 1, 1), (threads, 1, 1), smem, stream)
+
+    def get_launch_param(self, blocks: Union[Tuple[int, ...], List[int]],
+        threads: Union[Tuple[int, ...], List[int]], smem_size: int = 0, stream: int = 0):
+        return LaunchParam(blocks, threads, smem_size, stream)
+
+
+    def run_kernel_unchecked(self, name: str, launch: LaunchParam, *args: Tuple[Tensor, int]):
+        assert launch.ctx is not None 
+        if self.name_to_meta:
+            assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
+            assert len(args) == len(self.name_to_meta[name].args)
+        return self._mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.ctx, list(args))
+
+
+    def run_kernel(self, name: str, launch: LaunchParam,
+                   *args: Union[Tensor, int, float, List[int], List[float],
+                                Tuple[float, ...], Tuple[int, ...]],
+                   perf_context: Optional[ContextManager] = None):
+        return _run_kernel(self._mod, name, launch, *args, perf_context=perf_context, name_to_meta=self.name_to_meta)
+
+    def tensor_scalar(self, val, dtype: int):
+        return full([1], val, dtype)
+
+    def arg_scalar(self, val, dtype: int):
+        return (full([1], val, dtype), _NVRTCModule.kScalar)
 
     def arg_tensor(self, ten: Tensor):
         return (ten, _NVRTCModule.kTensor)

@@ -21,7 +21,7 @@
 #include <tensorview/core/mp_helper.h>
 #include "const_ops.h"
 
-#ifdef __CUDACC_RTC__
+#ifdef TV_PARALLEL_RTC
 #include "nvrtc_std.h"
 #else
 #include <array>
@@ -36,12 +36,12 @@
 namespace tv {
 
 template <class T> struct sizeof_bits {
-  static constexpr auto value = sizeof(T) * 8;
+  static constexpr auto TV_METAL_CONSTANT value = sizeof(T) * 8;
 };
-template <> struct sizeof_bits<bool> { static int const value = 1; };
+template <> struct sizeof_bits<bool> { static int const TV_METAL_CONSTANT value = 1; };
 
 template <class T>
-constexpr size_t sizeof_bits_v = sizeof_bits<std::decay_t<T>>::value;
+constexpr size_t TV_METAL_CONSTANT sizeof_bits_v = sizeof_bits<std::decay_t<T>>::value;
 
 
 
@@ -55,7 +55,7 @@ struct equivalent_data_type {
 
 template <typename T> struct sizeof_subbyte_impl {
   static_assert(sizeof_bits_v<T> % 8 == 0, "error");
-  static constexpr int value = sizeof_bits_v<T> / 8;
+  static constexpr int TV_METAL_CONSTANT value = sizeof_bits_v<T> / 8;
 };
 
 } // namespace detail
@@ -64,7 +64,7 @@ template <class T>
 using equivalent_data_type_t = typename detail::equivalent_data_type<T>::type;
 
 template <typename T>
-constexpr int sizeof_v = detail::sizeof_subbyte_impl<T>::value;
+constexpr int TV_METAL_CONSTANT sizeof_v = detail::sizeof_subbyte_impl<T>::value;
 
 namespace detail {
 template <typename K, typename V> struct InitPair {
@@ -89,19 +89,68 @@ template <typename T> TV_HOST_DEVICE_INLINE constexpr T array_mul(T l, T r) {
 template <typename T> TV_HOST_DEVICE_INLINE constexpr T array_div(T l, T r) {
   return l / r;
 }
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T &array_isum(T &l, T r) {
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT & array_isum(T TV_METAL_CONSTANT &l, T r) {
   return l += r;
 }
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T &array_isub(T &l, T r) {
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT &array_isub(T TV_METAL_CONSTANT &l, T r) {
   return l -= r;
 }
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T &array_imul(T &l, T r) {
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT &array_imul(T TV_METAL_CONSTANT &l, T r) {
   return l *= r;
 }
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T &array_idiv(T &l, T r) {
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT &array_idiv(T TV_METAL_CONSTANT &l, T r) {
   return l /= r;
 }
+#ifdef TV_METAL_RTC
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread & array_isum(T thread &l, T r) {
+  return l += r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup & array_isum(T threadgroup &l, T r) {
+  return l += r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_isum(T device &l, T r) {
+  return l += r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread &array_isub(T thread &l, T r) {
+  return l -= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup &array_isub(T threadgroup &l, T r) {
+  return l -= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_isub(T device &l, T r) {
+  return l -= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread &array_imul(T thread &l, T r) {
+  return l *= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup &array_imul(T threadgroup &l, T r) {
+  return l *= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_imul(T device &l, T r) {
+  return l *= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread &array_idiv(T thread &l, T r) {
+  return l /= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup &array_idiv(T threadgroup &l, T r) {
+  return l /= r;
+}
+
+template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_idiv(T device &l, T r) {
+  return l /= r;
+}
+#endif
 
 template <typename T> TV_HOST_DEVICE_INLINE constexpr T array_minus(T x) {
   return -x;
@@ -115,23 +164,22 @@ TV_HOST_DEVICE_INLINE constexpr TCast array_cast(T x) {
 } // namespace detail
 
 namespace arrayops {
-
 template <class F, class... Args>
-TV_HOST_DEVICE_INLINE constexpr auto apply(F &&f, Args &&...args);
+TV_HOST_DEVICE_INLINE constexpr auto apply(TV_METAL_THREAD F &&f, TV_METAL_THREAD Args &&...args);
 } // namespace arrayops
 
 template <typename T, size_t N, size_t Align = 0> struct array {
   // TODO constexpr slice
   typedef T value_type;
-  typedef value_type *pointer;
-  typedef const value_type *const_pointer;
-  typedef value_type &reference;
-  typedef const value_type &const_reference;
-  typedef value_type *iterator;
-  typedef const value_type *const_iterator;
+  typedef value_type TV_METAL_CONSTANT *pointer;
+  typedef const value_type TV_METAL_CONSTANT *const_pointer;
+  typedef value_type TV_METAL_CONSTANT &reference;
+  typedef const value_type TV_METAL_CONSTANT &const_reference;
+  typedef value_type TV_METAL_CONSTANT *iterator;
+  typedef const value_type TV_METAL_CONSTANT *const_iterator;
   typedef std::size_t size_type;
   typedef std::ptrdiff_t difference_type;
-#ifndef __CUDACC_RTC__
+#ifndef TV_PARALLEL_RTC
   typedef std::reverse_iterator<iterator> reverse_iterator;
   typedef std::reverse_iterator<const_iterator> const_reverse_iterator;
 #endif
@@ -146,19 +194,58 @@ public:
     return array_[idx];
   }
 #else
-  TV_HOST_DEVICE_INLINE constexpr reference operator[](int idx) {
+  TV_HOST_DEVICE_INLINE constexpr reference operator[](int idx) TV_METAL_CONSTANT {
     return array_[idx];
   }
-  TV_HOST_DEVICE_INLINE constexpr const_reference operator[](int idx) const {
+
+#ifndef TV_METAL_RTC
+  TV_HOST_DEVICE_INLINE constexpr const_reference operator[](int idx) const TV_METAL_CONSTANT {
     return array_[idx];
   }
+#endif
+#ifdef TV_METAL_RTC
+
+  TV_HOST_DEVICE_INLINE constexpr thread T& operator[](int idx) thread {
+    return array_[idx];
+  }
+
+  TV_HOST_DEVICE_INLINE constexpr threadgroup T& operator[](int idx) threadgroup {
+    return array_[idx];
+  }
+
+  TV_HOST_DEVICE_INLINE constexpr device T& operator[](int idx) device {
+    return array_[idx];
+  }
+
+  TV_HOST_DEVICE_INLINE constexpr thread const T& operator[](int idx) const thread {
+    return array_[idx];
+  }
+
+  TV_HOST_DEVICE_INLINE constexpr threadgroup const T& operator[](int idx) const threadgroup {
+    return array_[idx];
+  }
+
+  TV_HOST_DEVICE_INLINE constexpr device const T& operator[](int idx) const device {
+    return array_[idx];
+  }
+#endif
 #endif
   // constexpr array(T(&a)[N]) : array_(a) {}
   TV_HOST_DEVICE_INLINE constexpr size_t size() const { return N; }
 
-  TV_HOST_DEVICE_INLINE constexpr const T *data() const { return array_; }
+  TV_HOST_DEVICE_INLINE constexpr const TV_METAL_CONSTANT T *data() const TV_METAL_CONSTANT { return array_; }
+#ifndef TV_METAL_RTC
   TV_HOST_DEVICE_INLINE constexpr T *data() { return array_; }
+#endif
+#ifdef TV_METAL_RTC
+  TV_HOST_DEVICE_INLINE constexpr thread const T *data() const thread { return array_; }
+  TV_HOST_DEVICE_INLINE constexpr thread T *data() thread { return array_; }
+  TV_HOST_DEVICE_INLINE constexpr device const T *data() const threadgroup { return array_; }
+  TV_HOST_DEVICE_INLINE constexpr device T *data() threadgroup { return array_; }
+  TV_HOST_DEVICE_INLINE constexpr threadgroup const T *data() const device { return array_; }
+  TV_HOST_DEVICE_INLINE constexpr threadgroup T *data() device { return array_; }
 
+#endif
   // TV_HOST_DEVICE_INLINE constexpr const T[N] data_array() const { return
   // array_; } TV_HOST_DEVICE_INLINE constexpr T[N] data_array() { return
   // array_; }
@@ -183,55 +270,55 @@ public:
   TV_HOST_DEVICE_INLINE constexpr const_iterator cend() const {
     return const_iterator(array_ + N);
   }
-#ifndef __CUDACC_RTC__
-  constexpr const_reverse_iterator crbegin() const noexcept {
+#ifndef TV_PARALLEL_RTC
+  constexpr const_reverse_iterator crbegin() const TV_NOEXCEPT_EXCEPT_METAL {
     return const_reverse_iterator(end());
   }
 
-  constexpr const_reverse_iterator crend() const noexcept {
+  constexpr const_reverse_iterator crend() const TV_NOEXCEPT_EXCEPT_METAL {
     return const_reverse_iterator(begin());
   }
 
-  constexpr reverse_iterator rbegin() noexcept {
+  constexpr reverse_iterator rbegin() TV_NOEXCEPT_EXCEPT_METAL {
     return reverse_iterator(end());
   }
 
-  constexpr const_reverse_iterator rbegin() const noexcept {
+  constexpr const_reverse_iterator rbegin() const TV_NOEXCEPT_EXCEPT_METAL {
     return const_reverse_iterator(end());
   }
 
-  constexpr reverse_iterator rend() noexcept {
+  constexpr reverse_iterator rend() TV_NOEXCEPT_EXCEPT_METAL {
     return reverse_iterator(begin());
   }
 
-  constexpr const_reverse_iterator rend() const noexcept {
+  constexpr const_reverse_iterator rend() const TV_NOEXCEPT_EXCEPT_METAL {
     return const_reverse_iterator(begin());
   }
 #endif
-  TV_HOST_DEVICE_INLINE constexpr reference front() noexcept {
+  TV_HOST_DEVICE_INLINE constexpr reference front() TV_NOEXCEPT_EXCEPT_METAL {
     return *begin();
   }
 
-  TV_HOST_DEVICE_INLINE constexpr const_reference front() const noexcept {
+  TV_HOST_DEVICE_INLINE constexpr const_reference front() const TV_NOEXCEPT_EXCEPT_METAL {
     return array_[0];
   }
 
-  TV_HOST_DEVICE_INLINE constexpr reference back() noexcept {
+  TV_HOST_DEVICE_INLINE constexpr reference back() TV_NOEXCEPT_EXCEPT_METAL {
     return N ? *(end() - 1) : *end();
   }
 
-  TV_HOST_DEVICE_INLINE constexpr const_reference back() const noexcept {
+  TV_HOST_DEVICE_INLINE constexpr const_reference back() const TV_NOEXCEPT_EXCEPT_METAL {
     return N ? array_[N - 1] : array_[0];
   }
 
-  TV_HOST_DEVICE_INLINE constexpr void clear() noexcept {
+  TV_HOST_DEVICE_INLINE constexpr void clear() TV_NOEXCEPT_EXCEPT_METAL {
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N; ++i) {
       array_[i] = T{};
     }
   }
 
-  TV_HOST_DEVICE_INLINE constexpr void fill(const value_type &__u) {
+  TV_HOST_DEVICE_INLINE constexpr void fill(const TV_METAL_CONSTANT value_type &__u) {
     TV_PRAGMA_UNROLL
     for (int i = 0; i < N; ++i) {
       array_[i] = __u;
@@ -239,32 +326,121 @@ public:
   }
 
   template <typename TOther>
-  TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> &
-  operator+=(TOther const &other) {
+  TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
+  operator+=(TV_METAL_CONSTANT TOther const &other) {
     arrayops::apply(detail::array_isum<T>, *this, other);
     return *this;
   }
 
+#ifdef TV_METAL_RTC
   template <typename TOther>
-  TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> &
-  operator-=(TOther const &other) {
+  TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
+  operator+=(thread TOther const &other) {
+    arrayops::apply(detail::array_isum<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
+  operator+=(threadgroup TOther const &other) {
+    arrayops::apply(detail::array_isum<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator+=(device TOther const &other) {
+    arrayops::apply(detail::array_isum<T>, *this, other);
+    return *this;
+  }
+
+
+#endif
+
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
+  operator-=(TV_METAL_CONSTANT TOther const &other) {
     arrayops::apply(detail::array_isub<T>, *this, other);
     return *this;
   }
 
+#ifdef TV_METAL_RTC
   template <typename TOther>
-  TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> &
-  operator*=(TOther const &other) {
+  TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
+  operator-=(thread TOther const &other) {
+    arrayops::apply(detail::array_isub<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
+  operator-=(threadgroup TOther const &other) {
+    arrayops::apply(detail::array_isub<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator-=(device TOther const &other) {
+    arrayops::apply(detail::array_isub<T>, *this, other);
+    return *this;
+  }
+
+#endif
+
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
+  operator*=(TV_METAL_CONSTANT TOther const &other) {
     arrayops::apply(detail::array_imul<T>, *this, other);
     return *this;
   }
 
+#ifdef TV_METAL_RTC
   template <typename TOther>
-  TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> &
-  operator/=(TOther const &other) {
+  TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
+  operator*=(thread TOther const &other) {
+    arrayops::apply(detail::array_imul<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
+  operator*=(threadgroup TOther const &other) {
+    arrayops::apply(detail::array_imul<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator*=(device TOther const &other) {
+    arrayops::apply(detail::array_imul<T>, *this, other);
+    return *this;
+  }
+
+#endif
+
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
+  operator/=(TV_METAL_CONSTANT TOther const &other) {
     arrayops::apply(detail::array_idiv<T>, *this, other);
     return *this;
   }
+
+#ifdef TV_METAL_RTC
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
+  operator/=(thread TOther const &other) {
+    arrayops::apply(detail::array_idiv<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
+  operator/=(threadgroup TOther const &other) {
+    arrayops::apply(detail::array_idiv<T>, *this, other);
+    return *this;
+  }
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator/=(device TOther const &other) {
+    arrayops::apply(detail::array_idiv<T>, *this, other);
+    return *this;
+  }
+
+#endif
 
   TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> operator-() const {
     return arrayops::apply(detail::array_minus<T>, *this);
@@ -275,19 +451,58 @@ public:
     return arrayops::apply(detail::array_cast<T, TCast>, *this);
   }
 
+
+#ifdef TV_METAL_RTC
+  template <template <class, size_t, size_t> class Op, class... Args>
+  TV_HOST_DEVICE_INLINE constexpr auto op(TV_METAL_CONSTANT Args &&...args) {
+    return Op<T, N, Align>()(*this, args...);
+  }
+
+  template <template <class, size_t, size_t> class Op, class... Args>
+  TV_HOST_DEVICE_INLINE constexpr auto op(thread Args &&...args) {
+    return Op<T, N, Align>()(*this, args...);
+  }
+
+  template <template <class, size_t, size_t> class Op, class... Args>
+  TV_HOST_DEVICE_INLINE constexpr auto op(threadgroup Args &&...args) {
+    return Op<T, N, Align>()(*this, args...);
+  }
+
+  template <template <class, size_t, size_t> class Op, class... Args>
+  TV_HOST_DEVICE_INLINE constexpr auto op(device Args &&...args) {
+    return Op<T, N, Align>()(*this, args...);
+  }
+  template <template <class, size_t, size_t> class Op, class... Args>
+  TV_HOST_DEVICE_INLINE constexpr auto op(thread Args &&...args) const {
+    return Op<T, N, Align>()(*this, args...);
+  }
+
+  template <template <class, size_t, size_t> class Op, class... Args>
+  TV_HOST_DEVICE_INLINE constexpr auto op(threadgroup Args &&...args) const {
+    return Op<T, N, Align>()(*this, args...);
+  }
+
+  template <template <class, size_t, size_t> class Op, class... Args>
+  TV_HOST_DEVICE_INLINE constexpr auto op(device Args &&...args) const {
+    return Op<T, N, Align>()(*this, args...);
+  }
+
+#else 
   template <template <class, size_t, size_t> class Op, class... Args>
   TV_HOST_DEVICE_INLINE constexpr auto op(Args &&...args) {
     return Op<T, N, Align>()(*this, std::forward<Args>(args)...);
   }
-
   template <template <class, size_t, size_t> class Op, class... Args>
   TV_HOST_DEVICE_INLINE constexpr auto op(Args &&...args) const {
     return Op<T, N, Align>()(*this, std::forward<Args>(args)...);
   }
 
+#endif
+
+
   T array_[N];
 };
-
+#ifndef TV_METAL_RTC
 template <typename T, size_t N, size_t Align>
 TV_HOST_DEVICE_INLINE constexpr bool operator==(const array<T, N, Align> &lfs,
                                                 const array<T, N, Align> &rfs) {
@@ -305,11 +520,11 @@ TV_HOST_DEVICE_INLINE constexpr bool operator!=(const array<T, N, Align> &lfs,
 
   return !(lfs == rfs);
 }
-
+#endif
 namespace detail {
 // mp_list_c to array
 template <class... Is> struct mp_list_c_to_array_impl {
-  static constexpr array<typename mp_nth_t<0, Is...>::value_type, sizeof...(Is)>
+  static constexpr TV_METAL_CONSTANT array<typename mp_nth_t<0, Is...>::value_type, sizeof...(Is)>
       value{{Is::value...}};
 };
 
@@ -319,41 +534,111 @@ template <int I, int... Is> struct gen_seq : gen_seq<I - 1, I - 1, Is...> {};
 template <int... Is> struct gen_seq<0, Is...> : seq<Is...> {};
 
 template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr const T &
-array_or_scalar(const array<T, N, Align> &arr, int i) {
+TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT const T &
+array_or_scalar(TV_METAL_CONSTANT const array<T, N, Align> &arr, int i) {
   return arr[i];
 }
+
+#ifdef TV_METAL_RTC
+template <typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE constexpr thread const T &
+array_or_scalar(thread const array<T, N, Align> &arr, int i) {
+  return arr[i];
+}
+template <typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE constexpr device const T &
+array_or_scalar(device const array<T, N, Align> &arr, int i) {
+  return arr[i];
+}
+template <typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE constexpr threadgroup const T &
+array_or_scalar(threadgroup const array<T, N, Align> &arr, int i) {
+  return arr[i];
+}
+
+#endif
+
 #ifndef __CUDACC_RTC__
 template <typename T, size_t N>
-TV_HOST_DEVICE_INLINE constexpr const T &
-array_or_scalar(const std::array<T, N> &arr, int i) {
+TV_HOST_DEVICE_INLINE constexpr const TV_METAL_THREAD T &
+array_or_scalar(const TV_METAL_THREAD std::array<T, N> &arr, int i) {
   return arr[i];
 }
 #endif
 
 template <typename T>
-TV_HOST_DEVICE_INLINE constexpr const T &array_or_scalar(const T &arr, int i) {
+TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT const T &array_or_scalar(TV_METAL_CONSTANT const T &arr, int i) {
   return arr;
 }
-
-template <typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr T &array_or_scalar(array<T, N, Align> &arr,
-                                                   int i) {
-  return arr[i];
+#ifdef TV_METAL_RTC
+template <typename T>
+TV_HOST_DEVICE_INLINE constexpr thread const T &array_or_scalar(thread const T &arr, int i) {
+  return arr;
 }
 
 template <typename T>
-TV_HOST_DEVICE_INLINE constexpr T &array_or_scalar(T &arr, int i) {
+TV_HOST_DEVICE_INLINE constexpr device const T &array_or_scalar(device const T &arr, int i) {
   return arr;
 }
 
+template <typename T>
+TV_HOST_DEVICE_INLINE constexpr threadgroup const T &array_or_scalar(threadgroup const T &arr, int i) {
+  return arr;
+}
+
+#endif
+#ifndef TV_METAL_RTC
+template <typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT T &array_or_scalar(TV_METAL_CONSTANT array<T, N, Align> &arr,
+                                                   int i) {
+  return arr[i];
+}
+#endif
+#ifdef TV_METAL_RTC
+template <typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE constexpr thread T &array_or_scalar(thread array<T, N, Align> &arr, int i) {
+  return arr[i];
+}
+template <typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE constexpr device T &array_or_scalar(device array<T, N, Align> &arr, int i) {
+  return arr[i];
+}
+template <typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE constexpr threadgroup T &array_or_scalar(threadgroup array<T, N, Align> &arr, int i) {
+  return arr[i];
+}
+
+#endif
+#ifndef TV_METAL_RTC
+template <typename T>
+TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT T &array_or_scalar(TV_METAL_CONSTANT T &arr, int i) {
+  return arr;
+}
+#endif
+#ifdef TV_METAL_RTC
+template <typename T>
+TV_HOST_DEVICE_INLINE constexpr thread T &array_or_scalar(thread T &arr, int i) {
+  return arr;
+}
+
+template <typename T>
+TV_HOST_DEVICE_INLINE constexpr device T &array_or_scalar(device T &arr, int i) {
+  return arr;
+}
+
+template <typename T>
+TV_HOST_DEVICE_INLINE constexpr threadgroup T &array_or_scalar(threadgroup T &arr, int i) {
+  return arr;
+}
+
+#endif
 template <typename T> struct is_tv_array {
-  static constexpr bool value = false;
+  static constexpr TV_METAL_CONSTANT bool value = false;
 };
 
 template <typename T, size_t N, size_t Align>
 struct is_tv_array<tv::array<T, N, Align>> {
-  static constexpr bool value = true;
+  static constexpr TV_METAL_CONSTANT bool value = true;
 };
 
 template <typename T> struct get_nested_element_type_impl {
@@ -419,24 +704,24 @@ template <bool Enable> struct invoke_or_recursive;
 
 template <> struct invoke_or_recursive<true> {
   template <class F, class... Args>
-  TV_HOST_DEVICE_INLINE static constexpr auto run(F &&f, int i,
-                                                  Args &&...args) {
-    return arrayops::apply(std::forward<F>(f),
+  TV_HOST_DEVICE_INLINE static constexpr auto run(TV_METAL_THREAD F &&f, int i,
+                                                  TV_METAL_THREAD Args &&...args) {
+    return arrayops::apply(TV_FORWARD_EXCEPT_METAL(F, f),
                            array_or_scalar(std::forward<Args>(args), i)...);
   }
 };
 
 template <> struct invoke_or_recursive<false> {
   template <class F, class... Args>
-  TV_HOST_DEVICE_INLINE static constexpr auto run(F &&f, int i,
-                                                  Args &&...args) {
-    return std::forward<F>(f)(array_or_scalar(std::forward<Args>(args), i)...);
+  TV_HOST_DEVICE_INLINE static constexpr auto run(TV_METAL_THREAD F &&f, int i,
+                                                  TV_METAL_THREAD Args &&...args) {
+    return TV_FORWARD_EXCEPT_METAL(F, f)(array_or_scalar(std::forward<Args>(args), i)...);
   }
 };
 
 template <class F, int... Is, class... Args>
-TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(F &&f, seq<Is...>,
-                                                          Args &&...args)
+TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(TV_METAL_THREAD F &&f, seq<Is...>,
+                                                          TV_METAL_THREAD Args &&...args)
     -> cast_nested_element_t<
         array<typename mp_reduce<determine_array_type, mp_list<Args...>,
                                  void>::value_type,
@@ -447,52 +732,78 @@ TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(F &&f, seq<Is...>,
       std::decay_t<return_type_t<F>>>;
   static_assert(!std::is_same<arr_type_t, void>::value, "wtf");
   return {{invoke_or_recursive<(get_tv_array_rank<arr_type_t>::value > 1)>::run(
-      std::forward<F>(f), Is, std::forward<Args>(args)...)...}};
+      TV_FORWARD_EXCEPT_METAL(F, f), Is, std::forward<Args>(args)...)...}};
 }
+// template <class F, int... Is, class... Args>
+// TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(TV_METAL_THREAD F &&f, seq<Is...>,
+//                                                           TV_METAL_CONSTANT Args &&...args)
+//     -> cast_nested_element_t<
+//         array<typename mp_reduce<determine_array_type, mp_list<Args...>,
+//                                  void>::value_type,
+//               sizeof...(Is)>,
+//         std::decay_t<return_type_t<F>>> {
+//   using arr_type_t = cast_nested_element_t<
+//       mp_reduce<determine_array_type, mp_list<Args...>, void>,
+//       std::decay_t<return_type_t<F>>>;
+//   static_assert(!std::is_same<arr_type_t, void>::value, "wtf");
+//   return {{invoke_or_recursive<(get_tv_array_rank<arr_type_t>::value > 1)>::run(
+//       TV_FORWARD_EXCEPT_METAL(F, f), Is, std::forward<Args>(args)...)...}};
+// }
 
 // we can't use std::extent here because the default value of extent is ZERO...
 template <typename T> struct get_array_extent {
-  static constexpr int value = -1;
+  static constexpr TV_METAL_CONSTANT int value = -1;
 };
 
 #ifndef __CUDACC_RTC__
 // std::array don't support nvrtc.
 template <typename T, size_t N> struct get_array_extent<std::array<T, N>> {
-  static constexpr int value = N;
+  static constexpr TV_METAL_CONSTANT int value = N;
 };
 #endif
 
 template <typename T, size_t N, size_t Align>
 struct get_array_extent<array<T, N, Align>> {
-  static constexpr int value = N;
+  static constexpr TV_METAL_CONSTANT int value = N;
 };
 
+#ifdef TV_METAL_RTC
+template <typename T, size_t N, size_t Align>
+struct get_array_extent<TV_METAL_CONSTANT array<T, N, Align>> {
+  static constexpr TV_METAL_CONSTANT int value = N;
+};
+
+#endif
+
 template <class T> struct get_extent_helper_impl {
-  using type =
-      std::integral_constant<int, get_array_extent<std::decay_t<T>>::value>;
+  static constexpr auto TV_METAL_CONSTANT __value1 = get_array_extent<const std::remove_cv_t<std::decay_t<T>>>::value;
+  static constexpr auto TV_METAL_CONSTANT __value2 = get_array_extent<std::remove_cv_t<std::decay_t<T>>>::value;
+
+    using type =
+      std::integral_constant<int, __value1 == -1 ? __value2 : __value1>;
 };
 template <class T>
 using get_extent_helper = typename get_extent_helper_impl<T>::type;
 
 template <class... Ts>
-constexpr int get_max_extent_v =
+constexpr TV_METAL_CONSTANT int get_max_extent_v =
     mp_reduce_max<mp_transform<get_extent_helper, mp_list<Ts...>>,
                   std::integral_constant<int, -1>>::value;
 
 template <size_t N> struct array_reduce_impl {
   static_assert(N != 0, "N can't equal to zero");
   template <typename F, typename T, size_t N1, size_t Align>
-  TV_HOST_DEVICE_INLINE static constexpr T run(F &&f,
-                                               const array<T, N1, Align> &arr) {
-    return std::forward<F>(f)(
-        array_reduce_impl<N - 1>::run(std::forward<F>(f), arr), arr[N - 1]);
+  TV_HOST_DEVICE_INLINE static constexpr T run(TV_METAL_THREAD F &&f,
+                                               TV_METAL_THREAD const array<T, N1, Align> &arr) {
+    return TV_FORWARD_EXCEPT_METAL(F, f)(
+        array_reduce_impl<N - 1>::run(TV_FORWARD_EXCEPT_METAL(F, f), arr), arr[N - 1]);
   }
 };
 
 template <> struct array_reduce_impl<1> {
   template <typename F, typename T, size_t N1, size_t Align>
-  TV_HOST_DEVICE_INLINE static constexpr T run(F &&f,
-                                               const array<T, N1, Align> &arr) {
+  TV_HOST_DEVICE_INLINE static constexpr T run(TV_METAL_THREAD F &&f,
+                                               TV_METAL_THREAD const array<T, N1, Align> &arr) {
     return arr[0];
   }
 };
@@ -500,17 +811,24 @@ template <> struct array_reduce_impl<1> {
 } // namespace detail
 
 template <typename T>
-constexpr bool is_tv_array_v = detail::is_tv_array<std::decay_t<T>>::value;
+constexpr TV_METAL_CONSTANT bool is_tv_array_v = detail::is_tv_array<std::decay_t<T>>::value;
 
 namespace arrayops {
 
 template <class F, class... Args>
-TV_HOST_DEVICE_INLINE constexpr auto apply(F &&f, Args &&...args) {
+TV_HOST_DEVICE_INLINE constexpr auto apply(TV_METAL_THREAD F &&f, TV_METAL_THREAD Args &&...args) {
   constexpr int N = detail::get_max_extent_v<Args...>;
   static_assert(N > 0, "error");
-  return detail::index_transform_impl(std::forward<F>(f), detail::gen_seq<N>{},
+  return detail::index_transform_impl(TV_FORWARD_EXCEPT_METAL(F, f), detail::gen_seq<N>{},
                                       std::forward<Args>(args)...);
 }
+// template <class F, class... Args>
+// TV_HOST_DEVICE_INLINE constexpr auto apply(TV_METAL_THREAD F &&f, TV_METAL_CONSTANT Args &&...args) {
+//   constexpr int N = detail::get_max_extent_v<Args...>;
+//   static_assert(N > 0, "error");
+//   return detail::index_transform_impl(TV_FORWARD_EXCEPT_METAL(F, f), detail::gen_seq<N>{},
+//                                       std::forward<Args>(args)...);
+// }
 
 } // namespace arrayops
 namespace detail {
@@ -548,20 +866,20 @@ using nested_conversion_t = typename nested_conversion<std::decay_t<T>>::type;
 
 template <typename T, size_t N>
 constexpr nested_conversion_t<std::array<T, N>>
-from_std_array_impl_expand(const std::array<T, N> &arr);
-template <typename T> constexpr T from_std_array_impl_expand(const T &arr) {
+from_std_array_impl_expand(const TV_METAL_THREAD std::array<T, N> &arr);
+template <typename T> constexpr T from_std_array_impl_expand(const TV_METAL_THREAD T &arr) {
   return arr;
 }
 
 template <typename T, size_t N>
 constexpr nested_conversion_t<tv::array<T, N>>
-to_std_array_impl_expand(const tv::array<T, N> &arr);
-template <typename T> constexpr T to_std_array_impl_expand(const T &arr) {
+to_std_array_impl_expand(const TV_METAL_THREAD tv::array<T, N> &arr);
+template <typename T> constexpr T to_std_array_impl_expand(const TV_METAL_THREAD T &arr) {
   return arr;
 }
 
 template <typename T, size_t N, int... Inds>
-constexpr auto from_std_array_impl(const std::array<T, N> &arr,
+constexpr auto from_std_array_impl(const TV_METAL_THREAD std::array<T, N> &arr,
                                    mp_list_int<Inds...>) {
   return nested_conversion_t<std::array<T, N>>{
       from_std_array_impl_expand(arr[Inds])...};
@@ -569,12 +887,12 @@ constexpr auto from_std_array_impl(const std::array<T, N> &arr,
 
 template <typename T, size_t N>
 constexpr nested_conversion_t<std::array<T, N>>
-from_std_array_impl_expand(const std::array<T, N> &arr) {
+from_std_array_impl_expand(const TV_METAL_THREAD std::array<T, N> &arr) {
   return from_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
 }
 
 template <typename T, size_t N, int... Inds>
-constexpr auto to_std_array_impl(const tv::array<T, N> &arr,
+constexpr auto to_std_array_impl(const TV_METAL_THREAD tv::array<T, N> &arr,
                                  mp_list_int<Inds...>) {
   return nested_conversion_t<tv::array<T, N>>{
       to_std_array_impl_expand(arr[Inds])...};
@@ -582,7 +900,7 @@ constexpr auto to_std_array_impl(const tv::array<T, N> &arr,
 
 template <typename T, size_t N>
 constexpr nested_conversion_t<tv::array<T, N>>
-to_std_array_impl_expand(const tv::array<T, N> &arr) {
+to_std_array_impl_expand(const TV_METAL_THREAD tv::array<T, N> &arr) {
   return to_std_array_impl(arr, mp_make_list_c_sequence<int, N>{});
 }
 
@@ -591,29 +909,29 @@ to_std_array_impl_expand(const tv::array<T, N> &arr) {
 namespace arrayops {
 template <typename T, size_t N>
 constexpr detail::nested_conversion_t<std::array<T, N>>
-from_std_array(const std::array<T, N> &arr) {
+from_std_array(const TV_METAL_THREAD std::array<T, N> &arr) {
   return detail::from_std_array_impl_expand(arr);
 }
 template <typename T, size_t N>
 constexpr detail::nested_conversion_t<tv::array<T, N>>
-to_std_array(const tv::array<T, N> &arr) {
+to_std_array(const TV_METAL_THREAD tv::array<T, N> &arr) {
   return detail::to_std_array_impl_expand(arr);
 }
 } // namespace arrayops
 #endif
 
 template <class L>
-constexpr auto mp_list_c_to_array =
+constexpr TV_METAL_CONSTANT auto mp_list_c_to_array =
     mp_rename_v<L, detail::mp_list_c_to_array_impl>;
 template <class Array>
-constexpr auto array_size_v = detail::get_array_extent<Array>::value;
+constexpr TV_METAL_CONSTANT auto array_size_v = detail::get_array_extent<Array>::value;
 
 template <int... Is>
-constexpr auto mp_array_int_v = tv::mp_list_c_to_array<tv::mp_list_int<Is...>>;
+constexpr TV_METAL_CONSTANT auto mp_array_int_v = tv::mp_list_c_to_array<tv::mp_list_int<Is...>>;
 
 template <typename T, size_t N, size_t Align>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator+(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
+operator+(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_sum<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -621,7 +939,7 @@ operator+(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator+(const array<T, N, Align> &lfs, const T2 &rfs) {
+operator+(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const T2 &rfs) {
   return arrayops::apply(detail::array_sum<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -629,14 +947,14 @@ operator+(const array<T, N, Align> &lfs, const T2 &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator+(const T2 &lfs, const array<T, N, Align> &rfs) {
+operator+(TV_METAL_THREAD const T2 &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_sum<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
 
 template <typename T, size_t N, size_t Align>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator-(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
+operator-(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_sub<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -644,7 +962,7 @@ operator-(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator-(const array<T, N, Align> &lfs, const T2 &rfs) {
+operator-(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const T2 &rfs) {
   return arrayops::apply(detail::array_sub<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -652,14 +970,14 @@ operator-(const array<T, N, Align> &lfs, const T2 &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator-(const T2 &lfs, const array<T, N, Align> &rfs) {
+operator-(TV_METAL_THREAD const T2 &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_sub<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
 
 template <typename T, size_t N, size_t Align>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator*(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
+operator*(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_mul<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -667,7 +985,7 @@ operator*(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator*(const array<T, N, Align> &lfs, const T2 &rfs) {
+operator*(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const T2 &rfs) {
   return arrayops::apply(detail::array_mul<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -675,14 +993,14 @@ operator*(const array<T, N, Align> &lfs, const T2 &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator*(const T2 &lfs, const array<T, N, Align> &rfs) {
+operator*(TV_METAL_THREAD const T2 &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_mul<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
 
 template <typename T, size_t N, size_t Align>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator/(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
+operator/(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_div<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -690,7 +1008,7 @@ operator/(const array<T, N, Align> &lfs, const array<T, N, Align> &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator/(const array<T, N, Align> &lfs, const T2 &rfs) {
+operator/(TV_METAL_THREAD const array<T, N, Align> &lfs, TV_METAL_THREAD const T2 &rfs) {
   return arrayops::apply(detail::array_div<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -698,7 +1016,7 @@ operator/(const array<T, N, Align> &lfs, const T2 &rfs) {
 template <typename T, size_t N, size_t Align, typename T2,
           typename = std::enable_if_t<!is_tv_array_v<T2>>>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-operator/(const T2 &lfs, const array<T, N, Align> &rfs) {
+operator/(TV_METAL_THREAD const T2 &lfs, TV_METAL_THREAD const array<T, N, Align> &rfs) {
   return arrayops::apply(detail::array_div<detail::get_nested_element_t<T>>,
                          lfs, rfs);
 }
@@ -710,39 +1028,39 @@ struct alignas(Align) alignedarray : public array<T, N> {};
 namespace detail {
 template <typename T, size_t N1, size_t N2, int... IndsL, int... IndsR>
 TV_HOST_DEVICE_INLINE constexpr array<T, N1 + N2>
-concat_impl(const array<T, N1> &a, const array<T, N2> &b, mp_list_int<IndsL...>,
-            mp_list_int<IndsR...>) noexcept {
+concat_impl(TV_METAL_THREAD const array<T, N1> &a, TV_METAL_THREAD const array<T, N2> &b, mp_list_int<IndsL...>,
+            mp_list_int<IndsR...>) TV_NOEXCEPT_EXCEPT_METAL {
   return array<T, N1 + N2>{a[IndsL]..., b[IndsR]...};
 }
 
 template <typename T, size_t N, int... Inds>
 TV_HOST_DEVICE_INLINE constexpr array<T, N>
-reverse_impl(const array<T, N> &a, mp_list_int<Inds...>) noexcept {
+reverse_impl(TV_METAL_THREAD const array<T, N> &a, mp_list_int<Inds...>) TV_NOEXCEPT_EXCEPT_METAL {
   return array<T, N>{a[Inds]...};
 }
 
 template <typename T, size_t N, size_t Align, int... Inds>
 TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
-constant_impl(T val, mp_list_int<Inds...>) noexcept {
+constant_impl(T val, mp_list_int<Inds...>) TV_NOEXCEPT_EXCEPT_METAL {
   return array<T, N, Align>{(Inds, val)...};
 }
 
 template <typename T, size_t N, int... Inds>
 TV_HOST_DEVICE_INLINE constexpr array<T, sizeof...(Inds)>
-slice_impl(const array<T, N> &arr, mp_list_int<Inds...>) noexcept {
+slice_impl(TV_METAL_THREAD const array<T, N> &arr, mp_list_int<Inds...>) TV_NOEXCEPT_EXCEPT_METAL {
   return array<T, sizeof...(Inds)>{arr[Inds]...};
 }
 
 template <int Start, int End, typename T, size_t N1, size_t N2, int... Inds>
 TV_HOST_DEVICE_INLINE constexpr array<array<T, End - Start>, sizeof...(Inds)>
-slice_2d_impl(const array<array<T, N2>, N1> &arr, mp_list_int<Inds...>) noexcept {
+slice_2d_impl(TV_METAL_THREAD const array<array<T, N2>, N1> &arr, mp_list_int<Inds...>) TV_NOEXCEPT_EXCEPT_METAL {
   return array<array<T, End - Start>, sizeof...(Inds)>{slice_impl(arr[Inds], mp_list_int_range<Start, End>{})...};
 }
 
 
 template <typename T, size_t N1, size_t N2>
 TV_HOST_DEVICE_INLINE constexpr array<T, N1 + N2>
-concat2_base_impl(const array<T, N1> &a, const array<T, N2> &b) noexcept {
+concat2_base_impl(TV_METAL_THREAD const array<T, N1> &a, TV_METAL_THREAD const array<T, N2> &b) TV_NOEXCEPT_EXCEPT_METAL {
   return concat_impl(a, b, mp_make_list_c_sequence<int, N1>{},
                      mp_make_list_c_sequence<int, N2>{});
 }
@@ -753,37 +1071,39 @@ namespace arrayops {
 
 template <typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<T, N>
-concat(const array<T, N> &arr) noexcept {
+concat(TV_METAL_THREAD const array<T, N> &arr) TV_NOEXCEPT_EXCEPT_METAL {
   return arr;
 }
 
 template <typename T, size_t N, size_t... Ns>
 TV_HOST_DEVICE_INLINE constexpr array<T, mp_reduce_sum_v<size_t, N, Ns...>>
-concat(const array<T, N> &arr, const array<T, Ns> &...arrs) noexcept {
+concat(TV_METAL_THREAD const array<T, N> &arr, TV_METAL_THREAD const array<T, Ns> &...arrs) TV_NOEXCEPT_EXCEPT_METAL {
   return detail::concat2_base_impl(arr, concat(arrs...));
 }
 
 template <typename F, typename T, size_t N, size_t Align>
-TV_HOST_DEVICE_INLINE constexpr T reduce(F &&f,
-                                         const array<T, N, Align> &a) noexcept {
-  return detail::array_reduce_impl<N>::run(std::forward<F>(f), a);
+TV_HOST_DEVICE_INLINE constexpr T reduce(TV_METAL_THREAD F &&f,
+                                         TV_METAL_THREAD const array<T, N, Align> &a) TV_NOEXCEPT_EXCEPT_METAL {
+  return detail::array_reduce_impl<N>::run(TV_FORWARD_EXCEPT_METAL(F, f), a);
 }
 
+#ifndef TV_METAL_RTC
 template <typename T, size_t N, size_t Align = 0>
-TV_HOST_DEVICE_INLINE constexpr auto constant(T val) noexcept {
+TV_HOST_DEVICE_INLINE constexpr auto constant(T val) TV_NOEXCEPT_EXCEPT_METAL {
   return detail::constant_impl<T, N, Align>(
       val, mp_make_list_c_sequence_reverse<int, N>{});
 }
+#endif
 
 template <typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<T, N>
-reverse(const array<T, N> &a) noexcept {
+reverse(TV_METAL_THREAD const array<T, N> &a) TV_NOEXCEPT_EXCEPT_METAL {
   return detail::reverse_impl(a, mp_make_list_c_sequence_reverse<int, N>{});
 }
 template <int Start, int End, typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<
     T, (End > 0 ? End : End + int64_t(N)) - Start>
-slice(const array<T, N> &arr) {
+slice(TV_METAL_THREAD const array<T, N> &arr) {
   // TODO this function have problem in intellisense engine
   return detail::slice_impl(
       arr, mp_list_int_range<Start, (End > 0 ? End : End + int64_t(N))>{});
@@ -792,14 +1112,14 @@ slice(const array<T, N> &arr) {
 template <int Start1, int Start2, int End1, int End2, typename T, size_t N1, size_t N2>
 TV_HOST_DEVICE_INLINE constexpr array<
     array<T, (End2 > 0 ? End2 : End2 + int64_t(N2)) - Start2>, (End1 > 0 ? End1 : End1 + int64_t(N1)) - Start1>
-slice_2d(const array<array<T, N2>, N1> &arr) {
+slice_2d(TV_METAL_THREAD const array<array<T, N2>, N1> &arr) {
   return detail::slice_2d_impl<Start2, (End2 > 0 ? End2 : End2 + int64_t(N2))>(
       arr, mp_list_int_range<Start1, (End1 > 0 ? End1 : End1 + int64_t(N1))>{});
 }
 
 template <typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr bool contains(T val,
-                                              const array<T, N> &a) noexcept {
+                                              TV_METAL_THREAD const array<T, N> &a) TV_NOEXCEPT_EXCEPT_METAL {
   bool res = false;
   TV_PRAGMA_UNROLL
   for (int i = 0; i < N; ++i) {
@@ -814,7 +1134,7 @@ TV_HOST_DEVICE_INLINE constexpr bool contains(T val,
 
 template <typename T, size_t N1, size_t N2>
 TV_HOST_DEVICE_INLINE constexpr array<T, N1 + N2>
-operator|(const array<T, N1> &lfs, const array<T, N2> &rfs) {
+operator|(TV_METAL_THREAD const array<T, N1> &lfs, TV_METAL_THREAD const array<T, N2> &rfs) {
   return arrayops::concat(lfs, rfs);
 }
 

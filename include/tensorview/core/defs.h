@@ -29,8 +29,12 @@
 #define TV_IS_EXTEND_DEVICE_LAMBDA(x)                                          \
   __nv_is_extended_device_lambda_closure_type(x)
 
-#elif defined(__CUDACC_RTC__)
+
+
+#elif defined(__CUDACC_RTC__) && !defined(__APPLE__)
 #define TV_CUDA_CC
+#define TV_CUDA_RTC
+#define TV_PARALLEL_RTC
 #define TV_ASSERT(expr) assert(expr)
 #define TV_HOST_DEVICE_INLINE __forceinline__ __device__
 #define TV_DEVICE_INLINE __forceinline__ __device__
@@ -53,6 +57,40 @@
 #define TV_GPU_LAMBDA_DEVICE
 #define TV_IS_EXTEND_LAMBDA(x) true
 #define TV_IS_EXTEND_DEVICE_LAMBDA(x) true
+#endif
+
+#ifdef __APPLE__
+#ifdef __METAL_VERSION__
+#define TV_METAL_CC
+#define TV_PARALLEL_RTC
+#define TV_METAL_CONSTANT constant
+#define TV_METAL_THREAD thread
+#define TV_METAL_THREADGROUP threadgroup
+#define TV_METAL_DEVICE device
+#define TV_FORWARD_EXCEPT_METAL(Args, args) args
+#define TV_NOEXCEPT_EXCEPT_METAL
+#define TV_METAL_RTC
+#else 
+#define TV_METAL_CONSTANT
+#define TV_METAL_THREAD
+#define TV_METAL_THREADGROUP
+#define TV_METAL_DEVICE
+#define TV_FORWARD_EXCEPT_METAL(Args, args) std::forward<Args>(args)
+
+#define TV_NOEXCEPT_EXCEPT_METAL noexcept
+#endif
+#else 
+#define TV_METAL_CONSTANT
+#define TV_METAL_THREAD
+#define TV_METAL_THREADGROUP
+#define TV_METAL_DEVICE
+#define TV_FORWARD_EXCEPT_METAL(Args, args) std::forward<Args>(args)
+#define TV_NOEXCEPT_EXCEPT_METAL noexcept
+
+#endif
+
+#ifdef TV_CUDA
+#define TV_ENABLE_HARDWARE_ACCELERATION
 #endif
 
 #ifndef TV_MAX_DIM

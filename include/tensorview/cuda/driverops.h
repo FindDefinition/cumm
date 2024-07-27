@@ -17,7 +17,7 @@
 
 namespace tv {
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 
 #ifdef __DRIVER_TYPES_H__
 #ifndef DEVICE_RESET

@@ -15,7 +15,7 @@
 #pragma once
 
 #include <tensorview/core/all.h>
-#ifdef __CUDACC_RTC__
+#ifdef TV_PARALLEL_RTC
 #include <tensorview/core/nvrtc_std.h>
 #else
 #include <type_traits>
@@ -41,9 +41,16 @@ template <bool Signed> struct SizeToInt<4, Signed> {
   using type = std::conditional_t<Signed, int32_t, uint32_t>;
 };
 
+#ifdef TV_METAL_CC
+template <bool Signed> struct SizeToInt<8, Signed> {
+  using type = std::conditional_t<Signed, int64_t, uint64_t>;
+};
+#else 
 template <bool Signed> struct SizeToInt<8, Signed> {
   using type = std::conditional_t<Signed, int64_t, unsigned long long>;
 };
+
+#endif
 
 template <typename T> struct MapTypeToInt {
   using type = typename SizeToInt<sizeof(T), true>::type;
@@ -58,23 +65,23 @@ struct default_empty_key;
 
 template <>
 struct default_empty_key<int32_t>{
-  static constexpr int32_t value = std::numeric_limits<int32_t>::max();
+  static constexpr TV_METAL_CONSTANT int32_t value = std::numeric_limits<int32_t>::max();
 };
 
 template <>
 struct default_empty_key<int64_t>{
-  static constexpr int64_t value = std::numeric_limits<int64_t>::max();
+  static constexpr TV_METAL_CONSTANT int64_t value = std::numeric_limits<int64_t>::max();
 };
 template <>
 struct default_empty_key<uint32_t>{
-  static constexpr uint32_t value = std::numeric_limits<uint32_t>::max();
+  static constexpr TV_METAL_CONSTANT uint32_t value = std::numeric_limits<uint32_t>::max();
 };
 
 template <>
 struct default_empty_key<uint64_t>{
-  static constexpr uint64_t value = std::numeric_limits<uint64_t>::max();
+  static constexpr TV_METAL_CONSTANT uint64_t value = std::numeric_limits<uint64_t>::max();
 };
-
+#ifdef TV_CUDA_CC
 struct __place_holder_t;
 
 template <>
@@ -83,6 +90,7 @@ struct default_empty_key<
                      __place_holder_t, unsigned long long>::type> {
   static constexpr unsigned long long value = std::numeric_limits<unsigned long long>::max();
 };
+#endif
 
 } // namespace detail
 
@@ -93,7 +101,7 @@ template <typename K>
 using to_unsigned_t = typename detail::MapTypeToUnsignedInt<K>::type;
 
 template <typename K>
-constexpr K default_empty_key_v = detail::default_empty_key<K>::value;
+constexpr TV_METAL_CONSTANT K default_empty_key_v = detail::default_empty_key<K>::value;
 
 template <typename K, typename V, K EmptyKey = default_empty_key_v<K>>
 struct pair {

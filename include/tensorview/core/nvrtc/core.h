@@ -21,38 +21,41 @@
 // <http://www.gnu.org/licenses/>.
 
 #pragma once
-
-#ifdef __CUDACC_RTC__
-
+#include <tensorview/core/defs.h>
+#ifdef TV_PARALLEL_RTC
+#ifndef __APPLE__
 #include <cuda/std/cassert>
-
+#endif
 typedef signed char int8_t;
 typedef signed short int16_t;
 typedef signed int int32_t;
+#ifndef __APPLE__
 typedef signed long long int64_t;
+#endif
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
+#ifndef __APPLE__
 typedef unsigned long long uint64_t;
-
+#endif
 namespace std {
 typedef unsigned long size_t;
 typedef long ptrdiff_t;
 
 template<class T> 
-TV_HOST_DEVICE_INLINE constexpr const T& max(const T& a, const T& b)
+TV_HOST_DEVICE_INLINE constexpr const T max(const T a, const T b)
 {
     return (a < b) ? b : a;
 }
 
 template<class T> 
-TV_HOST_DEVICE_INLINE constexpr const T& min(const T& a, const T& b)
+TV_HOST_DEVICE_INLINE constexpr const T min(const T a, const T b)
 {
     return (b < a) ? b : a;
 }
 
 template<class T> 
-TV_HOST_DEVICE_INLINE constexpr T abs(const T& a)
+TV_HOST_DEVICE_INLINE constexpr T abs(const T a)
 {
     return a >= T(0) ? a : -a;
 }

@@ -18,8 +18,12 @@
 #include "const_ops.h"
 #include "defs.h"
 #include "mp_helper.h"
+#ifndef TV_METAL_RTC
 #include "printf2.h"
-#ifndef __CUDACC_RTC__
+#endif
+#ifndef TV_PARALLEL_RTC
 #include "cc17.h"
 #endif
+#ifndef TV_METAL_RTC
 #include "const_string.h"
+#endif

@@ -19,7 +19,7 @@ import numpy as np
 from pccm.targets.cuda_ptx import RegDType
 
 from cumm.constants import CUTLASS_MODE
-
+from ccimport import compat 
 
 class DType(object):
     def __init__(self,
@@ -84,9 +84,13 @@ class DType(object):
         else:
             return f"{bsize} / 8"
 
+if compat.IsAppleSiliconMacOs:
+    float16_origin = DType("half", 2 * 8, "f16", 7, RegDType.F16)
+    float16 = DType("half", 2 * 8, "f16", 7, RegDType.F16)
+else:
+    float16_origin = DType("__half", 2 * 8, "f16", 7, RegDType.F16, "cutlass::half_t")
+    float16 = DType("tv::half_t", 2 * 8, "f16", 7, RegDType.F16, "cutlass::half_t")
 
-float16_origin = DType("__half", 2 * 8, "f16", 7, RegDType.F16, "cutlass::half_t")
-float16 = DType("tv::half_t", 2 * 8, "f16", 7, RegDType.F16, "cutlass::half_t")
 float32 = DType("float", 4 * 8, "f32", 0, RegDType.F32)
 float64 = DType("double", 8 * 8, "f64", 4, RegDType.F64)
 
@@ -101,8 +105,12 @@ uint8 = DType("uint8_t", 1 * 8, "u8", 6, RegDType.U8)
 uint16 = DType("uint16_t", 2 * 8, "u16", 9, RegDType.U16)
 uint32 = DType("uint32_t", 4 * 8, "u32", 10, RegDType.U32)
 uint64 = DType("uint64_t", 8 * 8, "u64", 11, RegDType.U64)
-bfloat16 = DType("tv::bfloat16_t", 2 * 8, "bf16", 12, RegDType.BF16,
-                 "cutlass::bfloat16_t")
+if compat.IsAppleSiliconMacOs:
+
+    bfloat16 = DType("bfloat", 2 * 8, "bf16", 12, RegDType.BF16)
+else:
+    bfloat16 = DType("tv::bfloat16_t", 2 * 8, "bf16", 12, RegDType.BF16,
+                    "cutlass::bfloat16_t")
 
 tf32 = DType("tv::tfloat32_t", 4 * 8, "tf32", 13, RegDType.TF32,
              "cutlass::tfloat32_t")  # float32 with last 13 bit removed.

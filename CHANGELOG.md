@@ -1,4 +1,8 @@
 # Changelog
+## [0.6.0] - 2024-07-28
+### Added 
+- add cuda-like kernel in apple silicon, only RTC compile is supported.
+
 ## [0.5.3] - 2024-06-12
 ### Fixed 
 - fix compile problem in cuda 12.x

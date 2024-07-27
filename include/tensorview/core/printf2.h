@@ -15,7 +15,7 @@
 #pragma once
 #include "array.h"
 #include "defs.h"
-#ifndef __CUDACC_RTC__
+#ifndef TV_PARALLEL_RTC
 #include <cstdio>
 #endif
 #include "const_string.h"
@@ -185,7 +185,7 @@ printf2_array_impl(array<T, N> arg, mp_list_int<Indexes...>, Ts &&...args) {
   // this function should only be used for cuda code. host code
   // should use tv::ssprint.
   static constexpr auto fmt =
-      detail::types_to_format<Sep, array<T, N>, Ts...>::value;
+      types_to_format<Sep, array<T, N>, Ts...>::value;
   printf(fmt.c_str(), arg[Indexes]..., args...);
 }
 
@@ -195,7 +195,7 @@ printf2_array_impl(T const (&arg)[N], mp_list_int<Indexes...>, Ts &&...args) {
   // this function should only be used for cuda code. host code
   // should use tv::ssprint.
   static constexpr auto fmt =
-      detail::types_to_format<Sep, array<T, N>, Ts...>::value;
+      types_to_format<Sep, array<T, N>, Ts...>::value;
   printf(fmt.c_str(), arg[Indexes]..., args...);
 }
 

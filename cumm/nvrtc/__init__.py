@@ -66,8 +66,9 @@ def _lazy_load_llvm():
         llvm.initialize_native_target()
         llvm.initialize_native_asmprinter()  # yes, even this one
         # we need this for some std library
-        llvm.load_library_permanently("libstdc++.so.6")
-        llvm.load_library_permanently("libc.so.6")
+        if not compat.InMacOS:
+            llvm.load_library_permanently("libstdc++.so.6")
+            llvm.load_library_permanently("libc.so.6")
         LLVM_GLOBAL_ENGINE = create_execution_engine(False)
 
         # llvm.load_library_permanently("libdl.so")
@@ -221,21 +222,28 @@ def create_nvrtc_code(cus: List[pccm.Class],
     for cu in user_cus:
         extern_build_meta += cu.build_meta
     # this function will call driver init
-    opts = [f"-std={std}"]
+    opts = [] if compat.InMacOS else [f"-std={std}"]
     global_cflags = extern_build_meta.get_global_cflags()
     local_cflags = extern_build_meta.get_local_cflags()
     if not cpu_code:
-        if add_arch_flag:
-            # if we use CummNVRTCModule to compile ptx for optix, 
-            # we can't add arch flag
-            arch = tv.get_compute_capability()
-            opts.append(f"--gpu-architecture=sm_{arch[0]}{arch[1]}")
-        if cudadevrt_path and Path(cudadevrt_path).exists():
-            opts.append("--relocatable-device-code=true")
-        if "nvcc" in global_cflags:
-            opts.extend(global_cflags["nvcc"])
-        if "nvcc" in local_cflags:
-            opts.extend(local_cflags["nvcc"])
+        if compat.InMacOS:
+            # we reuse nvcc flags for metal 
+            if "nvcc" in global_cflags:
+                opts.extend(global_cflags["clang++"])
+            if "nvcc" in local_cflags:
+                opts.extend(local_cflags["nvcc"])
+        else:
+            if add_arch_flag:
+                # if we use CummNVRTCModule to compile ptx for optix, 
+                # we can't add arch flag
+                arch = tv.get_compute_capability()
+                opts.append(f"--gpu-architecture=sm_{arch[0]}{arch[1]}")
+            if cudadevrt_path and Path(cudadevrt_path).exists():
+                opts.append("--relocatable-device-code=true")
+            if "nvcc" in global_cflags:
+                opts.extend(global_cflags["nvcc"])
+            if "nvcc" in local_cflags:
+                opts.extend(local_cflags["nvcc"])
     else:
         if "g++" in global_cflags:
             opts.extend(global_cflags["g++"])
@@ -514,7 +522,7 @@ class CummLLVMModule:
                     print(v)
         self._llvm_mod: Optional[Any] = None
         self._llvm_engine: Optional[Any] = None
-        self._use_llvm_bit_code = False
+        self._use_llvm_bit_code = True
 
         self.name_to_meta = self.mod_params.name_to_meta
 
@@ -693,6 +701,89 @@ class CummLLVMModule:
             raise RuntimeError(
                 "LLVM run failed. see error logged to stdout before.")
         return res
+
+class CummMetalModule:
+
+    def __init__(self,
+                 cus: List[pccm.Class],
+                 namespace_root: Optional[Union[str, Path]] = None,
+                 verbose: bool = False,
+                 verbose_path: str = "",
+                 std: str = "c++14") -> None:
+        self.mod_params: NVRTCModuleParams = create_nvrtc_code(cus,
+                                                               namespace_root,
+                                                               "", [],
+                                                               std,
+                                                               cpu_code=True)
+        if verbose:
+            if verbose_path:
+                verbose_path_p = Path(verbose_path)
+                for k, v in self.mod_params.headers.items():
+                    code_path = verbose_path_p / k
+                    code_path.parent.mkdir(exist_ok=True, parents=True)
+                    with code_path.open("w") as f:
+                        f.write(v)
+            else:
+                for k, v in self.mod_params.headers.items():
+                    print(k)
+                    print(v)
+        self._metal_mod: Optional[tv.MetalModule] = None
+        self.name_to_meta = self.mod_params.name_to_meta
+
+    def load(self):
+        import llvmlite.binding as llvm
+        _lazy_load_llvm()
+        # use clang++ to get ir
+        opts = self.mod_params.opts
+        _lazy_load_lib_for_llvm(self.mod_params.libraries,
+                                self.mod_params.libpaths)
+        with tempfile.TemporaryDirectory() as fdir:
+            inc_dir = Path(fdir) / "include"
+            for k, v in self.mod_params.headers.items():
+                code_path = Path(inc_dir) / k
+                code_path.parent.mkdir(exist_ok=True, parents=True)
+                with code_path.open("w") as f:
+                    f.write(v)
+            # print(inc_dir)
+            out_name = Path(fdir) / "metal.ir"
+            out_lib_name = Path(fdir) / "metal.metallib"
+
+            with tempfile.NamedTemporaryFile("w", suffix=".metal") as f2:
+                f2.seek(0)
+                f2.write(self.mod_params.code)
+                f2.flush()
+                # print(self.mod_params.debug_code)
+                try:
+                    subprocess.check_output([
+                        "xcrun", "-sdk", "macosx", "metal", "-c",
+                        f2.name, *opts, "-std=metal3.1",
+                        "-I",
+                        str(inc_dir), "-o",
+                        str(out_name)
+                    ])
+                    # read ir and pass to llvmlite
+                    # xcrun -sdk macosx metallib -o LightsAndShadow.metallib Lights.metalar Shadow.ir
+                    subprocess.check_output([
+                        "xcrun", "-sdk", "macosx", "metallib",
+                        "-o", str(out_lib_name), str(out_name)
+                    ])
+                except:
+                    print("Build Error. Opts: {} Kernel Code:\n{}".format(opts, self.mod_params.debug_code))
+                    raise
+            with out_lib_name.open("rb") as f:
+                metal_data = f.read()
+        self._metal_mod = tv.MetalModule(metal_data)
+        # breakpoint()
+
+
+    def run_kernel(self, name: str, launch: tv.LaunchParam,
+                   *args: Union[Tensor, int, float, List[int], List[float],
+                                Tuple[float, ...], Tuple[int, ...]],
+                    perf_context: Optional[ContextManager] = None):
+        if self._metal_mod is None:
+            self.load()
+        assert self._metal_mod is not None 
+        return self._metal_mod.run_kernel(name, launch, *args, perf_context=perf_context)
 
 
 if __name__ == "__main__":

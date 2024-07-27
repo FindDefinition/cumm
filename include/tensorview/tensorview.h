@@ -20,7 +20,7 @@
 
 #include "core/defs.h"
 
-#ifdef __CUDACC_RTC__
+#ifdef TV_PARALLEL_RTC
 #include <tensorview/core/nvrtc_std.h>
 #else
 
@@ -37,7 +37,7 @@
 #include <vector>
 #endif
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 
 #include <cuda_fp16.h>
 #ifndef __CUDACC_RTC__
@@ -46,13 +46,13 @@
 #include <cuda_runtime_api.h>
 #endif
 #endif
-#if (CUDA_VERSION >= 11000 && defined(TV_CUDA))
+#if (CUDA_VERSION >= 11000 && defined(TV_CUDA_CC))
 #include <cuda_bf16.h>
 #endif
 
 namespace tv {
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 #ifndef __CUDACC_RTC__
 
 struct GPU {

@@ -14,7 +14,7 @@
 
 #pragma once
 #include "array.h"
-#ifndef TV_CUDA_CC
+#if !defined(TV_CUDA_CC) && !defined(__CUDACC_RTC__)
 #include <string>
 #endif 
 namespace tv {

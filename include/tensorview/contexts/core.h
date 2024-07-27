@@ -19,13 +19,57 @@
 #include <tensorview/core/defs.h>
 #include <tensorview/cuda/driverops.h>
 #include <unordered_map>
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
 #include <cuda.h>
+#endif
+#ifdef __APPLE__
+#include "Metal/Metal.hpp"
 #endif
 
 namespace tv {
 
-enum class ContextType : int { kCudaStream = 1, kCublasLt = 2, kCudnn = 3 };
+enum class ContextType : int { kCudaStream = 1, kCublasLt = 2, kCudnn = 3, kAppleMetal = 4 };
+
+namespace detail {
+#ifdef __APPLE__
+template <class T>
+std::unique_ptr<T, void (*)(T *)> make_apple_mtl_ptr(T *ptr) {
+  return std::unique_ptr<T, void (*)(T *)>(ptr, [](T *ptr) {
+    if (ptr) {
+      ptr->release();
+    }
+  });
+}
+
+#endif 
+
+}
+
+#ifdef __APPLE__
+
+struct AppleMetalContext {
+    MTL::Device* device_ptr_ = nullptr;
+    // The command queue used to pass commands to the device.
+    MTL::CommandQueue* command_queue_ptr_ = nullptr;
+    AppleMetalContext() {
+        device_ptr_ = MTL::CreateSystemDefaultDevice();
+        TV_ASSERT_RT_ERR(device_ptr_, "Metal device not found");
+        command_queue_ptr_ = device_ptr_->newCommandQueue();
+        TV_ASSERT_RT_ERR(command_queue_ptr_, "Metal command queue not found");
+    }
+    ~AppleMetalContext() {
+        if (command_queue_ptr_) {
+            command_queue_ptr_->release();
+            command_queue_ptr_ = nullptr;
+        }
+        if (device_ptr_) {
+            device_ptr_->release();
+            device_ptr_ = nullptr;
+        }
+    }
+};
+
+#endif
 
 namespace detail {
 
@@ -54,7 +98,7 @@ private:
 
 public:
   ContextCore() {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     ContextManager stream_mgr;
     stream_mgr.creater = []() -> std::uintptr_t {
       cudaStream_t stream_cuda;
@@ -66,8 +110,19 @@ public:
     };
     ctx_mgrs_[ContextType::kCudaStream] = stream_mgr;
 #endif
+#ifdef __APPLE__
+    ContextManager mtl_compute_ctx_mgr;
+    mtl_compute_ctx_mgr.creater = []() -> std::uintptr_t {
+      auto* ptr = new AppleMetalContext();
+      return reinterpret_cast<std::uintptr_t>(ptr);
+    };
+    mtl_compute_ctx_mgr.deleter = [](std::uintptr_t ptr_int) {
+      auto* ptr = reinterpret_cast<AppleMetalContext*>(ptr_int);
+      delete ptr;
+    };
+    ctx_mgrs_[ContextType::kAppleMetal] = mtl_compute_ctx_mgr;
+#endif
   }
-
   void register_manager(ContextType type, ContextManager mgr) {
     TV_ASSERT_INVALID_ARG(ctx_mgrs_.find(type) == ctx_mgrs_.end(),
                           "manager exists");
@@ -134,7 +189,7 @@ public:
     return *this;
   }
 
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
   Context &set_cuda_stream(cudaStream_t stream) {
     check_ptr_valid();
     context_ptr_->create_raw_item(ContextType::kCudaStream,
@@ -143,13 +198,12 @@ public:
   }
   cudaStream_t cuda_stream() {
     check_ptr_valid();
-    return reinterpret_cast<cudaStream_t>(
-        context_ptr_->get_item(ContextType::kCudaStream));
+    return reinterpret_cast<cudaStream_t>(cuda_stream_int());
   }
 #endif
 
   Context &set_cuda_stream_int(std::uintptr_t stream) {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     check_ptr_valid();
     context_ptr_->create_raw_item(ContextType::kCudaStream,
                                   stream);
@@ -157,19 +211,54 @@ public:
     return *this;
   }
   void synchronize_stream() {
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     check_ptr_valid();
     checkCudaErrors(cudaStreamSynchronize(cuda_stream()));
+#endif
+  }
+  void synchronize() {
+#if defined(TV_CUDA_CC)
+    check_ptr_valid();
+    checkCudaErrors(cudaStreamSynchronize(cuda_stream()));
+#else 
+#ifdef __APPLE__
+    check_ptr_valid();
+    if (has_item(ContextType::kAppleMetal)) {
+      auto* ptr = reinterpret_cast<AppleMetalContext*>(context_ptr_->get_item(ContextType::kAppleMetal));
+      auto cb = detail::make_apple_mtl_ptr(ptr->command_queue_ptr_->commandBuffer());
+      TV_ASSERT_INVALID_ARG(cb, "command buffer is null");
+      cb->commit();
+      cb->waitUntilCompleted();
+    }
+#endif
 #endif
   }
 
   std::uintptr_t cuda_stream_int() {
     check_ptr_valid();
-#ifdef TV_CUDA
+#if defined(TV_CUDA_CC)
     return reinterpret_cast<std::uintptr_t>(cuda_stream());
 #else 
     return 0;
 #endif 
+  }
+  bool has_item(ContextType type) {
+    check_ptr_valid();
+    return context_ptr_->has_item(type);
+  }
+  std::uintptr_t get_item(ContextType type) {
+    check_ptr_valid();
+    return context_ptr_->get_item(type);
+  }
+  Context &create_apple_metal_context() {
+#ifdef __APPLE__
+
+    check_ptr_valid();
+    context_ptr_->create_item(ContextType::kAppleMetal);
+    return *this;
+#else 
+    TV_THROW_INVALID_ARG("Apple Metal is not supported in non-apple platform");
+#endif
   }
 
 
