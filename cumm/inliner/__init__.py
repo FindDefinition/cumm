@@ -119,7 +119,6 @@ def torch_tensor_to_tv(ten,
                        dtype: Optional[int] = None,
                        shape: Optional[List[int]] = None):
     # assert ten.is_contiguous(), "must be contiguous tensor"
-    ptr = ten.data_ptr()
     device = ten.device
     if device.type == "cpu":
         tv_device = -1
@@ -129,12 +128,22 @@ def torch_tensor_to_tv(ten,
         tv_device = 0
     else:
         raise NotImplementedError
+    if device.type == "mps":
+        # mps data ptr is MTLBuffer, not real ptr
+        # if we use ten.data_ptr(), the result will be 
+        # MTLBuffer + data_offset, which will cause
+        # segfault.
+        ptr = ten.untyped_storage().data_ptr()
+        offset = ten.storage_offset()
+    else:
+        ptr = ten.data_ptr()
+        offset = 0
     if shape is None:
         shape = list(ten.shape)
     if dtype is None:
         dtype = _cached_get_torch_dtype_to_tv()[ten.dtype]
     return tv.from_blob_strided(ptr, shape, list(ten.stride()), dtype,
-                                tv_device)
+                                tv_device, offset)
 
 
 def get_current_stream():
@@ -160,6 +169,7 @@ class TVTensorPlugin(InlineBuilderPlugin):
 
     def get_cpp_type(self, obj: Any, user_arg: Optional[Any] = None) -> str:
         if get_qualname_of_type(type(obj)) == TORCH_TENSOR_NAME:
+            # print("??????", obj.shape, obj.dtype)
             obj = torch_tensor_to_tv(obj)
         prefix = ""
         if obj.is_readonly():
@@ -310,6 +320,18 @@ class NVRTCInlineBuilder(InlineBuilder):
     
     def synchronize(self):
         self.ctx.synchronize()
+
+    def synchronize_if_apple_metal(self):
+        """This method is used for mixed torch and cumm inline cuda code.
+        cuda have a default stream and context but metal not, at least we
+        can't acquire that context in pytorch. this means
+        we have two metal command queue in single process, metal ops exec 
+        order on two queue is undefined. so if you mix torch and inline cuda
+        code, run sync before/after any torch operation. you can use 
+        `inliner.synchronize_if_apple_metal` to achieve this.
+        """
+        if compat.IsAppleSiliconMacOs:
+            self.ctx.synchronize()
 
     def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
         for k, v in self.modules.items():

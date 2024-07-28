@@ -11,7 +11,7 @@ TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(TV_METAL_CONSTANT const T *ptr) {
   return reinterpret_cast<const TV_METAL_CONSTANT tv::array<T, N> *>(ptr)[0];
 }
 template <typename T, size_t... Ns>
-TV_HOST_DEVICE_INLINE TV_METAL_CONSTANT tv::array_nd<T, Ns...>* reinterpret_array_nd_cast(TV_METAL_CONSTANT T *ptr) {
+TV_HOST_DEVICE_INLINE TV_METAL_CONSTANT tv::array_nd<T, Ns...>* reinterpret_cast_array_nd(TV_METAL_CONSTANT T *ptr) {
   return reinterpret_cast<TV_METAL_CONSTANT tv::array_nd<T, Ns...> *>(ptr);
 }
 
@@ -31,17 +31,17 @@ TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(const threadgroup T *ptr) {
 }
 
 template <typename T, size_t... Ns>
-TV_HOST_DEVICE_INLINE thread tv::array_nd<T, Ns...>* reinterpret_array_nd_cast(thread T *ptr) {
+TV_HOST_DEVICE_INLINE thread tv::array_nd<T, Ns...>* reinterpret_cast_array_nd(thread T *ptr) {
   return reinterpret_cast<thread tv::array_nd<T, Ns...> *>(ptr);
 }
 
 template <typename T, size_t... Ns>
-TV_HOST_DEVICE_INLINE device tv::array_nd<T, Ns...>* reinterpret_array_nd_cast(device T *ptr) {
+TV_HOST_DEVICE_INLINE device tv::array_nd<T, Ns...>* reinterpret_cast_array_nd(device T *ptr) {
   return reinterpret_cast<device tv::array_nd<T, Ns...> *>(ptr);
 }
 
 template <typename T, size_t... Ns>
-TV_HOST_DEVICE_INLINE threadgroup tv::array_nd<T, Ns...>* reinterpret_array_nd_cast(threadgroup T *ptr) {
+TV_HOST_DEVICE_INLINE threadgroup tv::array_nd<T, Ns...>* reinterpret_cast_array_nd(threadgroup T *ptr) {
   return reinterpret_cast<threadgroup tv::array_nd<T, Ns...> *>(ptr);
 }
 

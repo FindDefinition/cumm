@@ -5,7 +5,7 @@ import torch
 
 from cumm import tensorview as tv
 from cumm.constants import PACKAGE_ROOT, TENSORVIEW_INCLUDE_PATH
-from cumm.inliner import NVRTCInlineBuilder
+from cumm.inliner import NVRTCInlineBuilder, torch_tensor_to_tv
 from cumm.common import TensorView, TensorViewCPU, TensorViewNVRTCHashKernel, TensorViewArrayLinalg, TensorViewNVRTCDev, EigenLib
 import numpy as np
 
@@ -21,7 +21,7 @@ def test_metal_basic():
         inliner.kernel_1d("nvrtc_std", a.shape[0], 0, 
                         f"""
         namespace op = tv::arrayops;
-        auto a_ptr = reinterpret_cast<TV_METAL_DEVICE tv::array<float, 3>*>($a);
+        auto a_ptr = op::reinterpret_cast_array_nd<float, 3>($a);
         auto a_val = a_ptr[i];
         a_ptr[i] = a_val.op<op::transform_3d>($aa);
 
@@ -30,6 +30,7 @@ def test_metal_basic():
         if (i <= 32){{
             auto wtf_max = metal::numeric_limits<tv::parallel::vote_t>::max();
             $data[i] = tv::parallel::detail::lanemask_lt();
+            $data[i] = op::MathScalarOp<float>::atan2(1.0f, 1.0f);
             // $data[i] = tv::parallel::warp_size() - tv::parallel::lane_index();
         }}
         
@@ -43,11 +44,19 @@ def test_metal_basic():
 
     # mod = CummNVRTCModule([TensorViewNVRTCDev()], verbose=True)
 
+def test_metal_torch_cumm():
+    th_ten = torch.rand(64, 4321).float().to("mps")
+    th_ten2 = th_ten[1:]
+    ref = th_ten2.cpu().numpy()
+    tv_ten = torch_tensor_to_tv(th_ten2)
+    my = tv_ten.cpu().numpy()
+
+    print(np.linalg.norm(ref - my))
+
+
 def test_metal_hash():
     keys_np = np.random.randint(0, 10, size=(2500)).astype(np.int32)
     # we still need to use .cuda to make code compatabile with cuda
-    th_ten = torch.rand(1).to("mps")
-    print(th_ten.is_mps)
     keys = tv.from_numpy(keys_np).cuda()
     wtf = tv.zeros([100], tv.float16, 0)
     keys_debug = tv.zeros([keys.shape[0]], tv.uint32, 0)
@@ -72,7 +81,6 @@ def test_metal_hash():
     inliner.kernel_1d("collect_unique_res", hashkeys.dim(0), 0, f"""
     using table_t = tv::hash::LinearHashTableSplit<int, int>;
     table_t table($hashkeys, $hashvalues, $hash_length);
-    auto wtf_ptr = $th_ten;
     if ($hashkeys[i] != table_t::empty_key){{
         tv::parallel::atomicAdd($cnt, 1);
     }}
@@ -81,4 +89,4 @@ def test_metal_hash():
     print(cnt.cpu().numpy())
 
 if __name__ == "__main__":
-    test_metal_hash()
+    test_metal_torch_cumm()

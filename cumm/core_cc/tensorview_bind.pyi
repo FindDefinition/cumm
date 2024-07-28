@@ -1,9 +1,9 @@
 from typing import overload, Any, Callable, Dict, List, Optional, Set, Tuple, Type, Union
 from pccm.stubs import EnumValue, EnumClassValue, enum
-class TensorViewBind:
+class AppleMetalImpl:
     @staticmethod
     def hello() -> None: ...
-class AppleMetalImpl:
+class TensorViewBind:
     @staticmethod
     def hello() -> None: ...
 # Copyright 2021 Yan Yan
@@ -440,7 +440,8 @@ def from_blob(ptr: int,
               shape: List[int],
               stride: List[int],
               dtype: int,
-              device: int = -1) -> Tensor:
+              device: int,
+              storage_offset: int = 0) -> Tensor:
     ...
 
 
@@ -449,7 +450,8 @@ def from_const_blob(ptr: int,
                     shape: List[int],
                     stride: List[int],
                     dtype: int,
-                    device: int = -1) -> Tensor:
+                    device: int,
+                    storage_offset: int = 0) -> Tensor:
     ...
 
 
@@ -457,7 +459,8 @@ def from_const_blob(ptr: int,
 def from_blob(ptr: int,
               shape: List[int],
               dtype: int,
-              device: int = -1) -> Tensor:
+              device: int,
+              storage_offset: int = 0) -> Tensor:
     ...
 
 
@@ -465,7 +468,8 @@ def from_blob(ptr: int,
 def from_const_blob(ptr: int,
                     shape: List[int],
                     dtype: int,
-                    device: int = -1) -> Tensor:
+                    device: int,
+                    storage_offset: int = 0) -> Tensor:
     ...
 
 

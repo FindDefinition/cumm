@@ -663,45 +663,45 @@ def zeros(shape: List[int],
 
 
 def from_blob_strided(ptr: int, shape: List[int], stride: List[int],
-                      dtype: Union[np.dtype, int], device: int) -> Tensor:
+                      dtype: Union[np.dtype, int], device: int, storage_offset: int = 0) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
-    return tensorview_bind.from_blob(ptr, shape, stride, tv_dtype, device)
+    return tensorview_bind.from_blob(ptr, shape, stride, tv_dtype, device, storage_offset)
 
 
 def from_const_blob_strided(ptr: int, shape: List[int], stride: List[int],
                             dtype: Union[np.dtype,
-                                         int], device: int) -> Tensor:
+                                         int], device: int, storage_offset: int = 0) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
     return tensorview_bind.from_const_blob(ptr, shape, stride, tv_dtype,
-                                           device)
+                                           device, storage_offset)
 
 
 def from_blob(ptr: int, shape: List[int], dtype: Union[np.dtype, int],
-              device: int) -> Tensor:
+              device: int, storage_offset: int = 0) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
-    return tensorview_bind.from_blob(ptr, shape, tv_dtype, device)
+    return tensorview_bind.from_blob(ptr, shape, tv_dtype, device, storage_offset)
 
 
 def from_const_blob(ptr: int, shape: List[int], dtype: Union[np.dtype, int],
-                    device: int) -> Tensor:
+                    device: int, storage_offset: int = 0) -> Tensor:
     if isinstance(dtype, int):
         assert dtype in ALL_TV_TENSOR_DTYPES
         tv_dtype = dtype
     else:
         tv_dtype = NPDTYPE_TO_TENSOR_MAP[np.dtype(dtype)]
-    return tensorview_bind.from_const_blob(ptr, shape, tv_dtype, device)
+    return tensorview_bind.from_const_blob(ptr, shape, tv_dtype, device, storage_offset)
 
 
 def empty(shape: List[int],

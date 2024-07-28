@@ -21,7 +21,6 @@
 #if defined(TV_HARDWARE_ACC_CUDA)
 #include <ATen/cuda/CUDAContext.h>
 #endif
-
 namespace tv {
 
 #if defined(TV_HARDWARE_ACC_CUDA)
@@ -231,7 +230,18 @@ inline tv::Tensor torch2tensor(const torch::Tensor &tensor) {
   if (tensor.device().type() == torch::kCUDA){
     device = 0;
   }
-  return tv::from_blob(tensor.data_ptr(), shape, stride, torch_type_to_tv(tensor.scalar_type()), device);
+  if (tensor.device().type() == torch::kMPS){
+    device = 0;
+  }
+  if (tensor.device().type() == torch::kMPS){
+    auto storage_ptr = tensor.storage().mutable_data();
+    auto storage_offset = tensor.storage_offset();
+    return tv::from_blob(storage_ptr, shape, stride, torch_type_to_tv(tensor.scalar_type()), device, storage_offset);
+
+  } else{
+    return tv::from_blob(tensor.data_ptr(), shape, stride, torch_type_to_tv(tensor.scalar_type()), device);
+
+  }
 }
 
 inline torch::Tensor tensor2torch(tv::Tensor tensor, bool cast_uint_to_int = false) {
@@ -250,9 +260,28 @@ inline torch::Tensor tensor2torch(tv::Tensor tensor, bool cast_uint_to_int = fal
   if (tensor.device() == -1){
     opt = opt.device(torch::kCPU);
   }else{
+#if defined(TV_HARDWARE_ACC_CUDA)
     opt = opt.device(torch::kCUDA);
+#elif defined(TV_HARDWARE_ACC_METAL)
+    opt = opt.device(torch::kMPS);
+#else 
+    TV_THROW_RT_ERR("unknown device, cumm only support mps and cuda.");
+#endif
   }
-  return torch::from_blob(tensor.raw_data(), torch::IntArrayRef(shape), torch::IntArrayRef(stride), opt);
+  if (tensor.device() == -1){
+    return torch::from_blob(tensor.raw_data(), torch::IntArrayRef(shape), torch::IntArrayRef(stride), opt);
+  }else{
+#ifdef TV_HARDWARE_ACC_METAL
+    // currently pytorch don't support mps from_blob.
+    TV_THROW_INVALID_ARG("currently pytorch don't support mps from_blob");
+    // return at::from_blob(tensor.storage()->apple_metal_buffer_ptr(), 
+    //   torch::IntArrayRef(shape), torch::IntArrayRef(stride), tensor.storage()->offset(), 
+    //   [](auto* ptr){}, opt);
+#else
+    return torch::from_blob(tensor.raw_data(), torch::IntArrayRef(shape), torch::IntArrayRef(stride), opt);
+#endif
+  }
+
 }
 
 

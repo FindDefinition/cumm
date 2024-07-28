@@ -168,7 +168,9 @@ inline device T&& forward(device typename remove_reference<T>::type&& t) TV_NOEX
     return static_cast<device T&&>(t);
 }
 
-
+#ifndef M_PI
+#define M_PI M_PI_F // metal don't support double for now
+#endif
 /*
 for non-array, non-function, non-point type T,
 std::decay_t<T> is:

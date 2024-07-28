@@ -432,7 +432,8 @@ def from_blob(ptr: int,
               shape: List[int],
               stride: List[int],
               dtype: int,
-              device: int = -1) -> Tensor:
+              device: int,
+              storage_offset: int = 0) -> Tensor:
     ...
 
 
@@ -441,7 +442,8 @@ def from_const_blob(ptr: int,
                     shape: List[int],
                     stride: List[int],
                     dtype: int,
-                    device: int = -1) -> Tensor:
+                    device: int,
+                    storage_offset: int = 0) -> Tensor:
     ...
 
 
@@ -449,7 +451,8 @@ def from_const_blob(ptr: int,
 def from_blob(ptr: int,
               shape: List[int],
               dtype: int,
-              device: int = -1) -> Tensor:
+              device: int,
+              storage_offset: int = 0) -> Tensor:
     ...
 
 
@@ -457,7 +460,8 @@ def from_blob(ptr: int,
 def from_const_blob(ptr: int,
                     shape: List[int],
                     dtype: int,
-                    device: int = -1) -> Tensor:
+                    device: int,
+                    storage_offset: int = 0) -> Tensor:
     ...
 
 

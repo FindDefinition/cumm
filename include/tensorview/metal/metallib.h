@@ -136,7 +136,7 @@ public:
           computeEncoder->setBuffer(
               reinterpret_cast<MTL::Buffer *>(
                   ten.storage()->apple_metal_buffer_ptr()),
-              ten.byte_offset(), buffer_cnt);
+              ten.byte_offset() + ten.storage()->byte_offset(), buffer_cnt);
         }
         buffer_cnt += 1;
         break;
@@ -147,7 +147,7 @@ public:
         computeEncoder->setBuffer(
             reinterpret_cast<MTL::Buffer *>(
                 ten.storage()->apple_metal_buffer_ptr()),
-            ten.byte_offset(), buffer_cnt);
+            ten.byte_offset() + ten.storage()->byte_offset(), buffer_cnt);
         buffer_cnt += 1;
         break;
       }

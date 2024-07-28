@@ -716,18 +716,18 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
       return std::vector<int64_t>(shape.begin(), shape.end());
     });
   // from_blob is used for pytorch.
-  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, std::vector<int64_t> stride, int dtype, int device){
-      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, stride, tv::DType(dtype), device);
-  }, py::arg("ptr"), py::arg("shape"), py::arg("stride"), py::arg("dtype"), py::arg("device")); 
-  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, std::vector<int64_t> stride, int dtype, int device){
-      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, stride, tv::DType(dtype), device);
-  }, py::arg("ptr"), py::arg("shape"), py::arg("stride"), py::arg("dtype"), py::arg("device")); 
-  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
-      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, tv::DType(dtype), device);
-  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
-  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device){
-      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, tv::DType(dtype), device);
-  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device")); 
+  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, std::vector<int64_t> stride, int dtype, int device, int storage_offset){
+      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, stride, tv::DType(dtype), device, storage_offset);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("stride"), py::arg("dtype"), py::arg("device"), py::arg("storage_offset") = 0); 
+  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, std::vector<int64_t> stride, int dtype, int device, int storage_offset){
+      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, stride, tv::DType(dtype), device, storage_offset);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("stride"), py::arg("dtype"), py::arg("device"), py::arg("storage_offset") = 0); 
+  m.def("from_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device, int storage_offset){
+      return tv::from_blob(reinterpret_cast<void*>(ptr_uint), shape, tv::DType(dtype), device, storage_offset);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device"), py::arg("storage_offset") = 0); 
+  m.def("from_const_blob", [](std::uintptr_t ptr_uint, std::vector<int64_t> shape, int dtype, int device, int storage_offset){
+      return tv::from_blob(reinterpret_cast<const void*>(ptr_uint), shape, tv::DType(dtype), device, storage_offset);
+  }, py::arg("ptr"), py::arg("shape"), py::arg("dtype"), py::arg("device"), py::arg("storage_offset") = 0); 
   m.def("zeros", [](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed){
     return tv::zeros(shape, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
