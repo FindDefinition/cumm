@@ -182,7 +182,7 @@ template <typename T> TV_DEVICE_INLINE T atomicMax(threadgroup metal::atomic<T> 
 template <typename T1, typename T2>
 TV_DEVICE_INLINE DataPair<T1, T2> atomicArgMax(TV_METAL_DEVICE DataPair<T1, T2> *addr, T1 first,
                                          T2 second) {
-  // for apple, only M3+ support 64 bit atomic.
+  // for apple, this function only support 32bit kv.
   using atomic_ptr_t = typename detail::AtomicDataType<sizeof(T1)>::type;
   detail::DataPairUnion<T1, T2> ret =
       *(reinterpret_cast<TV_METAL_DEVICE detail::DataPairUnion<T1, T2> *>(addr));
@@ -192,16 +192,22 @@ TV_DEVICE_INLINE DataPair<T1, T2> atomicArgMax(TV_METAL_DEVICE DataPair<T1, T2> 
   while (first > ret.data.first) {
     atomic_ptr_t old = ret.val;
 #if defined(TV_METAL_RTC)
-    bool success = metal::atomic_compare_exchange_weak_explicit(
-        (device metal::atomic<atomic_ptr_t> *)addr, &old, expected.val, metal::memory_order_relaxed,
-        metal::memory_order_relaxed);
-    if (!success){
-      ret.val = addr->val;
-    }
+    atomic_ptr_t old_for_apple = ret.val;
+    atomic_ptr_t cur;
+    bool success;
+    do {
+      success = metal::atomic_compare_exchange_weak_explicit(
+          (device metal::atomic<atomic_ptr_t> *)addr, &old_for_apple, expected.val, metal::memory_order_relaxed,
+          metal::memory_order_relaxed);
+      cur = old_for_apple;
+      old_for_apple = old;
+    } while (!success && old_for_apple == cur);
+    ret.val = cur;
 #else
     ret.val = atomicCAS((atomic_ptr_t *)addr, old, expected.val);
 #endif
     if (ret.val == old)
+      // insert success
       break;
   }
   return ret.data;
@@ -219,12 +225,16 @@ TV_DEVICE_INLINE DataPair<T1, T2> atomicArgMin(TV_METAL_DEVICE DataPair<T1, T2> 
   while (first < ret.data.first) {
     atomic_ptr_t old = ret.val;
 #if defined(TV_METAL_RTC)
-    bool success = metal::atomic_compare_exchange_weak_explicit(
-        (device metal::atomic<atomic_ptr_t>) addr, &old, expected.val, metal::memory_order_relaxed,
-        metal::memory_order_relaxed);
-    if (!success){
-      ret.val = addr->val;
-    }
+    atomic_ptr_t old_for_apple = ret.val;
+    atomic_ptr_t cur;
+    bool success;
+    do {
+      success = metal::atomic_compare_exchange_weak_explicit(
+          (device metal::atomic<atomic_ptr_t> *)addr, &old_for_apple, expected.val, metal::memory_order_relaxed,
+          metal::memory_order_relaxed);
+      cur = old_for_apple;
+      old_for_apple = old;
+    } while (!success && old_for_apple == cur);
 #else
     ret.val = atomicCAS((atomic_ptr_t *)addr, old, expected.val);
 #endif

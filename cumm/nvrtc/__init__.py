@@ -761,13 +761,14 @@ class CummMetalModule:
                         str(inc_dir), "-o",
                         str(out_name)
                     ])
-                    # read ir and pass to llvmlite
-                    # xcrun -sdk macosx metallib -o LightsAndShadow.metallib Lights.metalar Shadow.ir
                     subprocess.check_output([
                         "xcrun", "-sdk", "macosx", "metallib",
                         "-o", str(out_lib_name), str(out_name)
                     ])
                 except:
+                    for k, v in self.mod_params.headers.items():
+                        print(f"------ Header {k} -------")
+                        print(v)
                     print("Build Error. Opts: {} Kernel Code:\n{}".format(opts, self.mod_params.debug_code))
                     raise
             with out_lib_name.open("rb") as f:

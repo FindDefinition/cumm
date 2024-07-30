@@ -144,8 +144,11 @@ template <typename K> struct Murmur3Hash {
     k ^= k >> 16;
     return k;
   }
-  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { return x; }
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { 
+    return detail::platform_not_support_atomic_64_metas<K>::map_user_key(x);
+  }
   TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
+    key = detail::platform_not_support_atomic_64_metas<K>::unmap_user_key(key);
     return hash(key);
   }
 };
@@ -162,11 +165,13 @@ template <typename K> struct SpatialHash {
   }
   TV_HOST_DEVICE_INLINE static key_type encode(uint32_t x, uint32_t y,
                                                uint32_t z) {
-    return Morton<K>::encode(x, y, z);
+    auto res = Morton<key_type>::encode(x, y, z);
+    return detail::platform_not_support_atomic_64_metas<K>::map_user_key(res);
   }
-  // this function hash a single number by decode and hash
+  // this function hash a single number by decode and hash from existed key
   TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
-    auto decoded = Morton<K>::decode(key);
+    key = detail::platform_not_support_atomic_64_metas<K>::unmap_user_key(key);
+    auto decoded = Morton<key_type>::decode(key);
     return hash(decoded[0], decoded[1], decoded[2]);
   }
 };
@@ -175,8 +180,11 @@ template <typename K> struct IdentityHash {
   using key_type = tv::hash::to_unsigned_t<K>;
 
   TV_HOST_DEVICE_INLINE static key_type hash(key_type k) { return k; }
-  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { return x; }
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { 
+    return detail::platform_not_support_atomic_64_metas<K>::map_user_key(x);
+  }
   TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
+    key = detail::platform_not_support_atomic_64_metas<K>::unmap_user_key(key);
     return hash(key);
   }
 };
@@ -222,8 +230,11 @@ struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
     }
     return ret;
   }
-  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { return x; }
+  TV_HOST_DEVICE_INLINE static key_type encode(key_type x) { 
+    return detail::platform_not_support_atomic_64_metas<K>::map_user_key(x);
+  }
   TV_HOST_DEVICE_INLINE static key_type hash_scalar(key_type key) {
+    key = detail::platform_not_support_atomic_64_metas<K>::unmap_user_key(key);
     return hash(key);
   }
 };

@@ -48,25 +48,150 @@ std::unique_ptr<T, void (*)(T *)> make_apple_mtl_ptr(T *ptr) {
 #ifdef TV_HARDWARE_ACC_METAL
 
 struct AppleMetalContext {
+    enum class SyncType {
+      NONE,               // no commit to command buffer
+      COMMIT,             // commit and flush the command buffer
+      COMMIT_AND_WAIT,    // flush and wait for command buffer execution to finish
+      COMMIT_AND_CONTINUE,// commit and continue with a new underlying command buffer
+    };
+private:
     MTL::Device* device_ptr_ = nullptr;
     // The command queue used to pass commands to the device.
     MTL::CommandQueue* command_queue_ptr_ = nullptr;
+    dispatch_queue_t dq_ptr_ = nullptr;
+    MTL::CommandBuffer* command_buffer_ptr_external_ = nullptr;
+    NS::SharedPtr<MTL::CommandBuffer> _commandBuffer, _prevCommandBuffer; 
+    bool from_blob_ = false;
+    bool _enableCommitAndContinue = true;
+public:
     AppleMetalContext() {
         device_ptr_ = MTL::CreateSystemDefaultDevice();
         TV_ASSERT_RT_ERR(device_ptr_, "Metal device not found");
         command_queue_ptr_ = device_ptr_->newCommandQueue();
         TV_ASSERT_RT_ERR(command_queue_ptr_, "Metal command queue not found");
+        dq_ptr_ = dispatch_queue_create("tv metal gpu stream", nullptr);
     }
+
+    AppleMetalContext(MTL::CommandBuffer* cb, dispatch_queue_t dq): from_blob_(true) {
+        device_ptr_ = MTL::CreateSystemDefaultDevice();
+        TV_ASSERT_RT_ERR(device_ptr_, "Metal device not found");
+        command_buffer_ptr_external_ = cb;
+        TV_ASSERT_RT_ERR(command_buffer_ptr_external_, "Metal command queue not found");
+        dq_ptr_ = dq;
+    }
+
+    void update_context_from_blob(MTL::CommandBuffer* cb, dispatch_queue_t dq) {
+      TV_ASSERT_RT_ERR(from_blob_, "you can't update context from blob when context is not from blob");
+      command_buffer_ptr_external_ = cb;
+      dq_ptr_ = dq;
+    }
+
+    __attribute__((visibility("default"))) static std::shared_ptr<AppleMetalContext> getInstance()
+#ifndef TV_STATIC_VARIABLE_IMPLEMENTATION
+    {
+      TV_THROW_RT_ERR("you must include this in a source file with TV_STATIC_VARIABLE_IMPLEMENTATION defined");
+    }
+#else 
+    ;
+#endif
     ~AppleMetalContext() {
-        if (command_queue_ptr_) {
-            command_queue_ptr_->release();
-            command_queue_ptr_ = nullptr;
+      if (device_ptr_) {
+          device_ptr_->release();
+          device_ptr_ = nullptr;
+      }
+      if (command_queue_ptr_) {
+          command_queue_ptr_->release();
+          command_queue_ptr_ = nullptr;
+      }
+      if (!from_blob_){
+        if (dq_ptr_){
+          dispatch_release(dq_ptr_);
         }
-        if (device_ptr_) {
-            device_ptr_->release();
-            device_ptr_ = nullptr;
-        }
+      }
     }
+    bool is_from_blob() const { return from_blob_; }
+    MTL::Device* device() const {return device_ptr_;}
+    dispatch_queue_t queue() const { return dq_ptr_; }
+    MTL::CommandQueue* commandQueue() const { 
+      TV_ASSERT_RT_ERR(command_queue_ptr_, "you can't get command queue when context is from blob");
+      return command_queue_ptr_; 
+    }
+
+    MTL::CommandBuffer* commandBuffer() {
+      if (from_blob_){
+        return command_buffer_ptr_external_;
+      }
+      if (!_commandBuffer) {
+        _commandBuffer = NS::TransferPtr(command_queue_ptr_->commandBuffer());
+      }
+      return _commandBuffer.get();
+    }
+    void synchronize(SyncType syncType) {
+      TV_ASSERT_RT_ERR(!from_blob_, "you can't synchronize when context is from blob");
+      // endKernelCoalescing();
+      switch (syncType) {
+        case SyncType::NONE:
+          // typically in GPU to GPU copies we won't commit explicitly
+          break;
+        case SyncType::COMMIT:
+          commit();
+          break;
+        case SyncType::COMMIT_AND_WAIT:
+          commitAndWait();
+          break;
+        case SyncType::COMMIT_AND_CONTINUE:
+          TV_ASSERT_RT_ERR(_enableCommitAndContinue,
+                                          "CommitAndContinue is called but it is disabled globally!");
+          commitAndContinue();
+          break;
+      }
+    }   
+
+    void commit() {
+      TV_ASSERT_RT_ERR(!from_blob_, "you can't synchronize when context is from blob");
+      if (_enableCommitAndContinue) {
+        commitAndContinue();
+      } else {
+        flush();
+      }
+    }
+
+    void flush() {
+      TV_ASSERT_RT_ERR(!from_blob_, "you can't synchronize when context is from blob");
+      if (_commandBuffer) {
+        _commandBuffer->commit();
+        // if commitAndContinue is disabled (e.g., for Profiler), we keep the command
+        // buffer so we could wait on it later, if required.
+        if (!_enableCommitAndContinue) {
+          _prevCommandBuffer = _commandBuffer;
+        } else {
+          _commandBuffer.reset();
+        }
+        _commandBuffer = NS::SharedPtr<MTL::CommandBuffer>{};
+      }
+    }
+    void commitAndContinue() {
+      TV_ASSERT_RT_ERR(!from_blob_, "you can't synchronize when context is from blob");
+      TV_ASSERT_RT_ERR(_commandBuffer, "error");
+      _commandBuffer->commit();
+      _commandBuffer = NS::TransferPtr(command_queue_ptr_->commandBuffer());
+    }
+    void commitAndWait() {
+      TV_ASSERT_RT_ERR(!from_blob_, "you can't synchronize when context is from blob");
+      if (_prevCommandBuffer) {
+        // the previous command buffer (if exists) has already been committed,
+        // so we just wait until it's completed and then dispose it.
+        _prevCommandBuffer->waitUntilCompleted();
+        _prevCommandBuffer = NS::SharedPtr<MTL::CommandBuffer>{};
+      }
+
+      if (_commandBuffer) {
+        _commandBuffer->commit();
+        _commandBuffer->waitUntilCompleted();
+        _commandBuffer = NS::SharedPtr<MTL::CommandBuffer>{};
+      }
+    }
+
 };
 
 #endif
@@ -76,6 +201,7 @@ namespace detail {
 struct ContextValue {
   std::uintptr_t ptr_int;
   bool from_blob;
+  void(*deleter)(std::uintptr_t) = nullptr;
 };
 
 struct ContextManager {
@@ -121,7 +247,11 @@ public:
       delete ptr;
     };
     ctx_mgrs_[ContextType::kAppleMetal] = mtl_compute_ctx_mgr;
+#ifdef TV_STATIC_VARIABLE_IMPLEMENTATION
+    create_raw_item(ContextType::kAppleMetal, reinterpret_cast<std::uintptr_t>(AppleMetalContext::getInstance().get()));
 #endif
+#endif
+
   }
   void register_manager(ContextType type, ContextManager mgr) {
     TV_ASSERT_INVALID_ARG(ctx_mgrs_.find(type) == ctx_mgrs_.end(),
@@ -139,14 +269,24 @@ public:
     ctx_ptrs_[type] = ContextValue{ctx_mgrs_[type].creater(), false};
   }
 
-  void create_raw_item(ContextType type, std::uintptr_t handle) {
+  void create_raw_item(ContextType type, std::uintptr_t handle, void(*deleter)(std::uintptr_t) = nullptr) {
     TV_ASSERT_RT_ERR(ctx_ptrs_.find(type) == ctx_ptrs_.end(),
                      "context item exists");
-    ctx_ptrs_[type] = ContextValue{handle, true};
+    ctx_ptrs_[type] = ContextValue{handle, true, deleter};
   }
 
   bool has_item(ContextType type) {
     return ctx_ptrs_.find(type) != ctx_ptrs_.end();
+  }
+
+  void remove_item(ContextType type) {
+    auto ptr = ctx_ptrs_.find(type);
+    if (ptr != ctx_ptrs_.end()) {
+      if (!ptr->second.from_blob) {
+        ctx_mgrs_[type].deleter(ptr->second.ptr_int);
+      }
+      ctx_ptrs_.erase(ptr);
+    }
   }
 
   std::uintptr_t get_item(ContextType type) {
@@ -161,6 +301,10 @@ public:
     for (auto &pair : ctx_ptrs_) {
       if (!pair.second.from_blob) {
         ctx_mgrs_[pair.first].deleter(pair.second.ptr_int);
+      }else{
+        if (pair.second.deleter){
+          pair.second.deleter(pair.second.ptr_int);
+        }
       }
     }
   }
@@ -185,6 +329,9 @@ public:
 
   Context &create_cuda_stream() {
     check_ptr_valid();
+    if (context_ptr_->has_item(ContextType::kCudaStream)){
+      context_ptr_->remove_item(ContextType::kCudaStream);
+    }
     context_ptr_->create_item(ContextType::kCudaStream);
     return *this;
   }
@@ -225,10 +372,7 @@ public:
     check_ptr_valid();
     if (has_item(ContextType::kAppleMetal)) {
       auto* ptr = reinterpret_cast<AppleMetalContext*>(context_ptr_->get_item(ContextType::kAppleMetal));
-      auto cb = detail::make_apple_mtl_ptr(ptr->command_queue_ptr_->commandBuffer());
-      TV_ASSERT_INVALID_ARG(cb, "command buffer is null");
-      cb->commit();
-      cb->waitUntilCompleted();
+      ptr->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
     }
 #endif
 #endif
@@ -254,6 +398,9 @@ public:
 #ifdef TV_HARDWARE_ACC_METAL
 
     check_ptr_valid();
+    if (context_ptr_->has_item(ContextType::kAppleMetal)){
+      context_ptr_->remove_item(ContextType::kAppleMetal);
+    }
     context_ptr_->create_item(ContextType::kAppleMetal);
     return *this;
 #else 
@@ -261,6 +408,29 @@ public:
 #endif
   }
 
+  Context &create_or_update_metal_context_from_blob(std::uintptr_t cb, std::uintptr_t dq) {
+#ifdef TV_HARDWARE_ACC_METAL
+    auto deleter = [](std::uintptr_t ptr_int) {
+      auto* ptr = reinterpret_cast<AppleMetalContext*>(ptr_int);
+      delete ptr;
+    };
+    auto ctx = new AppleMetalContext(reinterpret_cast<MTL::CommandBuffer*>(cb), reinterpret_cast<dispatch_queue_t>(dq));
+    check_ptr_valid();
+    if (context_ptr_->has_item(ContextType::kAppleMetal)){
+      AppleMetalContext* ptr = reinterpret_cast<AppleMetalContext*>(context_ptr_->get_item(ContextType::kAppleMetal));
+      if (!ptr->is_from_blob()){
+        context_ptr_->remove_item(ContextType::kAppleMetal);
+      }else{
+        ptr->update_context_from_blob(reinterpret_cast<MTL::CommandBuffer*>(cb), reinterpret_cast<dispatch_queue_t>(dq));
+        return *this;
+      }
+    }
+    context_ptr_->create_raw_item(ContextType::kAppleMetal, reinterpret_cast<std::uintptr_t>(ctx), deleter);
+    return *this;
+#else 
+    TV_THROW_INVALID_ARG("Apple Metal is not supported in non-apple platform");
+#endif
+  }
 
 };
 } // namespace tv

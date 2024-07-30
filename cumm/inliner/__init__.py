@@ -59,7 +59,9 @@ my vscode highlight extension config:
 
 """
 
+import abc
 import contextlib
+import contextvars
 import re
 import pccm
 from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME, PCCM_INLINE_FUNCTION_NAME_FORMAT
@@ -75,9 +77,29 @@ from cumm.common import TensorViewNVRTC, GemmBasic, TensorViewViewClass
 from cumm.gemm.codeops import div_up
 from cumm.tensorview import nullcontext
 from ccimport import compat
+
+_TORCH_MPS_SYNC: Callable[[], Any] | None = None 
+
 _TORCH_DTYPE_TO_TV: Dict[Any, int] = {}
 TORCH_TENSOR_NAME = "torch.Tensor"
 
+
+
+class InlinerKernelLaunchContext:
+    pass
+
+INLINER_KERNEL_CTX: contextvars.ContextVar[InlinerKernelLaunchContext | None] = contextvars.ContextVar("InlinerKernelLaunchContext", default=None)
+
+@contextlib.contextmanager
+def _enter_inliner_kernel_ctx(ctx: InlinerKernelLaunchContext):
+    token = INLINER_KERNEL_CTX.set(ctx)
+    try:
+        yield ctx
+    finally:
+        INLINER_KERNEL_CTX.reset(token)
+
+def _has_inliner_kernel_ctx():
+    return INLINER_KERNEL_CTX.get() is not None
 
 class LaunchParam:
     def __init__(self,
@@ -148,6 +170,8 @@ def torch_tensor_to_tv(ten,
 
 def get_current_stream():
     import torch
+    if compat.IsAppleSiliconMacOs:
+        return 0
     return torch.cuda.current_stream().cuda_stream
 
 
@@ -273,6 +297,35 @@ _DEFAULT_KERNEL_PLUGINS: Dict[str, InlineBuilderPlugin] = {
 
 _CUMM_KERNEL_1D_SIZE_NAME = "_cumm_pccm_inline_size"
 
+def identity():
+    return
+
+def _default_mps_sync_func():
+    global _TORCH_MPS_SYNC
+    if _TORCH_MPS_SYNC is None:
+        try:
+            import torch 
+            _TORCH_MPS_SYNC = torch.mps.synchronize 
+        except:
+            _TORCH_MPS_SYNC = identity 
+    _TORCH_MPS_SYNC()
+
+class MPSContextBase(abc.ABC):
+    @abc.abstractmethod
+    def get_command_buffer(self) -> int:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def get_dispatch_queue(self) -> int:
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def commit(self):
+        raise NotImplementedError
+
+    # @abc.abstractmethod
+    # def synchronize(self):
+    #     raise NotImplementedError
 
 class NVRTCInlineBuilder(InlineBuilder):
     def __init__(
@@ -289,7 +342,9 @@ class NVRTCInlineBuilder(InlineBuilder):
             remote_addr: str = "",
             default_deps: Optional[List[Type[pccm.Class]]] = None,
             std: str = "c++14",
-            context: Optional[tv.Context] = None):
+            context: Optional[tv.Context] = None,
+            mps_sync_func: Callable[[], None] = _default_mps_sync_func,
+            mps_context: Optional[MPSContextBase] = None):
         if plugins is None:
             plugins = _DEFAULT_KERNEL_PLUGINS
         if default_deps is None:
@@ -312,14 +367,40 @@ class NVRTCInlineBuilder(InlineBuilder):
         self.maximum_1d_threads = 512
         self.measure_build_time = measure_build_time
         self._remote_addr = remote_addr
-        
-        self.ctx = tv.Context() if context is None else context
+        self._mps_sync_func = mps_sync_func
+        self._mps_context = mps_context
+        self.ctx = tv.Context() if context is None or mps_context is not None else context
         if compat.InMacOS and not self.ctx.has_apple_metal_context():
-            self.ctx.create_apple_metal_context()
-
+            if self._mps_context is None:
+                self.ctx.create_apple_metal_context()
+            else:
+                self.ctx.create_or_update_metal_context_from_blob(self._mps_context.get_command_buffer(),
+                                                                self._mps_context.get_dispatch_queue()) 
     
     def synchronize(self):
         self.ctx.synchronize()
+
+    @contextlib.contextmanager
+    def enter_inliner_scope(self):
+        if self._mps_context is not None:
+            # if we use context from pytorch, we don't need to perform sync
+            # because kernel will run on the same context.
+            # the only problem is we must update the context after any pytorch operation.
+            self.ctx.create_or_update_metal_context_from_blob(self._mps_context.get_command_buffer(),
+                                                            self._mps_context.get_dispatch_queue()) 
+            yield
+        elif not compat.IsAppleSiliconMacOs or _has_inliner_kernel_ctx():
+            yield 
+        else:
+            # sync all mps operations from other lib
+            self._mps_sync_func()
+            # you shouldn't call any pytorch operation in this scope.
+            try:
+                with _enter_inliner_kernel_ctx(InlinerKernelLaunchContext()):
+                    yield 
+            finally:
+                # sync all inliner operation
+                self.synchronize()
 
     def synchronize_if_apple_metal(self):
         """This method is used for mixed torch and cumm inline cuda code.
@@ -495,10 +576,14 @@ class NVRTCInlineBuilder(InlineBuilder):
                  user_args: Optional[_NVRTCInlineParams] = None):
         assert user_args is not None
         launch = user_args.launch.copy()
-        launch.ctx = self.ctx
+        if launch.ctx is None or not launch.ctx.has_apple_metal_context():
+            launch.ctx = self.ctx
         if isinstance(func, CummMetalModule):
-            return func.run_kernel(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args, perf_context=user_args.perf_context)
-
+            with self.enter_inliner_scope():
+                res = func.run_kernel(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args, perf_context=user_args.perf_context)
+                if self._mps_context is not None:
+                    self._mps_context.commit()
+                return res
         else:
             if user_args.run_in_process:
                 return func.run_kernel_in_spawn_process(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args)
@@ -527,11 +612,11 @@ class NVRTCInlineBuilder(InlineBuilder):
                 code = code_pccm
             code.add_dependency(TensorViewViewClass)
         return self.inline(name,
-                           code,
-                           ".cu",
-                           _frame_cnt=_frame_cnt,
-                           user_arg=user_arg,
-                           disable_cache=disable_cache)
+                        code,
+                        ".cu",
+                        _frame_cnt=_frame_cnt,
+                        user_arg=user_arg,
+                        disable_cache=disable_cache)
     
     def kernel_raw_capture_tview(self,
                                 name: str,

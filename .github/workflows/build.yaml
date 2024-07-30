@@ -151,7 +151,7 @@ jobs:
         run: |
           export CUMM_DISABLE_JIT="1"
           git clone https://github.com/bkaradzic/metal-cpp.git
-          export CUMM_APPLE_METAL_CPP_ROOT=./metal-cpp
+          export CUMM_APPLE_METAL_CPP_ROOT=$pwd/metal-cpp
           pip install pccm pybind11
           python -m build --wheel --outdir dist/ .
 

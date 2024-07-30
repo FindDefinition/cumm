@@ -46,6 +46,17 @@
   __nv_is_extended_host_device_lambda_closure_type(x)
 #define TV_IS_EXTEND_DEVICE_LAMBDA(x)                                          \
   __nv_is_extended_device_lambda_closure_type(x)
+
+#elif defined(__METAL_VERSION__)
+#define TV_ASSERT(x) assert(x)
+#define TV_HOST_DEVICE_INLINE __attribute__((__always_inline__))
+#define TV_HOST_DEVICE
+#define TV_DEVICE
+#define TV_DEVICE_INLINE __attribute__((__always_inline__))
+#define TV_GPU_LAMBDA
+#define TV_GPU_LAMBDA_DEVICE
+#define TV_IS_EXTEND_LAMBDA(x) true
+#define TV_IS_EXTEND_DEVICE_LAMBDA(x) true
 #else
 
 #define TV_ASSERT(x) assert(x)

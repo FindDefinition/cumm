@@ -256,6 +256,8 @@ public:
       // then the ptr is Buffer ptr, not data ptr
       // pytorch mps tensor use private buffer, so we can't
       // get the pointer, pytorch can't get the pointer too.
+
+      // https://stackoverflow.com/questions/76989609/how-to-convert-a-idmtlcommandqueue-to-a-mtlcommandqueue-of-metal-cpp
       MTL::Buffer *buffer = reinterpret_cast<MTL::Buffer *>(ptr);
       ptr_mtl_ = buffer;
       offset_ = storage_offset;
@@ -365,6 +367,18 @@ public:
     return false;
 #endif
   }
+  std::uintptr_t gpu_address() const {
+    TV_ASSERT_INVALID_ARG(!is_cpu(), "only support gpu tensor");
+#if defined(TV_HARDWARE_ACC_CUDA)
+    std::uintptr_t address = ptr_;
+    return address;
+#elif defined(TV_HARDWARE_ACC_METAL)
+    TV_ASSERT_INVALID_ARG(ptr_mtl_ != nullptr, "invalid metal buffer");
+    return std::uintptr_t(ptr_mtl_->gpuAddress());
+#else 
+    TV_THROW_RT_ERR("only support gpu tensor");
+#endif
+  }
   int device() const { return device_; }
   void zero_(int64_t offset, int64_t length, Context ctx = Context()) {
     TV_ASSERT_RT_ERR(length <= size_ - offset, "eror");
@@ -393,19 +407,19 @@ public:
       TV_ASSERT_INVALID_ARG(
           ctx.has_item(ContextType::kAppleMetal),
           "you must use a context with metal created explicitly");
-      auto *cmd_queue_ptr = reinterpret_cast<AppleMetalContext *>(
-                                ctx.get_item(ContextType::kAppleMetal))
-                                ->command_queue_ptr_;
-      auto cb = make_apple_mtl_ptr(cmd_queue_ptr->commandBuffer());
+      auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
+                                ctx.get_item(ContextType::kAppleMetal));
+      auto cb = metal_ctx->commandBuffer();
       auto bce = make_apple_mtl_ptr(cb->blitCommandEncoder());
       bce->fillBuffer(ptr_mtl_,
                       NS::Range::Make(offset * sizeof(T) + byte_offset(),
                                       length * sizeof(T)),
                       0);
       bce->endEncoding();
-      cb->commit();
       if (sync_op) {
-        cb->waitUntilCompleted();
+        metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
+      }else{
+        metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
       }
 #else
       TV_THROW_INVALID_ARG("don't compiled with cuda");
@@ -435,7 +449,7 @@ public:
           host2host(new_storage_ptr->data(), data(), size_ * sizeof(T),
                     ctx.cuda_stream());
         } else {
-          host2host(new_storage_ptr->ptr_, ptr_, size_ * sizeof(T));
+          host2host(new_storage_ptr->data(), data(), size_ * sizeof(T));
         }
 #else
         std::copy(data(), data() + size_ * sizeof(T), new_storage_ptr->data());
@@ -460,17 +474,17 @@ public:
       ctx = Context().create_apple_metal_context();
       sync_op = true;
     }
-    auto *cmd_queue_ptr = reinterpret_cast<AppleMetalContext *>(
-                              ctx.get_item(ContextType::kAppleMetal))
-                              ->command_queue_ptr_;
-    auto cb = make_apple_mtl_ptr(cmd_queue_ptr->commandBuffer());
+    auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
+                              ctx.get_item(ContextType::kAppleMetal));
+    auto cb = metal_ctx->commandBuffer();
     auto bce = make_apple_mtl_ptr(cb->blitCommandEncoder());
     bce->copyFromBuffer(ptr_mtl_, byte_offset(), new_storage_ptr->ptr_mtl_,
                         new_storage_ptr->byte_offset(), size_ * sizeof(T));
     bce->endEncoding();
-    cb->commit();
     if (sync_op) {
-      cb->waitUntilCompleted();
+      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
+    }else{
+      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
     }
 #else
     else {
@@ -1359,6 +1373,9 @@ public:
   size_t byte_offset() const { return offset_; }
   bool is_cpu() const { return storage_ ? storage_->is_cpu() : true; }
   bool is_readonly() const { return !writeable_; }
+  std::uintptr_t gpu_address() const {
+    return storage()->gpu_address();
+  }
   Tensor get_readonly() const {
     // used for cumm inliner, we can capture const tensor
     // as const ptr
@@ -1431,7 +1448,7 @@ public:
     return fill_template_<T>(val, Context());
   }
 
-  Tensor &fill_(int val, Context ctx = Context()) {
+  Tensor &fill_(int64_t val, Context ctx = Context()) {
     auto target_device = this->device();
 // #ifdef TV_HARDWARE_ACC_METAL
 //     target_device = -1;
@@ -1510,10 +1527,9 @@ public:
       ctx = Context().create_apple_metal_context();
       sync_op = true;
     }
-    auto *cmd_queue_ptr = reinterpret_cast<AppleMetalContext *>(
-                              ctx.get_item(ContextType::kAppleMetal))
-                              ->command_queue_ptr_;
-    auto cb = detail::make_apple_mtl_ptr(cmd_queue_ptr->commandBuffer());
+    auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
+                              ctx.get_item(ContextType::kAppleMetal));
+    auto cb = metal_ctx->commandBuffer();
     TV_ASSERT_RT_ERR(cb, "error");
     auto bce = detail::make_apple_mtl_ptr(cb->blitCommandEncoder());
     TV_ASSERT_RT_ERR(bce, "error");
@@ -1525,9 +1541,11 @@ public:
     auto size = raw_size();
     bce->copyFromBuffer(src, src_offset, dst, dst_offset, size);
     bce->endEncoding();
-    cb->commit();
+    
     if (sync_op) {
-      cb->waitUntilCompleted();
+      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
+    }else{
+      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
     }
     return;
 #else
@@ -1606,20 +1624,19 @@ public:
       ctx = Context().create_apple_metal_context();
       sync_op = true;
     }
-    auto *cmd_queue_ptr = reinterpret_cast<AppleMetalContext *>(
-                              ctx.get_item(ContextType::kAppleMetal))
-                              ->command_queue_ptr_;
-    auto cb = detail::make_apple_mtl_ptr(cmd_queue_ptr->commandBuffer());
+    auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
+                              ctx.get_item(ContextType::kAppleMetal));
+    auto cb = metal_ctx->commandBuffer();
     auto bce = detail::make_apple_mtl_ptr(cb->blitCommandEncoder());
     auto src = tensor.storage_->apple_metal_buffer_ptr();
     auto dst = storage_->apple_metal_buffer_ptr();
     bce->copyFromBuffer(src, tensor.storage_->byte_offset(), dst,
                         storage_->byte_offset(), storage_->size());
     bce->endEncoding();
-    cb->commit();
-
     if (sync_op) {
-      cb->waitUntilCompleted();
+      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
+    }else{
+      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
     }
     return;
 #else
@@ -1629,50 +1646,50 @@ public:
       // use memcpy instead to avoid cuda context init
       if (this->pinned()) {
         if (ctx.has_cuda_stream()) {
-          host2host(this->storage_->ptr_, tensor.storage_->ptr_,
+          host2host(this->storage_->data(), tensor.storage_->data(),
                     this->storage_->size(), ctx.cuda_stream());
 
         } else {
-          host2host(this->storage_->ptr_, tensor.storage_->ptr_,
+          host2host(this->storage_->data(), tensor.storage_->data(),
                     this->storage_->size());
         }
       } else {
-        std::copy(tensor.storage_->ptr_,
-                  tensor.storage_->ptr_ + this->storage_->size(),
-                  this->storage_->ptr_);
+        std::copy(tensor.storage_->data(),
+                  tensor.storage_->data() + this->storage_->size(),
+                  this->storage_->data());
       }
 #else
-      std::copy(tensor.storage_->ptr_,
-                tensor.storage_->ptr_ + this->storage_->size(),
-                this->storage_->ptr_);
+      std::copy(tensor.storage_->data(),
+                tensor.storage_->data() + this->storage_->size(),
+                this->storage_->data());
 #endif
     }
 #if defined(TV_HARDWARE_ACC_CUDA)
     else if (device() >= 0 && tensor.device() == -1) {
       if (ctx.has_cuda_stream()) {
-        host2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+        host2dev(this->storage_->data(), tensor.storage_->data(),
                  this->storage_->size(), ctx.cuda_stream());
 
       } else {
-        host2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+        host2dev(this->storage_->data(), tensor.storage_->data(),
                  this->storage_->size());
       }
 
     } else if (device() == -1 && tensor.device() >= 0) {
       if (ctx.has_cuda_stream()) {
-        dev2host(this->storage_->ptr_, tensor.storage_->ptr_,
+        dev2host(this->storage_->data(), tensor.storage_->data(),
                  this->storage_->size(), ctx.cuda_stream());
 
       } else {
-        dev2host(this->storage_->ptr_, tensor.storage_->ptr_,
+        dev2host(this->storage_->data(), tensor.storage_->data(),
                  this->storage_->size());
       }
     } else if (device() >= 0 && tensor.device() >= 0) {
       if (ctx.has_cuda_stream()) {
-        dev2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+        dev2dev(this->storage_->data(), tensor.storage_->data(),
                 this->storage_->size(), ctx.cuda_stream());
       } else {
-        dev2dev(this->storage_->ptr_, tensor.storage_->ptr_,
+        dev2dev(this->storage_->data(), tensor.storage_->data(),
                 this->storage_->size());
       }
     }
@@ -2191,7 +2208,7 @@ inline Tensor zeros_managed(TensorShape shape, DType dtype) {
   return Tensor(shape, dtype, 0, true, true).zero_();
 }
 
-inline Tensor full(TensorShape shape, int val, DType dtype, int device = -1,
+inline Tensor full(TensorShape shape, int64_t val, DType dtype, int device = -1,
                    bool pinned = false, bool managed = false) {
   return Tensor(shape, dtype, device, pinned, managed).fill_(val);
 }

@@ -37,6 +37,9 @@ class Context:
     def create_apple_metal_context(self) -> None:
         ...
 
+    def create_or_update_metal_context_from_blob(self, command_buffer_ptr: int, dispatch_queue_ptr: int) -> None:
+        ...
+
     def has_apple_metal_context(self) -> bool:
         ...
 
@@ -417,6 +420,10 @@ class Tensor:
 
     def byte_pointer(self) -> int:
         ...
+        
+    def gpu_address(self) -> int:
+        ...
+
 
 
 def zeros(shape: List[int],

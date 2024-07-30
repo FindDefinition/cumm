@@ -301,6 +301,22 @@ class TensorViewHeader(pccm.Class):
         super().__init__()
         self.build_meta.add_public_includes(TENSORVIEW_INCLUDE_PATH)
 
+class TensorViewCompileLinkFlags(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        if not CUMM_CPU_ONLY_BUILD:
+            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_ENABLE_HARDWARE_ACC")
+            self.build_meta.add_public_cflags("cl", "/DTV_ENABLE_HARDWARE_ACC")
+        self.build_meta.add_global_cflags("nvcc", "--expt-relaxed-constexpr")
+        self.build_meta.add_global_cflags("cl",  "/O2")
+        self.build_meta.add_global_cflags("g++,clang++", "-O3")
+
+class TensorViewImplFlags(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.build_meta.add_global_cflags("nvcc,clang++,g++", "-DTV_STATIC_VARIABLE_IMPLEMENTATION")
+        self.build_meta.add_global_cflags("cl", "/DTV_STATIC_VARIABLE_IMPLEMENTATION")
+
 class TensorViewCPU(pccm.Class):
     def __init__(self):
         super().__init__()
@@ -326,57 +342,15 @@ class ThrustLib(pccm.Class):
             self.build_meta.add_public_includes(thrust_include)
 
 
-class PyTorchLibNoPybind(pccm.Class):
-    def __init__(self):
-        super().__init__()
-        spec = importlib.util.find_spec("torch")
-        if spec is None:
-            raise ValueError(
-                "you need to install torch python")
-        origin = Path(spec.origin)
-        libtorch = origin.parent
-        self.add_dependency(CUDALibs, TensorView)
-
-        self.build_meta.add_public_includes(str(libtorch / "include"))
-        self.build_meta.add_public_includes(str(libtorch / "include/torch/csrc/api/include"))
-        torch_lib_paths = [str(libtorch / "lib")]
-        torch_libs = ["c10", "torch", 'torch_cpu', 'torch_python']
-        if not compat.InMacOS:
-            torch_cuda_libs = ["c10_cuda", "torch_cuda"]
-        else:
-            torch_cuda_libs = []
-        self.build_meta.libraries.extend(torch_libs + torch_cuda_libs)
-        self.build_meta.libpaths.extend(torch_lib_paths)
-        self.build_meta.add_public_cflags("nvcc,clang++,g++", "-D_GLIBCXX_USE_CXX11_ABI=0")
-        self.add_include("torch/script.h")
-        if not compat.InMacOS:
-            self.add_include("ATen/cuda/CUDAContext.h")
-        self.add_include("ATen/ATen.h")
-        if compat.InMacOS:
-            self.build_meta.add_ldflags("clang++", "-Wl,-undefined,dynamic_lookup")
-            self.build_meta.add_ldflags("clang++", "-framework Metal", "-framework CoreGraphics")
-
-class PyTorchLib(pccm.Class):
-    def __init__(self):
-        super().__init__()
-        self.add_dependency(PyTorchLibNoPybind)
-        self.add_include("torch/extension.h") # include this to add pybind for torch.Tensor
-        self.add_include("tensorview/torch_utils.h")
 
 class TensorView(pccm.Class):
     def __init__(self):
         super().__init__()
         # any project depend on TensorView will add global nvcc flags:
-        self.build_meta.add_global_cflags("nvcc", "--expt-relaxed-constexpr")
-        self.build_meta.add_global_cflags("cl",  "/O2")
-        self.build_meta.add_global_cflags("g++,clang++", "-O3")
-
         if not CUMM_CPU_ONLY_BUILD:
-            self.add_dependency(CUDALibs, TensorViewCPU)
-            self.build_meta.add_public_cflags("nvcc,clang++,g++", "-DTV_ENABLE_HARDWARE_ACC")
-            self.build_meta.add_public_cflags("cl", "/DTV_ENABLE_HARDWARE_ACC")
+            self.add_dependency(CUDALibs, TensorViewCPU, TensorViewCompileLinkFlags)
         else:
-            self.add_dependency(TensorViewCPU)
+            self.add_dependency(TensorViewCPU, TensorViewCompileLinkFlags)
 
 class TensorViewParallel(pccm.Class):
     def __init__(self):
@@ -734,38 +708,6 @@ class PyBind11(pccm.Class):
 
         if compat.InMacOS:
             self.build_meta.add_ldflags("clang++", "-Wl,-undefined,dynamic_lookup")
-
-class PyTorchTools(pccm.Class):
-    def __init__(self):
-        super().__init__()
-        self.add_dependency(PyTorchLib)
-
-    @pccm.pybind.mark
-    @pccm.static_function
-    def torch2tensor(self):
-        code = pccm.FunctionCode()
-        code.arg("ten", "torch::Tensor", pyanno="~torch.Tensor")
-        code.raw(f"""
-        return tv::torch2tensor(ten);
-        """)
-        return code.ret("tv::Tensor")
-
-    @pccm.pybind.mark
-    @pccm.static_function
-    def tensor2torch(self):
-        code = pccm.FunctionCode()
-        code.arg("ten", "tv::Tensor")
-        code.arg("clone", "bool", "true")
-        code.arg("cast_uint_to_int", "bool", "false")
-
-        code.raw(f"""
-        auto res = tv::tensor2torch(ten, cast_uint_to_int);
-        if (clone){{
-            res = res.clone();
-        }}
-        return res;
-        """)
-        return code.ret("torch::Tensor", "~torch.Tensor")
 
 class BoostGeometryLib(pccm.Class):
     def __init__(self):

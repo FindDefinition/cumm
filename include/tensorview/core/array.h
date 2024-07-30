@@ -454,38 +454,57 @@ public:
 
 #ifdef TV_METAL_RTC
   template <template <class, size_t, size_t> class Op, class... Args>
-  TV_HOST_DEVICE_INLINE constexpr auto op(TV_METAL_CONSTANT Args &&...args) {
-    return Op<T, N, Align>()(*this, args...);
-  }
-
-  template <template <class, size_t, size_t> class Op, class... Args>
   TV_HOST_DEVICE_INLINE constexpr auto op(thread Args &&...args) {
-    return Op<T, N, Align>()(*this, args...);
-  }
-
-  template <template <class, size_t, size_t> class Op, class... Args>
-  TV_HOST_DEVICE_INLINE constexpr auto op(threadgroup Args &&...args) {
-    return Op<T, N, Align>()(*this, args...);
-  }
-
-  template <template <class, size_t, size_t> class Op, class... Args>
-  TV_HOST_DEVICE_INLINE constexpr auto op(device Args &&...args) {
     return Op<T, N, Align>()(*this, args...);
   }
   template <template <class, size_t, size_t> class Op, class... Args>
   TV_HOST_DEVICE_INLINE constexpr auto op(thread Args &&...args) const {
     return Op<T, N, Align>()(*this, args...);
   }
+  // TODO how to fix this in metal?
+  // template <template <class, size_t, size_t> class Op>
+  // TV_HOST_DEVICE_INLINE constexpr auto op() {
+  //   return Op<T, N, Align>()(*this);
+  // }
 
-  template <template <class, size_t, size_t> class Op, class... Args>
-  TV_HOST_DEVICE_INLINE constexpr auto op(threadgroup Args &&...args) const {
-    return Op<T, N, Align>()(*this, args...);
-  }
+  // template <template <class, size_t, size_t> class Op>
+  // TV_HOST_DEVICE_INLINE constexpr auto op() const {
+  //   return Op<T, N, Align>()(*this);
+  // }
 
-  template <template <class, size_t, size_t> class Op, class... Args>
-  TV_HOST_DEVICE_INLINE constexpr auto op(device Args &&...args) const {
-    return Op<T, N, Align>()(*this, args...);
-  }
+  // template <template <class, size_t, size_t> class Op, class... Args>
+  // TV_HOST_DEVICE_INLINE constexpr auto op(TV_METAL_CONSTANT Args &&...args, thread typename std::enable_if<sizeof...(Args) != 0>::type * = 0) {
+  //   return Op<T, N, Align>()(*this, args...);
+  // }
+
+  // template <template <class, size_t, size_t> class Op, class... Args>
+  // TV_HOST_DEVICE_INLINE constexpr auto op(thread Args &&...args, thread typename std::enable_if<sizeof...(Args) != 0>::type * = 0) {
+  //   return Op<T, N, Align>()(*this, args...);
+  // }
+
+  // template <template <class, size_t, size_t> class Op, class... Args>
+  // TV_HOST_DEVICE_INLINE constexpr auto op(threadgroup Args &&...args, thread typename std::enable_if<sizeof...(Args) != 0>::type * = 0) {
+  //   return Op<T, N, Align>()(*this, args...);
+  // }
+
+  // template <template <class, size_t, size_t> class Op, class... Args>
+  // TV_HOST_DEVICE_INLINE constexpr auto op(device Args &&...args, thread typename std::enable_if<sizeof...(Args) != 0>::type * = 0) {
+  //   return Op<T, N, Align>()(*this, args...);
+  // }
+  // template <template <class, size_t, size_t> class Op, class... Args>
+  // TV_HOST_DEVICE_INLINE constexpr auto op(thread Args &&...args, thread typename std::enable_if<sizeof...(Args) != 0>::type * = 0) const {
+  //   return Op<T, N, Align>()(*this, args...);
+  // }
+
+  // template <template <class, size_t, size_t> class Op, class... Args>
+  // TV_HOST_DEVICE_INLINE constexpr auto op(threadgroup Args &&...args, thread typename std::enable_if<sizeof...(Args) != 0>::type * = 0) const {
+  //   return Op<T, N, Align>()(*this, args...);
+  // }
+
+  // template <template <class, size_t, size_t> class Op, class... Args>
+  // TV_HOST_DEVICE_INLINE constexpr auto op(device Args &&...args, thread  typename std::enable_if<sizeof...(Args) != 0>::type * = 0) const {
+  //   return Op<T, N, Align>()(*this, args...);
+  // }
 
 #else 
   template <template <class, size_t, size_t> class Op, class... Args>

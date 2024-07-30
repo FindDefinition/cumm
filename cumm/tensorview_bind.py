@@ -20,7 +20,7 @@ import pccm
 from ccimport import compat
 from pccm.utils import project_is_editable, project_is_installed
 
-from cumm.common import PyBind11, TensorView, TensorViewCPU, get_cuda_version_by_nvcc
+from cumm.common import PyBind11, TensorView, TensorViewCPU, TensorViewCompileLinkFlags, TensorViewHeader, TensorViewImplFlags, get_cuda_version_by_nvcc
 from cumm.constants import CUMM_CPU_ONLY_BUILD, PACKAGE_ROOT
 from .constants import CUMM_APPLE_METAL_CPP_ROOT, CUMM_CUDA_VERSION, PACKAGE_NAME
 from cumm.conv.nvrtc_code import nvrtc_conv_template
@@ -33,7 +33,7 @@ with _TENSORVIEW_BIND_CODE_ANNO_PATH.open("r") as f:
 class AppleMetalImpl(pccm.Class):
     def __init__(self):
         super().__init__()
-        
+        self.add_dependency(TensorViewHeader, TensorViewCompileLinkFlags)
         if compat.InMacOS:
             path = Path.home() / "metal-cpp"
             if CUMM_APPLE_METAL_CPP_ROOT is not None:
@@ -54,14 +54,22 @@ class AppleMetalImpl(pccm.Class):
 #include <Foundation/Foundation.hpp>
 #include <Metal/Metal.hpp>
 #include <QuartzCore/QuartzCore.hpp>
+#include <tensorview/contexts/core.h>
 
+namespace tv {
+std::shared_ptr<AppleMetalContext> AppleMetalContext::getInstance()
+{
+  static std::shared_ptr<AppleMetalContext> ctx = std::make_shared<AppleMetalContext>();
+  return ctx;
+}
+}
             """
         return code
 
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView, PyBind11)
+        self.add_dependency(TensorView, PyBind11, TensorViewImplFlags)
         if compat.InMacOS:
             self.add_dependency(AppleMetalImpl)
         self.add_include("tensorview/pybind_utils.h")
@@ -75,6 +83,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
         self.add_include("tensorview/gemm/core/nvrtc_params.h")
         if not compat.InWindows:
             self.add_include("cxxabi.h")
+        
 
         if not CUMM_CPU_ONLY_BUILD and not compat.InMacOS:
             # cufilt (nv_decode.h) is used to demangle
@@ -460,6 +469,8 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("set_cuda_stream", &tv::Context::set_cuda_stream_int)
     .def("synchronize_stream", &tv::Context::synchronize_stream)
     .def("create_apple_metal_context", &tv::Context::create_apple_metal_context)
+    .def("create_or_update_metal_context_from_blob", &tv::Context::create_or_update_metal_context_from_blob)
+
     .def("synchronize", &tv::Context::synchronize)
     .def("has_apple_metal_context", [](tv::Context& ctx){
         return ctx.has_item(tv::ContextType::kAppleMetal);
@@ -650,7 +661,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("squeeze", py::overload_cast<>(&tv::Tensor::squeeze, py::const_))
     .def("squeeze", py::overload_cast<int>(&tv::Tensor::squeeze, py::const_))
     .def("zero_", &tv::Tensor::zero_, py::arg("ctx") = tv::Context())
-    .def("fill_int_", py::overload_cast<int, tv::Context>(&tv::Tensor::fill_), py::arg("val"), py::arg("ctx") = tv::Context())
+    .def("fill_int_", py::overload_cast<int64_t, tv::Context>(&tv::Tensor::fill_), py::arg("val"), py::arg("ctx") = tv::Context())
     .def("fill_float_", py::overload_cast<float, tv::Context>(&tv::Tensor::fill_), py::arg("val"), py::arg("ctx") = tv::Context())
     .def("copy_", [](tv::Tensor& t, const tv::Tensor& other, tv::Context ctx) -> void{
       t.copy_(other, ctx);
@@ -691,6 +702,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     .def("byte_pointer", [](const tv::Tensor& ten){
       return reinterpret_cast<std::uintptr_t>(ten.raw_data());
     })
+    .def("gpu_address", &tv::Tensor::gpu_address)
 
 #if defined(TV_ENABLE_HARDWARE_ACC)
     .def("cuda", py::overload_cast<tv::Context>(&tv::Tensor::cuda, py::const_), py::arg("ctx") = tv::Context())
@@ -734,7 +746,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   m.def("empty", [](std::vector<int64_t> shape, int dtype, int device, bool pinned, bool managed){
     return tv::empty(shape, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
-  m.def("full_int", [](std::vector<int64_t> shape, int val, int dtype, int device, bool pinned, bool managed){
+  m.def("full_int", [](std::vector<int64_t> shape, int64_t val, int dtype, int device, bool pinned, bool managed){
     return tv::full(shape, val, tv::DType(dtype), device, pinned, managed);
   }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0, py::arg("device") = -1, py::arg("pinned") = false, py::arg("managed") = false); 
   m.def("full_float", [](std::vector<int64_t> shape, float val, int dtype, int device, bool pinned, bool managed){
@@ -744,7 +756,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
   m.def("zeros_managed", [](std::vector<int64_t> shape, int dtype){
     return tv::zeros(shape, tv::DType(dtype), 0, false, true);
   }, py::arg("shape"), py::arg("dtype") = 0); 
-  // m.def("full_int_managed", [](std::vector<int64_t> shape, int val, int dtype){
+  // m.def("full_int_managed", [](std::vector<int64_t> shape, int64_t val, int dtype){
   //   return tv::full(shape, val, tv::DType(dtype), 0, false, true);
   // }, py::arg("shape"), py::arg("value"), py::arg("dtype") = 0); 
   // m.def("full_float_managed", [](std::vector<int64_t> shape, float val, int dtype){
@@ -788,7 +800,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
 #endif
   }); 
         """)
-        if compat.InLinux:
+        if compat.InLinux or compat.InMacOS:
             code.raw("""
             m.def("cufilt", [](std::string name){
               int status;

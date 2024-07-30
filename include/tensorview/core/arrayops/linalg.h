@@ -531,6 +531,22 @@ public:
   }
 };
 
+template <typename T, size_t N, size_t Align> struct transform_matrix;
+
+template <typename T>
+struct transform_matrix<array<T, 3>, 3, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 4>, 4>
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 3> &self,
+             const TV_METAL_THREAD array<T, 3> &other) {
+    return {
+      array<T, 4>{self[0][0], self[0][1], self[0][2], other[0]},
+      array<T, 4>{self[1][0], self[1][1], self[1][2], other[1]},
+      array<T, 4>{self[2][0], self[2][1], self[2][2], other[2]},
+      array<T, 4>{T(0), T(0), T(0), T(1)}
+    };
+  }
+};
+
 template <typename T, size_t N, size_t Align> struct qxdir;
 template <typename T, size_t N, size_t Align> struct qydir;
 template <typename T, size_t N, size_t Align> struct qzdir;

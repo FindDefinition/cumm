@@ -61,6 +61,58 @@ template <typename T> struct MapTypeToUnsignedInt {
 };
 
 template <typename K>
+struct platform_not_support_atomic_64_metas {
+#ifdef TV_METAL_CC
+  static_assert(!std::is_same_v<K, int64_t>, "int64 not supported when 64bit CAS not supported");
+#endif
+  TV_HOST_DEVICE_INLINE static constexpr auto map_user_key(K key) {
+    return key;
+  }
+  TV_HOST_DEVICE_INLINE static constexpr auto unmap_user_key(K key) {
+    return key;
+  }
+
+};
+
+#ifdef TV_METAL_CC
+// template <>
+// struct platform_not_support_atomic_64_metas<int64_t> {
+  
+//   // in platform without 64bit atomic cas, user can only use 62bit data.
+//   // drop 2nd and 3rd bit, keep sign and rest
+//   static constexpr TV_METAL_CONSTANT bool kMask = 0x9fff'ffff'7fff'ffff;
+
+//   TV_HOST_DEVICE_INLINE static constexpr auto map_user_key(uint64_t key) {
+//     auto res = key & kMask;
+//     // move 1st bit in last 32 bit to 2nd bit in first 32 bit
+//     return res | ((key & 0x8000'0000) << 31);
+//   }
+//   TV_HOST_DEVICE_INLINE static constexpr auto unmap_user_key(uint64_t key) {
+//    // user key format) 0b.*0....... (first 32 bit) 0b0....... (last 32 bit)
+//    // move * to first 0 in last 32 bit
+//     auto res = key & kMask;
+//     return res | ((key & 0x4000'0000'0000'0000) >> 31);
+//   }
+// };
+template <>
+struct platform_not_support_atomic_64_metas<uint64_t> {
+  // drop 1st and 2nd bit
+  static constexpr TV_METAL_CONSTANT bool kMask = 0x3fff'ffff'7fff'ffff;
+
+  TV_HOST_DEVICE_INLINE static constexpr auto map_user_key(uint64_t key) {
+    auto res = key & kMask;
+    // move 1st bit in last 32 bit to 1st bit in first 32 bit
+    return res | ((key & 0x8000'0000) << 32);
+  }
+  TV_HOST_DEVICE_INLINE static constexpr auto unmap_user_key(uint64_t key) {
+    auto res = key & kMask;
+    return res | ((key & 0x8000'0000'0000'0000) >> 32);
+  }
+};
+#endif
+
+
+template <typename K>
 struct default_empty_key;
 
 template <>
@@ -70,7 +122,13 @@ struct default_empty_key<int32_t>{
 
 template <>
 struct default_empty_key<int64_t>{
+#ifdef TV_METAL_CC
+  // when using metal with 64bit key, custom empty key is not supported
+  // all empty key for u64 and i64 are set to 0xFFFFFFFFFFFFFFFF
+  static constexpr TV_METAL_CONSTANT int64_t value = -1;
+#else 
   static constexpr TV_METAL_CONSTANT int64_t value = std::numeric_limits<int64_t>::max();
+#endif 
 };
 template <>
 struct default_empty_key<uint32_t>{
@@ -79,7 +137,11 @@ struct default_empty_key<uint32_t>{
 
 template <>
 struct default_empty_key<uint64_t>{
+#ifdef TV_METAL_CC
   static constexpr TV_METAL_CONSTANT uint64_t value = std::numeric_limits<uint64_t>::max();
+#else 
+  static constexpr TV_METAL_CONSTANT uint64_t value = std::numeric_limits<uint64_t>::max();
+#endif 
 };
 #ifdef TV_CUDA_CC
 struct __place_holder_t;
