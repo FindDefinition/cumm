@@ -216,7 +216,8 @@ class MetalModule:
 
     def run_kernel(self, name: str, blocks: List[int], threads: List[int],
                    smem_size: int, ctx: Context, args: List[Tuple[Tensor,
-                                                                 int]]):
+                                                                 int]],
+                    treat_array_as_scalar: bool = True):
         ...
 
 

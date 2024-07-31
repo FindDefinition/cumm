@@ -192,8 +192,7 @@ public:
   }
   void run_kernel(std::string name, std::array<int, 3> blocks,
                   std::array<int, 3> threads, int smem_size, Context ctx,
-                  std::vector<std::tuple<tv::Tensor, int>> args,
-                  bool treat_array_as_scalar) {
+                  std::vector<std::tuple<tv::Tensor, int>> args) {
 #ifdef TV_HARDWARE_ACC_METAL
     bool sync_op = false;
     if (!ctx.has_item(ContextType::kAppleMetal)) {

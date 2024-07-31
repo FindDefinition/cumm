@@ -69,9 +69,7 @@ std::shared_ptr<AppleMetalContext> AppleMetalContext::getInstance()
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView, PyBind11, TensorViewImplFlags)
-        if compat.InMacOS:
-            self.add_dependency(AppleMetalImpl)
+        self.add_dependency(TensorView, PyBind11, TensorViewImplFlags, AppleMetalImpl)
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
         self.add_include("limits")
