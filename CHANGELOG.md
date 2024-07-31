@@ -4,6 +4,7 @@
 - add cuda-like kernel in apple silicon, only RTC compile is supported.
 ### Changed
 - BREAKING CHANGE: rename macro `TV_CUDA` to `TV_ENABLE_HARDWARE_ACC`
+- BREAKING CHANGE: change managed tensor behavior, now you must specify cpu device when you use managed flag.
 
 ## [0.5.3] - 2024-06-12
 ### Fixed 

@@ -18,6 +18,7 @@ from enum import Enum
 import enum
 from functools import partial
 import io
+import time
 import traceback
 from typing import Callable, Dict, List, Optional, Tuple, Union, ContextManager
 
@@ -188,6 +189,7 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                 perf_context: Optional[ContextManager] = None,
                 name_to_meta: Optional[Dict[str, NVRTCKernelMeta]] = None,
                 lower_name: Optional[str] = None):
+    # t = time.time()
     metas: List[NVRTCArgMeta] = [NVRTCArgMeta(NVRTCArgBaseType.Scalar, False, -1, [])] * len(args)
     if name_to_meta:
         assert name in name_to_meta, f"can't find your kernel {name}, available: {name_to_meta.keys()}"
@@ -229,11 +231,16 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                 if not isinstance(arg, Tensor):
                     assert not isinstance(arg, Tensor)
                     dtype = get_npdtype_from_tvdtype(meta.simple_type)
+                    tv_dtype = meta.simple_type
                     if isinstance(arg, np.ndarray):
                         arg_array = arg.astype(dtype)
                         arg_type = _NVRTCModule.kArray
+                    elif isinstance(arg, bool):
+                        arg_type = _NVRTCModule.kConstant 
+                        tv_dtype = uint8
+                        arg_array = np.array(arg, dtype=np.uint8)
                     else:
-                        assert isinstance(arg, (int, bool, float))
+                        assert isinstance(arg, (int, float, np.integer, np.floating))
                         arg_type = _NVRTCModule.kScalar
                         arg_array = np.array(arg, dtype=dtype)
                     if not arg_array.shape:
@@ -241,17 +248,21 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                     assert list(arg_array.shape) == meta.shape, f"{arg_array.shape}, {meta.shape}"
                     # auto dtype cast
                     # TODO prevent floats assigned to ints
-                    ten = empty(meta.shape, meta.simple_type, -1)
+                    ten = empty(meta.shape, tv_dtype, -1)
                     ten.numpy_view()[:] = arg_array
                     kernel_args.append((ten, arg_type))
                     continue
         # meta isn't valid, use regular dtypes.
-        if isinstance(arg, (int, float)):
+        if isinstance(arg, bool):
+            ten = full([1], arg, uint8)
+            kernel_args.append((ten, _NVRTCModule.kConstant))
+
+        elif isinstance(arg, (int, float, np.integer, np.floating)):
             dtype = float32
-            if isinstance(arg, int):
+            if isinstance(arg, (int, np.integer)):
                 dtype = int64
             ten = full([1], arg, dtype)
-            kernel_args.append((ten, _NVRTCModule.kScalar))
+            kernel_args.append((ten, _NVRTCModule.kArray))
         elif isinstance(arg, (list, tuple)):
             raise NotImplementedError("don't support list or tuple, you must use np.ndarray")
             dtype = np.float32
@@ -280,8 +291,13 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                                     launch.smem, launch.stream, kernel_args)
     else:
         assert launch.ctx is not None 
-        return mod.run_kernel(name, launch.blocks, launch.threads,
+        # print("preprocess time", time.time() - t)
+        # t = time.time()
+        res = mod.run_kernel(name, launch.blocks, launch.threads,
                                     launch.smem, launch.ctx, kernel_args)
+        # print(f"kernel {name} time: {time.time() - t}")
+        return res 
+
 class NVRTCModule:
     def __init__(self,
                  code: Union[str, NVRTCProgram],
@@ -523,8 +539,11 @@ class _TimerMeasure:
         self.duration = duration
 
 class KernelTimer:
-    def __init__(self, enable: bool = True) -> None:
-        self.enable = enable and not tensorview_bind.is_cpu_only()
+    def __init__(self, enable: bool = True, disable_if_cpu_only: bool = True) -> None:
+        if disable_if_cpu_only:
+            self.enable = enable and not tensorview_bind.is_cpu_only()
+        else:
+            self.enable = enable
         if self.enable:
             self._timer = CUDAKernelTimer(enable)
         else:
@@ -598,12 +617,20 @@ def _print_exit_handler(tim: CUDAKernelTimer, name: str, out: Optional[List[floa
     if out is not None:
         out[0] = duration
 
-def measure_and_print(name: str = "CUDATimer", stream: int = 0, out: Optional[List[float]] = None, enable: bool = True):
+def measure_and_print(name: str = "CUDATimer", *, stream: int = 0, out: Optional[List[float]] = None, enable: bool = True):
     tim = KernelTimer(enable=enable)
     return tim._record(name, stream, partial(_print_exit_handler, out=out))
 
-def measure_duration(name: str = "CUDATimer", stream: int = 0, enable: bool = True):
+def measure_duration(name: str = "CUDATimer", *, stream: int = 0, enable: bool = True):
     tim = KernelTimer(enable=enable)
+    return tim._record(name, stream, measure_time=True)
+
+def measure_and_print_cpu(name: str = "CPUTimer", *, stream: int = 0, out: Optional[List[float]] = None, enable: bool = True):
+    tim = KernelTimer(enable=enable, disable_if_cpu_only=False)
+    return tim._record(name, stream, partial(_print_exit_handler, out=out))
+
+def measure_duration_cpu(name: str = "CPUTimer", *, stream: int = 0, enable: bool = True):
+    tim = KernelTimer(enable=enable, disable_if_cpu_only=False)
     return tim._record(name, stream, measure_time=True)
 
 def get_numpy_view(ten: Tensor) -> np.ndarray:

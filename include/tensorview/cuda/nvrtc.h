@@ -301,7 +301,7 @@ private:
 
 class NVRTCModule {
 public:
-  enum ArgType { kTensor = 0, kArray = 1, kTensorView = 2, kScalar = 3 };
+  enum ArgType { kTensor = 0, kArray = 1, kTensorView = 2, kScalar = 3, kConstant = 4 };
 
   NVRTCModule(std::shared_ptr<NVRTCProgram> program,
               std::string cudadevrt_path = "")
@@ -465,6 +465,7 @@ public:
         break;
       }
       case ArgType::kScalar:
+      case ArgType::kConstant:
       case ArgType::kArray: {
         TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
         // const check is performed in python

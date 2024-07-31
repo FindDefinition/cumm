@@ -23,6 +23,7 @@ TODO add CAS
 #endif
 #if defined(TV_HARDWARE_ACC_CUDA) && defined(__CUDACC_RTC__)
 #include <tensorview/core/nvrtc_std.h>
+#include <cooperative_groups.h>
 #endif
 
 namespace tv {

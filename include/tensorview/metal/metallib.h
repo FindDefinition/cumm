@@ -28,35 +28,132 @@
 namespace tv {
 namespace detail {
 #ifdef TV_HARDWARE_ACC_METAL
-inline MTL::DataType tv_dtype_to_mtl_data_type(tv::DType t) {
-  switch (t) {
-  case DType::bool_:
-    return MTL::DataType::DataTypeBool;
-  case DType::float32:
-    return MTL::DataType::DataTypeFloat;
-  case DType::int8:
-    return MTL::DataType::DataTypeChar;
-  case DType::int16:
-    return MTL::DataType::DataTypeShort;
-  case DType::int32:
-    return MTL::DataType::DataTypeInt;
-  case DType::int64:
-    return MTL::DataType::DataTypeLong;
-  case DType::uint8:
-    return MTL::DataType::DataTypeUChar;
-  case DType::uint16:
-    return MTL::DataType::DataTypeUShort;
-  case DType::uint32:
-    return MTL::DataType::DataTypeUInt;
-  case DType::uint64:
-    return MTL::DataType::DataTypeULong;
-  case DType::float16:
-    return MTL::DataType::DataTypeHalf;
-  case DType::bfloat16:
-    return MTL::DataType::DataTypeBFloat;
+inline MTL::DataType tv_dtype_to_mtl_data_type(tv::DType t, int cnt) {
+  switch (cnt){
+    case 1: {
+      switch (t) {
+      case DType::bool_:
+        return MTL::DataType::DataTypeBool;
+      case DType::float32:
+        return MTL::DataType::DataTypeFloat;
+      case DType::int8:
+        return MTL::DataType::DataTypeChar;
+      case DType::int16:
+        return MTL::DataType::DataTypeShort;
+      case DType::int32:
+        return MTL::DataType::DataTypeInt;
+      case DType::int64:
+        return MTL::DataType::DataTypeLong;
+      case DType::uint8:
+        return MTL::DataType::DataTypeUChar;
+      case DType::uint16:
+        return MTL::DataType::DataTypeUShort;
+      case DType::uint32:
+        return MTL::DataType::DataTypeUInt;
+      case DType::uint64:
+        return MTL::DataType::DataTypeULong;
+      case DType::float16:
+        return MTL::DataType::DataTypeHalf;
+      case DType::bfloat16:
+        return MTL::DataType::DataTypeBFloat;
 
-  default:
-    TV_THROW_INVALID_ARG("not implemented dtype: ", dtype_str(t));
+      default:
+        TV_THROW_INVALID_ARG("not implemented dtype: ", dtype_str(t));
+      }
+
+      break;
+    }
+    case 2: {
+      switch (t) {
+      case DType::float32:
+        return MTL::DataType::DataTypeFloat2;
+      case DType::int8:
+        return MTL::DataType::DataTypeChar2;
+      case DType::int16:
+        return MTL::DataType::DataTypeShort2;
+      case DType::int32:
+        return MTL::DataType::DataTypeInt2;
+      case DType::int64:
+        return MTL::DataType::DataTypeLong2;
+      case DType::uint8:
+        return MTL::DataType::DataTypeUChar2;
+      case DType::uint16:
+        return MTL::DataType::DataTypeUShort2;
+      case DType::uint32:
+        return MTL::DataType::DataTypeUInt2;
+      case DType::uint64:
+        return MTL::DataType::DataTypeULong2;
+      case DType::float16:
+        return MTL::DataType::DataTypeHalf2;
+      case DType::bfloat16:
+        return MTL::DataType::DataTypeBFloat2;
+
+      default:
+        TV_THROW_INVALID_ARG("not implemented dtype: ", dtype_str(t));
+      }
+      break;
+    }
+    case 3: {
+      switch (t) {
+      case DType::float32:
+        return MTL::DataType::DataTypeFloat3;
+      case DType::int8:
+        return MTL::DataType::DataTypeChar3;
+      case DType::int16:
+        return MTL::DataType::DataTypeShort3;
+      case DType::int32:
+        return MTL::DataType::DataTypeInt3;
+      case DType::int64:
+        return MTL::DataType::DataTypeLong3;
+      case DType::uint8:
+        return MTL::DataType::DataTypeUChar3;
+      case DType::uint16:
+        return MTL::DataType::DataTypeUShort3;
+      case DType::uint32:
+        return MTL::DataType::DataTypeUInt3;
+      case DType::uint64:
+        return MTL::DataType::DataTypeULong3;
+      case DType::float16:
+        return MTL::DataType::DataTypeHalf3;
+      case DType::bfloat16:
+        return MTL::DataType::DataTypeBFloat3;
+
+      default:
+        TV_THROW_INVALID_ARG("not implemented dtype: ", dtype_str(t));
+      }
+      break;
+    }
+    case 4: {
+      switch (t) {
+      case DType::float32:
+        return MTL::DataType::DataTypeFloat4;
+      case DType::int8:
+        return MTL::DataType::DataTypeChar4;
+      case DType::int16:
+        return MTL::DataType::DataTypeShort4;
+      case DType::int32:
+        return MTL::DataType::DataTypeInt4;
+      case DType::int64:
+        return MTL::DataType::DataTypeLong4;
+      case DType::uint8:
+        return MTL::DataType::DataTypeUChar4;
+      case DType::uint16:
+        return MTL::DataType::DataTypeUShort4;
+      case DType::uint32:
+        return MTL::DataType::DataTypeUInt4;
+      case DType::uint64:
+        return MTL::DataType::DataTypeULong4;
+      case DType::float16:
+        return MTL::DataType::DataTypeHalf4;
+      case DType::bfloat16:
+        return MTL::DataType::DataTypeBFloat4;
+      default:
+        TV_THROW_INVALID_ARG("not implemented dtype: ", dtype_str(t));
+      }
+      break;
+    }
+    default:
+      TV_THROW_INVALID_ARG("not implemented cnt: ", cnt);
   }
 }
 
@@ -95,7 +192,8 @@ public:
   }
   void run_kernel(std::string name, std::array<int, 3> blocks,
                   std::array<int, 3> threads, int smem_size, Context ctx,
-                  std::vector<std::tuple<tv::Tensor, int>> args) {
+                  std::vector<std::tuple<tv::Tensor, int>> args,
+                  bool treat_array_as_scalar) {
 #ifdef TV_HARDWARE_ACC_METAL
     bool sync_op = false;
     if (!ctx.has_item(ContextType::kAppleMetal)) {
@@ -109,50 +207,73 @@ public:
         ctx.get_item(ContextType::kAppleMetal));
     auto cb = ctx_ptr->commandBuffer();
     TV_ASSERT_RT_ERR(cb, "command buffer is null");
-    auto nameNS = detail::make_apple_mtl_ptr(
-        NS::String::string(name.c_str(), NS::ASCIIStringEncoding));
-
     auto constants = detail::make_apple_mtl_ptr(
         MTL::FunctionConstantValues::alloc()->init());
     TV_ASSERT_RT_ERR(constants, "command buffer is null");
     int cnt = 0;
+    std::string cache_ley = name;
     for (auto &arg : args) {
       auto &ten = std::get<0>(arg);
       auto arg_type = std::get<1>(arg);
       switch (arg_type) {
-      case ArgType::kScalar: {
-        TV_ASSERT_INVALID_ARG(ten.device() == -1 && ten.size() == 1,
-                              "array tensor must be CPU and scalar");
-        auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype());
-        constants->setConstantValue(ten.raw_data(), mtl_dtype, cnt);
+      case ArgType::kConstant: {
+        TV_ASSERT_INVALID_ARG(ten.device() == -1 && ten.size() == 1 && ten.dtype() == tv::uint8,
+                              "array tensor must be CPU and scalar and uint8 (bool)");
+        // auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype(), ten.dim(0));
+        auto mtl_dtype = MTL::DataType::DataTypeBool;
+        bool val = ten.item<uint8_t>() > 0;
+        constants->setConstantValue(&val, mtl_dtype, cnt);
+        cache_ley += std::string("_") + std::to_string(ten.item<uint8_t>());
         cnt += 1;
+        // TV_ASSERT_INVALID_ARG(ten.dim(0) <= 4,
+        //                       "array tensor smaller than 4");
+        // if (ten.ndim() == 2){
+        //   TV_ASSERT_INVALID_ARG(ten.dim(1) <= 4,
+        //                         "array tensor smaller than 4");
+        //   auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype(), ten.dim(1));
+        //   for (int j = 0; j < ten.dim(0); ++j){
+        //     constants->setConstantValue(ten.raw_data() + j * ten.dim(1) * tv::bit_size(ten.dtype()) / 8, mtl_dtype, cnt);
+        //     cnt += 1;
+        //   }
+        // }else{
+        //   auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype(), ten.dim(0));
+        //   constants->setConstantValue(ten.raw_data(), mtl_dtype, cnt);
+        //   cnt += 1;
+        // }
         break;
       }
       default:;
       }
     }
-    NS::Error *error = nullptr;
-    auto computeFunction = detail::make_apple_mtl_ptr(
-        mtl_lib_->newFunction(nameNS.get(), constants.get(), &error));
-    TV_ASSERT_INVALID_ARG(computeFunction && error == nullptr,
-                          "can't find function", name);
-    error = nullptr;
-    auto func_pso =
-        detail::make_apple_mtl_ptr(ptr_mtl_device_->newComputePipelineState(
-            computeFunction.get(), &error));
-    TV_ASSERT_INVALID_ARG(func_pso && error == nullptr, "can't create pso",
-                          name);
-
-    auto pso_ptr = func_pso.get();
+    // TODO find a way to cache func pso
+    if (func_pso_map_.find(cache_ley) == func_pso_map_.end()) {
+      auto nameNS = detail::make_apple_mtl_ptr(
+          NS::String::string(name.c_str(), NS::ASCIIStringEncoding));
+      NS::Error *error = nullptr;
+      auto computeFunction = NS::TransferPtr(
+          mtl_lib_->newFunction(nameNS.get(), constants.get(), &error));
+      TV_ASSERT_INVALID_ARG(computeFunction && error == nullptr,
+                            "can't find function", name);
+      error = nullptr;
+      auto func_pso =
+          NS::TransferPtr(ptr_mtl_device_->newComputePipelineState(
+              computeFunction.get(), &error));
+      TV_ASSERT_INVALID_ARG(func_pso && error == nullptr, "can't create pso",
+                            name);
+      func_pso_map_[cache_ley] = std::make_tuple(computeFunction, func_pso);
+    }
+    auto pso_ptr = std::get<1>(func_pso_map_[cache_ley]).get();
 
     dispatch_sync(ctx_ptr->queue(), ^() {
-      auto computeEncoder =
-          std::unique_ptr<MTL::ComputeCommandEncoder,
-                          void (*)(MTL::ComputeCommandEncoder *)>(
-              cb->computeCommandEncoder(), [](MTL::ComputeCommandEncoder *p) {
-                // p->endEncoding();
+      bool ce_is_end_encoding = false;
+      auto deleter = [&ce_is_end_encoding](MTL::ComputeCommandEncoder *p) {
+                if (!ce_is_end_encoding)
+                  p->endEncoding();
                 p->release();
-              });
+              };
+      auto computeEncoder =
+          std::unique_ptr<MTL::ComputeCommandEncoder, decltype(deleter)>(
+              cb->computeCommandEncoder(), deleter);
       TV_ASSERT_RT_ERR(computeEncoder, "compute encoder is null");
       int buffer_cnt = 0;
 
@@ -173,17 +294,21 @@ public:
           buffer_cnt += 1;
           break;
         }
+        case ArgType::kScalar:
         case ArgType::kArray: {
+          // TODO I don't know if buffer still valid for kernel
+          // after I release it here. in CUDA, cudaFree is sync,
+          // cudaFreeAsync is encoded in the stream.
+          // so metal?
           TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
           // const check is performed in python
-          computeEncoder->setBuffer(
-              reinterpret_cast<MTL::Buffer *>(
-                  ten.storage()->apple_metal_buffer_ptr()),
-              ten.byte_offset() + ten.storage()->byte_offset(), buffer_cnt);
+          TV_ASSERT_INVALID_ARG(ten.storage()->apple_metal_buffer_ptr() == nullptr,
+                                "array metal buffer must be empty");
+          computeEncoder->setBytes(ten.raw_data(), ten.raw_size(), buffer_cnt);
           buffer_cnt += 1;
           break;
         }
-        case ArgType::kScalar: {
+        case ArgType::kConstant: {
           break;
         }
         case ArgType::kTensorView: {
@@ -201,6 +326,7 @@ public:
       // Encode the compute command.
       computeEncoder->dispatchThreads(gridSize, threadgroupSize);
       computeEncoder->endEncoding();
+      ce_is_end_encoding = true;
       // if from blob (use external context), do sync with external library by
       // user.
       if (!ctx_ptr->is_from_blob()) {
@@ -232,6 +358,7 @@ private:
 #ifdef TV_HARDWARE_ACC_METAL
   MTL::Device *ptr_mtl_device_ = nullptr;
   MTL::Library *mtl_lib_ = nullptr;
+  std::unordered_map<std::string, std::tuple<NS::SharedPtr<MTL::Function>, NS::SharedPtr<MTL::ComputePipelineState>>> func_pso_map_;
 
 #endif
 };

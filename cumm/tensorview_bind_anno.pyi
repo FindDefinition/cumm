@@ -163,6 +163,7 @@ class NVRTCModule:
     kArray = 1
     kTensorView = 2
     kScalar = 3
+    kConstant = 4
 
     @overload
     def __init__(self,
@@ -207,7 +208,8 @@ class MetalModule:
 
     def run_kernel(self, name: str, blocks: List[int], threads: List[int],
                    smem_size: int, ctx: Context, args: List[Tuple[Tensor,
-                                                                 int]]):
+                                                                 int]],
+                    treat_array_as_scalar: bool = True):
         ...
 
 

@@ -27,6 +27,12 @@
 #include "nvrtc/type_traits.h"
 #include "nvrtc/limits.h"
 #include "nvrtc/tuple.h"
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+
 #else 
 #pragma METAL internals : enable
 

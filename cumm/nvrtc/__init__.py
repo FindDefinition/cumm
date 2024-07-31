@@ -285,6 +285,7 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
 
     def __init__(self,
                  code: str,
+                 params: NVRTCModuleParams,
                  headers: Optional[Dict[str, str]] = None,
                  opts: Optional[List[str]] = None,
                  program_name: str = "kernel.cu",
@@ -299,6 +300,7 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                          name_to_meta=name_to_meta,
                          cudadevrt_path=cudadevrt_path)
         self.code = code
+        self.params = params
         # extract meta data from ptx
         self.kernel_metas = list(name_to_meta.values())
         ptx = self.program.ptx()
@@ -380,6 +382,7 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
     def from_params(cls, params: NVRTCModuleParams):
         try:
             return cls(params.code,
+                        params,
                        params.headers,
                        params.opts,
                        name_exprs=params.name_exprs,
@@ -457,29 +460,30 @@ class CummNVRTCModule(CummNVRTCModuleBase):
                  verbose_path: str = "",
                  std: str = "c++14",
                  add_arch_flag: bool = True) -> None:
-        mod_params = create_nvrtc_code(cus, namespace_root, cudadevrt_path,
+        params = create_nvrtc_code(cus, namespace_root, cudadevrt_path,
                                        custom_names, std, add_arch_flag=add_arch_flag)
         if verbose:
             if verbose_path:
                 verbose_path_p = Path(verbose_path)
-                for k, v in mod_params.headers.items():
+                for k, v in params.headers.items():
                     code_path = verbose_path_p / k
                     code_path.parent.mkdir(exist_ok=True, parents=True)
                     with code_path.open("w") as f:
                         f.write(v)
             else:
-                for k, v in mod_params.headers.items():
+                for k, v in params.headers.items():
                     print(k)
                     print(v)
         try:
-            super().__init__(mod_params.code,
-                            mod_params.headers,
-                            mod_params.opts,
-                            name_exprs=mod_params.name_exprs,
-                            name_to_meta=mod_params.name_to_meta,
+            super().__init__(params.code,
+                            params,
+                            params.headers,
+                            params.opts,
+                            name_exprs=params.name_exprs,
+                            name_to_meta=params.name_to_meta,
                             cudadevrt_path=cudadevrt_path)
         except RuntimeError:
-            print("Build Error. Kernel Code:\n{}".format(mod_params.debug_code))
+            print("Build Error. Kernel Code:\n{}".format(params.debug_code))
             raise
 
 
@@ -503,7 +507,7 @@ class CummLLVMModule:
                  verbose: bool = False,
                  verbose_path: str = "",
                  std: str = "c++14") -> None:
-        self.mod_params: NVRTCModuleParams = create_nvrtc_code(cus,
+        self.params: NVRTCModuleParams = create_nvrtc_code(cus,
                                                                namespace_root,
                                                                "", [],
                                                                std,
@@ -511,31 +515,31 @@ class CummLLVMModule:
         if verbose:
             if verbose_path:
                 verbose_path_p = Path(verbose_path)
-                for k, v in self.mod_params.headers.items():
+                for k, v in self.params.headers.items():
                     code_path = verbose_path_p / k
                     code_path.parent.mkdir(exist_ok=True, parents=True)
                     with code_path.open("w") as f:
                         f.write(v)
             else:
-                for k, v in self.mod_params.headers.items():
+                for k, v in self.params.headers.items():
                     print(k)
                     print(v)
         self._llvm_mod: Optional[Any] = None
         self._llvm_engine: Optional[Any] = None
         self._use_llvm_bit_code = True
 
-        self.name_to_meta = self.mod_params.name_to_meta
+        self.name_to_meta = self.params.name_to_meta
 
     def load(self):
         import llvmlite.binding as llvm
         _lazy_load_llvm()
         # use clang++ to get ir
-        opts = self.mod_params.opts
-        _lazy_load_lib_for_llvm(self.mod_params.libraries,
-                                self.mod_params.libpaths)
+        opts = self.params.opts
+        _lazy_load_lib_for_llvm(self.params.libraries,
+                                self.params.libpaths)
         with tempfile.TemporaryDirectory() as fdir:
             inc_dir = Path(fdir) / "include"
-            for k, v in self.mod_params.headers.items():
+            for k, v in self.params.headers.items():
                 code_path = Path(inc_dir) / k
                 code_path.parent.mkdir(exist_ok=True, parents=True)
                 with code_path.open("w") as f:
@@ -544,7 +548,7 @@ class CummLLVMModule:
             out_name = Path(fdir) / "ir.ll"
             with tempfile.NamedTemporaryFile("w", suffix=".cc") as f2:
                 f2.seek(0)
-                f2.write(self.mod_params.code)
+                f2.write(self.params.code)
                 f2.flush()
                 # -fno-use-cxa-atexit:
                 # https://groups.google.com/g/llvm-dev/c/WUMwGnaaaSc
@@ -710,7 +714,7 @@ class CummMetalModule:
                  verbose: bool = False,
                  verbose_path: str = "",
                  std: str = "c++14") -> None:
-        self.mod_params: NVRTCModuleParams = create_nvrtc_code(cus,
+        self.params: NVRTCModuleParams = create_nvrtc_code(cus,
                                                                namespace_root,
                                                                "", [],
                                                                std,
@@ -718,28 +722,28 @@ class CummMetalModule:
         if verbose:
             if verbose_path:
                 verbose_path_p = Path(verbose_path)
-                for k, v in self.mod_params.headers.items():
+                for k, v in self.params.headers.items():
                     code_path = verbose_path_p / k
                     code_path.parent.mkdir(exist_ok=True, parents=True)
                     with code_path.open("w") as f:
                         f.write(v)
             else:
-                for k, v in self.mod_params.headers.items():
+                for k, v in self.params.headers.items():
                     print(k)
                     print(v)
         self._metal_mod: Optional[tv.MetalModule] = None
-        self.name_to_meta = self.mod_params.name_to_meta
+        self.name_to_meta = self.params.name_to_meta
 
     def load(self):
         import llvmlite.binding as llvm
         _lazy_load_llvm()
         # use clang++ to get ir
-        opts = self.mod_params.opts
-        _lazy_load_lib_for_llvm(self.mod_params.libraries,
-                                self.mod_params.libpaths)
+        opts = self.params.opts
+        _lazy_load_lib_for_llvm(self.params.libraries,
+                                self.params.libpaths)
         with tempfile.TemporaryDirectory() as fdir:
             inc_dir = Path(fdir) / "include"
-            for k, v in self.mod_params.headers.items():
+            for k, v in self.params.headers.items():
                 code_path = Path(inc_dir) / k
                 code_path.parent.mkdir(exist_ok=True, parents=True)
                 with code_path.open("w") as f:
@@ -750,9 +754,9 @@ class CummMetalModule:
 
             with tempfile.NamedTemporaryFile("w", suffix=".metal") as f2:
                 f2.seek(0)
-                f2.write(self.mod_params.code)
+                f2.write(self.params.code)
                 f2.flush()
-                # print(self.mod_params.debug_code)
+                # print(self.params.debug_code)
                 try:
                     subprocess.check_output([
                         "xcrun", "-sdk", "macosx", "metal", "-c",
@@ -766,10 +770,10 @@ class CummMetalModule:
                         "-o", str(out_lib_name), str(out_name)
                     ])
                 except:
-                    for k, v in self.mod_params.headers.items():
+                    for k, v in self.params.headers.items():
                         print(f"------ Header {k} -------")
                         print(v)
-                    print("Build Error. Opts: {} Kernel Code:\n{}".format(opts, self.mod_params.debug_code))
+                    print("Build Error. Opts: {} Kernel Code:\n{}".format(opts, self.params.debug_code))
                     raise
             with out_lib_name.open("rb") as f:
                 metal_data = f.read()

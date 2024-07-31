@@ -41,6 +41,64 @@ std::unique_ptr<T, void (*)(T *)> make_apple_mtl_ptr(T *ptr) {
   });
 }
 
+inline const void *pageAlignedBlockPtr(const void *ptr, int size,
+                                 int *alignedBlockSize) {
+  uintptr_t address = (uintptr_t)ptr;
+  uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
+  uintptr_t alignedEnd = ((address + size) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+  uint64_t alignedLength = alignedEnd - alignedAddress;
+
+  TV_ASSERT_INVALID_ARG(address >= alignedAddress, "err");
+  TV_ASSERT_INVALID_ARG(address + size <= alignedAddress + alignedLength,
+                        "err");
+
+  *alignedBlockSize = alignedLength;
+  return (const void*)(alignedAddress);
+}
+inline void *pageAlignedBlockPtr(void *ptr, int size,
+                                 int *alignedBlockSize) {
+  uintptr_t address = (uintptr_t)ptr;
+  uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
+  uintptr_t alignedEnd = ((address + size) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+  uint64_t alignedLength = alignedEnd - alignedAddress;
+
+  TV_ASSERT_INVALID_ARG(address >= alignedAddress, "err");
+  TV_ASSERT_INVALID_ARG(address + size <= alignedAddress + alignedLength,
+                        "err");
+
+  *alignedBlockSize = alignedLength;
+  return (void*)(alignedAddress);
+}
+
+inline std::tuple<MTL::Buffer*, int, void*> create_apple_buffer_from_cpu_ptr(void* ptr, int byte_size, MTL::Device* dev_ptr){
+  // for copy from/to cpu
+  int alignedLength = 0;
+  void* host_dst = ptr;
+  void* alignedPtr = pageAlignedBlockPtr(host_dst, int(byte_size),
+  &alignedLength); 
+  int destOffset = (std::uintptr_t(host_dst) -
+  std::uintptr_t(alignedPtr));
+  // 4 bytes alignment required on macos for blits.
+  TV_ASSERT_RT_ERR(destOffset % 4 == 0, "Unaligned blit request");
+  auto ptr_ptl = dev_ptr->newBuffer(alignedPtr, alignedLength, MTL::ResourceStorageModeShared, nullptr);
+  TV_ASSERT_RT_ERR(ptr_ptl, "Metal buffer not created", PAGE_SIZE);
+  return std::make_tuple(ptr_ptl, destOffset, alignedPtr);
+}
+inline std::tuple<MTL::Buffer*, int, const void*> create_apple_buffer_from_cpu_ptr(const void* ptr, int byte_size, MTL::Device* dev_ptr){
+  // for copy from/to cpu
+  int alignedLength = 0;
+  const void* host_dst = ptr;
+  const void* alignedPtr = pageAlignedBlockPtr(host_dst, int(byte_size),
+  &alignedLength); 
+  int destOffset = (std::uintptr_t(host_dst) -
+  std::uintptr_t(alignedPtr));
+  // 4 bytes alignment required on macos for blits.
+  TV_ASSERT_RT_ERR(destOffset % 4 == 0, "Unaligned blit request");
+  auto ptr_ptl = dev_ptr->newBuffer((void*)(alignedPtr), alignedLength, MTL::ResourceStorageModeShared, nullptr);
+  TV_ASSERT_RT_ERR(ptr_ptl, "Metal buffer not created", PAGE_SIZE);
+  return std::make_tuple(ptr_ptl, destOffset, alignedPtr);
+}
+
 #endif 
 
 }
@@ -190,6 +248,62 @@ public:
         _commandBuffer->waitUntilCompleted();
         _commandBuffer = NS::SharedPtr<MTL::CommandBuffer>{};
       }
+    }
+    void copy(MTL::Buffer* src, MTL::Buffer* dst, size_t src_offset, size_t dst_offset, size_t length, SyncType sync_type) {
+      TV_ASSERT_INVALID_ARG(src && dst, "Metal buffer is null");
+      auto blitEncoder = commandBuffer()->blitCommandEncoder();
+      // For some reason copyFromBuffer for 4Gb fails without returning an error
+      // See https://github.com/pytorch/pytorch/issues/124335
+      // Workaround by batching copy commands into 2Gb chunks
+      constexpr size_t max_copy_size = 0x80000000; // 2GB
+      size_t bytes_copied = 0;
+      size_t bytes_remains = length;
+      while (bytes_remains > 0) {
+        size_t bytes_to_copy = std::min(max_copy_size, bytes_remains);
+        blitEncoder->copyFromBuffer(src, src_offset + bytes_copied, dst, dst_offset + bytes_copied, bytes_to_copy);
+        bytes_copied += bytes_to_copy;
+        bytes_remains -= bytes_to_copy;
+      }
+      blitEncoder->endEncoding();
+      synchronize(sync_type);
+    }
+    void copy_src_raw(const void* src, size_t src_size, MTL::Buffer* dst, size_t src_offset, size_t dst_offset, size_t size, SyncType sync_type) {
+      TV_ASSERT_INVALID_ARG(src && dst, "Metal buffer is null");
+
+      auto res = detail::create_apple_buffer_from_cpu_ptr(src, src_size,
+                                                  device_ptr_);
+      auto ptr_mtl = detail::make_apple_mtl_ptr(std::get<0>(res));
+      auto boffset = std::get<1>(res);
+      return copy(ptr_mtl.get(), dst, boffset + src_offset, dst_offset, size, sync_type);
+    }
+
+    void copy_dst_raw(MTL::Buffer* src, void* dst, size_t dst_size, size_t src_offset, size_t dst_offset, size_t size, SyncType sync_type) {
+      TV_ASSERT_INVALID_ARG(src && dst, "Metal buffer is null");
+
+      auto res = detail::create_apple_buffer_from_cpu_ptr(dst, dst_size,
+                                                  device_ptr_);
+      auto ptr_mtl = detail::make_apple_mtl_ptr(std::get<0>(res));
+      auto boffset = std::get<1>(res);
+      return copy(src, ptr_mtl.get(), src_offset, boffset + dst_offset, size, sync_type);
+    }
+
+    void fill(MTL::Buffer* buffer, size_t offset, size_t size, uint8_t value, SyncType sync_type) {
+      TV_ASSERT_INVALID_ARG(buffer, "Metal buffer is null");
+
+      auto blitEncoder = commandBuffer()->blitCommandEncoder();
+      blitEncoder->fillBuffer(buffer, NS::Range::Make(offset,
+                                        size), value);
+      blitEncoder->endEncoding();
+      synchronize(sync_type);
+    }
+
+    void fill_raw(void* buffer, size_t offset, size_t size, uint8_t value, SyncType sync_type) {
+      TV_ASSERT_INVALID_ARG(buffer, "Metal buffer is null");
+      auto res = detail::create_apple_buffer_from_cpu_ptr(buffer, size,
+                                                  device_ptr_);
+      auto ptr_mtl = detail::make_apple_mtl_ptr(std::get<0>(res));
+      auto boffset = std::get<1>(res);
+      return fill(ptr_mtl.get(), boffset + offset, size, value, sync_type);
     }
 
 };

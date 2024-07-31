@@ -178,23 +178,6 @@ template <typename T>
 struct is_convertible<T, __nv_bfloat16> : std::is_floating_point<T> {};
 #endif
 
-#ifdef TV_HARDWARE_ACC_METAL
-static void *pageAlignedBlockPtr(const void *ptr, int size,
-                                 int *alignedBlockSize) {
-  uintptr_t address = (uintptr_t)ptr;
-  uintptr_t alignedAddress = address & ~(PAGE_SIZE - 1);
-  uintptr_t alignedEnd = ((address + size) + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-  uint64_t alignedLength = alignedEnd - alignedAddress;
-
-  TV_ASSERT_INVALID_ARG(address >= alignedAddress, "err");
-  TV_ASSERT_INVALID_ARG(address + size <= alignedAddress + alignedLength,
-                        "err");
-
-  *alignedBlockSize = alignedLength;
-  return (void *)alignedAddress;
-}
-#endif
-
 template <typename T> class TensorStorage {
   // friend Tensor;
 public:
@@ -205,15 +188,22 @@ public:
       ptr_ = nullptr;
     } else {
       if (device == -1) {
+        if (pinned || managed) {
+          TV_ASSERT_INVALID_ARG(
+              pinned ^ managed,
+              "cpu tensor can't be managed (shared in apple silicon)");
+        }
         if (pinned_) {
 #if defined(TV_HARDWARE_ACC_CUDA)
           checkCudaErrors(cudaMallocHost(&ptr_, size * sizeof(T)));
 #else
-          TV_THROW_INVALID_ARG(
-              "you need to define TV_ENABLE_HARDWARE_ACC to use pinned");
+          TV_THROW_INVALID_ARG("you need to define TV_ENABLE_HARDWARE_ACC to "
+                               "use pinned, only cuda support this.");
 #endif
-        } else {
-#ifdef TV_HARDWARE_ACC_METAL
+        } else if (managed) {
+#if defined(TV_HARDWARE_ACC_CUDA)
+          checkCudaErrors(cudaMallocManaged(&this->ptr_, size * sizeof(T)));
+#elif defined(TV_HARDWARE_ACC_METAL)
           ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
           TV_ASSERT_RT_ERR(ptr_mtl_device_, "Metal device not found");
           ptr_mtl_ =
@@ -221,16 +211,16 @@ public:
           TV_ASSERT_RT_ERR(ptr_mtl_, "Metal buffer not created");
           ptr_ = reinterpret_cast<T *>(ptr_mtl_->contents());
 #else
-          ptr_ = new T[size];
+          TV_THROW_INVALID_ARG("don't compiled with cuda or metal");
 #endif
+        } else {
+          ptr_ = new T[size];
         }
       } else {
+        TV_ASSERT_INVALID_ARG(!managed && !pinned,
+                              "only cpu tensor can be managed or pinned");
 #if defined(TV_HARDWARE_ACC_CUDA)
-        if (managed) {
-          checkCudaErrors(cudaMallocManaged(&this->ptr_, size * sizeof(T)));
-        } else {
-          checkCudaErrors(cudaMalloc(&ptr_, size * sizeof(T)));
-        }
+        checkCudaErrors(cudaMalloc(&ptr_, size * sizeof(T)));
 #elif defined(TV_HARDWARE_ACC_METAL)
         ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
         TV_ASSERT_RT_ERR(ptr_mtl_device_, "Metal device not found");
@@ -245,39 +235,47 @@ public:
       }
     }
   }
-  TensorStorage(T *ptr, size_t size, int device, int storage_offset = 0)
-      : size_(size), ptr_(ptr), from_blob_(true), device_(device) {
+  TensorStorage(T *ptr, size_t size, int device, int storage_offset = 0,
+                bool managed = false)
+      : size_(size), ptr_(ptr), from_blob_(true), device_(device),
+        managed_(managed) {
     if (size == 0) {
       ptr_ = nullptr;
     }
 #ifdef TV_HARDWARE_ACC_METAL
     if (device == 0) {
-      // assume the ptr is come from torch mps
-      // then the ptr is Buffer ptr, not data ptr
-      // pytorch mps tensor use private buffer, so we can't
-      // get the pointer, pytorch can't get the pointer too.
+      if (managed) {
+        // pytorch don't have managed, so we assume the ptr come from
+        // tensorview, so it's data ptr, not buffer ptr.
+        ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
+        TV_ASSERT_RT_ERR(ptr_mtl_device_, "Metal device not found");
 
-      // https://stackoverflow.com/questions/76989609/how-to-convert-a-idmtlcommandqueue-to-a-mtlcommandqueue-of-metal-cpp
-      MTL::Buffer *buffer = reinterpret_cast<MTL::Buffer *>(ptr);
-      ptr_mtl_ = buffer;
-      offset_ = storage_offset;
-      return;
+        int alignedLength = 0;
+        void *host_dst = ptr;
+        void *alignedPtr = detail::pageAlignedBlockPtr(
+            host_dst, int(size * sizeof(T)), &alignedLength);
+        int destOffset = (uintptr_t(host_dst) - uintptr_t(alignedPtr));
+        // 4 bytes alignment required on macos for blits.
+        TV_ASSERT_RT_ERR(destOffset % 4 == 0, "Unaligned blit request");
+        TV_ASSERT_RT_ERR(destOffset % sizeof(T) == 0, "should not happen");
+        ptr_ = reinterpret_cast<T *>(alignedPtr);
+        ptr_mtl_ = ptr_mtl_device_->newBuffer(
+            alignedPtr, alignedLength, MTL::ResourceStorageModeShared, nullptr);
+        TV_ASSERT_RT_ERR(ptr_mtl_, "Metal buffer not created", PAGE_SIZE);
+        offset_ = destOffset / sizeof(T);
+      } else {
+        // assume the ptr is come from torch mps
+        // then the ptr is Buffer ptr, not data ptr
+        // pytorch mps tensor use private buffer, so we can't
+        // get the pointer, pytorch can't get the pointer too.
+
+        // https://stackoverflow.com/questions/76989609/how-to-convert-a-idmtlcommandqueue-to-a-mtlcommandqueue-of-metal-cpp
+        MTL::Buffer *buffer = reinterpret_cast<MTL::Buffer *>(ptr);
+        ptr_mtl_ = buffer;
+        offset_ = storage_offset;
+        return;
+      }
     }
-    ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
-    TV_ASSERT_RT_ERR(ptr_mtl_device_, "Metal device not found");
-    int alignedLength = 0;
-    const void* host_dst = ptr;
-    void* alignedPtr = pageAlignedBlockPtr(host_dst, int(size * sizeof(T)),
-    &alignedLength); int destOffset = (uintptr_t(host_dst) -
-    uintptr_t(alignedPtr));
-    // 4 bytes alignment required on macos for blits.
-    TV_ASSERT_RT_ERR(destOffset % 4 == 0, "Unaligned blit request");
-    TV_ASSERT_RT_ERR(destOffset % sizeof(T) == 0, "should not happen");
-    ptr_ = reinterpret_cast<T*>(alignedPtr);
-    ptr_mtl_ =
-        ptr_mtl_device_->newBuffer(alignedPtr, alignedLength, MTL::ResourceStorageModeShared, nullptr);
-    TV_ASSERT_RT_ERR(ptr_mtl_, "Metal buffer not created", PAGE_SIZE);
-    offset_ = destOffset / sizeof(T);
 #endif
   }
 
@@ -293,8 +291,10 @@ public:
 #if defined(TV_HARDWARE_ACC_CUDA)
         cudaFreeHost(ptr_);
 #endif
-      } else {
-#ifdef TV_HARDWARE_ACC_METAL
+      } else if (managed_) {
+#if defined(TV_HARDWARE_ACC_CUDA)
+        cudaFree(ptr_);
+#elif defined(TV_HARDWARE_ACC_METAL)
         if (ptr_mtl_ != nullptr) {
           ptr_mtl_->release();
           ptr_mtl_ = nullptr;
@@ -303,9 +303,10 @@ public:
           ptr_mtl_device_->release();
           ptr_mtl_device_ = nullptr;
         }
-#else
-        delete[] ptr_;
+        ptr_ = nullptr;
 #endif
+      } else {
+        delete[] ptr_;
       }
     } else {
 #if defined(TV_HARDWARE_ACC_CUDA)
@@ -325,6 +326,8 @@ public:
   };
 
   inline size_t size() const { return size_; }
+  inline size_t byte_size() const { return size_ * sizeof(T); }
+
 #ifdef TV_HARDWARE_ACC_METAL
   const auto *apple_metal_buffer_ptr() const { return ptr_mtl_; }
   auto *apple_metal_buffer_ptr() { return ptr_mtl_; }
@@ -338,20 +341,28 @@ public:
 #endif
     return ptr_ + offset_;
   }
-  const T *data() const { 
+  const T *data() const {
 #ifdef TV_HARDWARE_ACC_METAL
     TV_ASSERT_INVALID_ARG(
         !is_private(),
         "you can't access pointer of private buffer, currently only apple "
         "buffer can be private. only gpu kernels can access private data.");
 #endif
-    return ptr_ + offset_; 
+    return ptr_ + offset_;
   }
   bool is_cpu() const { return device_ == -1; }
 
-  bool empty() const { 
+  bool empty() const {
 #ifdef TV_HARDWARE_ACC_METAL
-    return ptr_mtl_ == nullptr || size_ == 0;
+    if (!is_cpu()) {
+      return ptr_mtl_ == nullptr || size_ == 0;
+    } else {
+      if (managed_) {
+        return ptr_mtl_ == nullptr || size_ == 0;
+      } else {
+        return ptr_ == nullptr || size_ == 0;
+      }
+    }
 #else
     return ptr_ == nullptr || size_ == 0;
 #endif
@@ -370,17 +381,23 @@ public:
   std::uintptr_t gpu_address() const {
     TV_ASSERT_INVALID_ARG(!is_cpu(), "only support gpu tensor");
 #if defined(TV_HARDWARE_ACC_CUDA)
-    std::uintptr_t address = ptr_;
+    std::uintptr_t address = reinterpret_cast<std::uintptr_t>(ptr_);
     return address;
 #elif defined(TV_HARDWARE_ACC_METAL)
     TV_ASSERT_INVALID_ARG(ptr_mtl_ != nullptr, "invalid metal buffer");
     return std::uintptr_t(ptr_mtl_->gpuAddress());
-#else 
+#else
     TV_THROW_RT_ERR("only support gpu tensor");
 #endif
   }
   int device() const { return device_; }
   void zero_(int64_t offset, int64_t length, Context ctx = Context()) {
+    if (size_ == 0) {
+      TV_ASSERT_INVALID_ARG(
+          offset == 0 && length == 0,
+          "when you zero a empty tensor, offset and length should be 0");
+      return;
+    }
     TV_ASSERT_RT_ERR(length <= size_ - offset, "eror");
     int target_device = device_;
 #ifdef TV_HARDWARE_ACC_METAL
@@ -399,27 +416,21 @@ public:
             cudaMemset(data() + offset * sizeof(T), 0, length * sizeof(T)));
       }
 #elif defined(TV_HARDWARE_ACC_METAL)
-      bool sync_op = false;
+      AppleMetalContext::SyncType sync_type =
+          AppleMetalContext::SyncType::COMMIT;
       if (!ctx.has_item(ContextType::kAppleMetal)) {
         ctx = Context().create_apple_metal_context();
-        sync_op = true;
+        sync_type = AppleMetalContext::SyncType::COMMIT_AND_WAIT;
       }
-      TV_ASSERT_INVALID_ARG(
-          ctx.has_item(ContextType::kAppleMetal),
-          "you must use a context with metal created explicitly");
       auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
-                                ctx.get_item(ContextType::kAppleMetal));
-      auto cb = metal_ctx->commandBuffer();
-      auto bce = make_apple_mtl_ptr(cb->blitCommandEncoder());
-      bce->fillBuffer(ptr_mtl_,
-                      NS::Range::Make(offset * sizeof(T) + byte_offset(),
-                                      length * sizeof(T)),
-                      0);
-      bce->endEncoding();
-      if (sync_op) {
-        metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
-      }else{
-        metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
+          ctx.get_item(ContextType::kAppleMetal));
+      if (ptr_mtl_ == nullptr) {
+        TV_ASSERT_RT_ERR(ptr_ != nullptr, "invalid ptr, shouldn't happen");
+        metal_ctx->fill_raw(ptr_, byte_offset() + offset * sizeof(T), length, 0,
+                            sync_type);
+      } else {
+        metal_ctx->fill(ptr_mtl_, byte_offset() + offset * sizeof(T), length, 0,
+                        sync_type);
       }
 #else
       TV_THROW_INVALID_ARG("don't compiled with cuda");
@@ -428,7 +439,96 @@ public:
   }
 
   void zero_whole_(Context ctx = Context()) { return zero_(0, size_, ctx); }
-
+  void copy_(const TensorStorage<T> &src, Context ctx = Context()) {
+    TV_ASSERT_INVALID_ARG(size_ == src.size_, "size not match");
+    if (size_ == 0) {
+      return;
+    }
+    copy(src, 0, *this, 0, size_, ctx);
+  }
+  static void copy(const TensorStorage<T> &src, size_t src_offset,
+                   TensorStorage<T> &dst, size_t dst_offset, size_t copy_size,
+                   Context ctx = Context()) {
+    if (copy_size == 0) {
+      return;
+    }
+    TV_ASSERT_INVALID_ARG(src.size_ >= src_offset + copy_size,
+                          "src size not match");
+    TV_ASSERT_INVALID_ARG(dst.size_ >= dst_offset + copy_size,
+                          "dst size not match");
+    size_t copy_size_in_bytes = copy_size * sizeof(T);
+#if defined(TV_HARDWARE_ACC_CUDA)
+    if (src.device_ == -1 && dst.device_ == -1) {
+      std::copy(src.data() + src_offset, src.data() + src_offset + copy_size,
+                dst.data() + dst_offset);
+    } else if (src.device_ == -1 && dst.device_ != -1) {
+      if (ctx.has_cuda_stream()) {
+        host2dev(dst.data() + dst_offset, src.data() + src_offset,
+                 copy_size, ctx.cuda_stream());
+      } else {
+        host2dev(dst.data() + dst_offset, src.data() + src_offset,
+                 copy_size);
+      }
+    } else if (src.device_ != -1 && dst.device_ == -1) {
+      if (ctx.has_cuda_stream()) {
+        dev2host(dst.data() + dst_offset, src.data() + src_offset,
+                 copy_size, ctx.cuda_stream());
+      } else {
+        dev2host(dst.data() + dst_offset, src.data() + src_offset,
+                 copy_size);
+      }
+    } else {
+      if (ctx.has_cuda_stream()) {
+        dev2dev(dst.data() + dst_offset, src.data() + src_offset,
+                copy_size, ctx.cuda_stream());
+      } else {
+        dev2dev(dst.data() + dst_offset, src.data() + src_offset,
+                copy_size);
+      }
+    }
+#elif defined(TV_HARDWARE_ACC_METAL)
+    AppleMetalContext::SyncType sync_type = AppleMetalContext::SyncType::COMMIT;
+    if (!ctx.has_item(ContextType::kAppleMetal)) {
+      ctx = Context().create_apple_metal_context();
+      sync_type = AppleMetalContext::SyncType::COMMIT_AND_WAIT;
+    }
+    auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
+        ctx.get_item(ContextType::kAppleMetal));
+    if (src.ptr_mtl_ == nullptr && dst.ptr_mtl_ == nullptr) {
+      // always cpu to cpu, just use std copy
+      std::copy(src.data() + src_offset, src.data() + src_offset + copy_size,
+                dst.data() + dst_offset);
+    } else if (src.ptr_mtl_ == nullptr && dst.ptr_mtl_ != nullptr) {
+      auto ptr = src.ptr_;
+      TV_ASSERT_RT_ERR(ptr != nullptr, "invalid ptr, shouldn't happen");
+      metal_ctx->copy_src_raw(ptr, src.byte_size(), dst.ptr_mtl_,
+                              src.byte_offset() + src_offset * sizeof(T),
+                              dst.byte_offset() + dst_offset * sizeof(T),
+                              copy_size_in_bytes, sync_type);
+    } else if (src.ptr_mtl_ != nullptr && dst.ptr_mtl_ == nullptr) {
+      // when copy to a cpu tensor, we always do sync.
+      auto ptr = dst.ptr_;
+      TV_ASSERT_RT_ERR(ptr != nullptr, "invalid ptr, shouldn't happen");
+      metal_ctx->copy_dst_raw(src.ptr_mtl_, ptr, dst.byte_size(),
+                              src.byte_offset() + src_offset * sizeof(T),
+                              dst.byte_offset() + dst_offset * sizeof(T),
+                              copy_size_in_bytes,
+                              AppleMetalContext::SyncType::COMMIT_AND_WAIT);
+    } else {
+      metal_ctx->copy(src.ptr_mtl_, dst.ptr_mtl_,
+                      src.byte_offset() + src_offset * sizeof(T),
+                      dst.byte_offset() + dst_offset * sizeof(T),
+                      copy_size_in_bytes, sync_type);
+    }
+#else
+    if (src.device_ == -1 && dst.device_ == -1) {
+      std::copy(src.data() + src_offset, src.data() + src_offset + copy_size,
+                dst.data() + dst_offset);
+    } else {
+      TV_THROW_RT_ERR("only support cpu tensor");
+    }
+#endif
+  }
   std::shared_ptr<TensorStorage<T>> clone(Context ctx = Context()) {
     // clone whole storage
     auto new_storage_ptr =
@@ -436,110 +536,19 @@ public:
     if (size_ == 0) {
       return new_storage_ptr;
     }
-    int target_device = device_;
-#ifdef TV_HARDWARE_ACC_METAL
-    target_device = 0; // for apple m cpu, all buffer are shared.
-#endif
-
-    if (target_device == -1) {
-
-      if (pinned_) {
-#if defined(TV_HARDWARE_ACC_CUDA)
-        if (ctx.has_cuda_stream()) {
-          host2host(new_storage_ptr->data(), data(), size_ * sizeof(T),
-                    ctx.cuda_stream());
-        } else {
-          host2host(new_storage_ptr->data(), data(), size_ * sizeof(T));
-        }
-#else
-        std::copy(data(), data() + size_ * sizeof(T), new_storage_ptr->data());
-#endif
-      } else {
-        // use memcpy instead to avoid cuda context init
-        std::copy(data(), data() + size_ * sizeof(T), new_storage_ptr->data());
-      }
-    }
-#if defined(TV_HARDWARE_ACC_CUDA)
-    else {
-      if (ctx.has_cuda_stream()) {
-        dev2dev(new_storage_ptr->data(), data(), size_ * sizeof(T),
-                ctx.cuda_stream());
-      } else {
-        dev2dev(new_storage_ptr->data(), data(), size_ * sizeof(T));
-      }
-    }
-#elif defined(TV_HARDWARE_ACC_METAL)
-    bool sync_op = false;
-    if (!ctx.has_item(ContextType::kAppleMetal)) {
-      ctx = Context().create_apple_metal_context();
-      sync_op = true;
-    }
-    auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
-                              ctx.get_item(ContextType::kAppleMetal));
-    auto cb = metal_ctx->commandBuffer();
-    auto bce = make_apple_mtl_ptr(cb->blitCommandEncoder());
-    bce->copyFromBuffer(ptr_mtl_, byte_offset(), new_storage_ptr->ptr_mtl_,
-                        new_storage_ptr->byte_offset(), size_ * sizeof(T));
-    bce->endEncoding();
-    if (sync_op) {
-      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
-    }else{
-      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
-    }
-#else
-    else {
-      TV_THROW_RT_ERR("only support cpu tensor");
-    }
-#endif
+    new_storage_ptr->copy_(*this, ctx);
     return new_storage_ptr;
   }
 
   std::shared_ptr<TensorStorage<T>> cpu(Context ctx = Context()) {
     // clone whole storage
-#ifdef TV_HARDWARE_ACC_METAL
-    auto res = clone(ctx);
-    res->device_ = -1;
-    return res;
-#else
     auto new_storage_ptr =
         std::make_shared<TensorStorage<T>>(size_, -1, managed_, pinned_);
     if (size_ == 0) {
       return new_storage_ptr;
     }
-    if (device_ == -1) {
-
-      if (pinned_) {
-#if defined(TV_HARDWARE_ACC_CUDA)
-        if (ctx.has_cuda_stream()) {
-          host2host(new_storage_ptr->data(), data(), size_ * sizeof(T),
-                    ctx.cuda_stream());
-        } else {
-          host2host(new_storage_ptr->data(), data(), size_ * sizeof(T));
-        }
-#else
-        std::copy(data(), data() + size_ * sizeof(T), new_storage_ptr->data());
-#endif
-      } else {
-        // use memcpy instead to avoid cuda context init
-        std::copy(data(), data() + size_ * sizeof(T), new_storage_ptr->data());
-      }
-    }
-#if defined(TV_HARDWARE_ACC_CUDA)
-    else {
-      if (ctx.has_cuda_stream()) {
-        dev2host(new_storage_ptr->data(), data(), size_ * sizeof(T),
-                 ctx.cuda_stream());
-      } else {
-        dev2host(new_storage_ptr->data(), data(), size_ * sizeof(T));
-      }
-    }
-#else
-    else {
-      TV_THROW_RT_ERR("only support cpu tensor");
-    }
-#endif
+    new_storage_ptr->copy_(*this, ctx);
     return new_storage_ptr;
-#endif
   }
 
 private:
@@ -880,19 +889,20 @@ struct Tensor {
     // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     auto itemsize = detail::sizeof_dtype(dtype);
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
-        reinterpret_cast<uint8_t *>(ptr),
-        shape.size() * itemsize, device, storage_offset * itemsize);
+        reinterpret_cast<uint8_t *>(ptr), shape.size() * itemsize, device,
+        storage_offset * itemsize);
     shape_ = shape;
     stride_ = stride;
     contiguous_ = compute_is_contiguous();
   }
-  Tensor(void *ptr, TensorShape shape, DType dtype, int device = -1, int storage_offset = 0)
+  Tensor(void *ptr, TensorShape shape, DType dtype, int device = -1,
+         int storage_offset = 0)
       : dtype_(dtype) {
     // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     auto itemsize = detail::sizeof_dtype(dtype);
     storage_ = std::make_shared<detail::TensorStorage<uint8_t>>(
-        reinterpret_cast<uint8_t *>(ptr),
-        shape.size() * itemsize, device, storage_offset * itemsize);
+        reinterpret_cast<uint8_t *>(ptr), shape.size() * itemsize, device,
+        storage_offset * itemsize);
     shape_ = shape;
     stride_ = shape.stride_rowmajor();
     contiguous_ = compute_is_contiguous();
@@ -910,7 +920,8 @@ struct Tensor {
     stride_ = stride;
     contiguous_ = compute_is_contiguous();
   }
-  Tensor(const void *ptr, TensorShape shape, DType dtype, int device = -1, int storage_offset = 0)
+  Tensor(const void *ptr, TensorShape shape, DType dtype, int device = -1,
+         int storage_offset = 0)
       : dtype_(dtype), writeable_(false) {
     // TV_ASSERT_INVALID_ARG(!shape.empty(), "dont support empty shape");
     auto itemsize = detail::sizeof_dtype(dtype);
@@ -1373,9 +1384,7 @@ public:
   size_t byte_offset() const { return offset_; }
   bool is_cpu() const { return storage_ ? storage_->is_cpu() : true; }
   bool is_readonly() const { return !writeable_; }
-  std::uintptr_t gpu_address() const {
-    return storage()->gpu_address();
-  }
+  std::uintptr_t gpu_address() const { return storage()->gpu_address(); }
   Tensor get_readonly() const {
     // used for cumm inliner, we can capture const tensor
     // as const ptr
@@ -1413,9 +1422,9 @@ public:
   template <typename T> Tensor &fill_template_(T val, Context ctx) {
     writable_check();
     auto target_device = this->device();
-// #ifdef TV_HARDWARE_ACC_METAL
-//     target_device = -1;
-// #endif
+    // #ifdef TV_HARDWARE_ACC_METAL
+    //     target_device = -1;
+    // #endif
     if (target_device == -1) {
       std::fill(this->data_ptr<T>(), this->data_ptr<T>() + this->size(), val);
     } else {
@@ -1450,9 +1459,9 @@ public:
 
   Tensor &fill_(int64_t val, Context ctx = Context()) {
     auto target_device = this->device();
-// #ifdef TV_HARDWARE_ACC_METAL
-//     target_device = -1;
-// #endif
+    // #ifdef TV_HARDWARE_ACC_METAL
+    //     target_device = -1;
+    // #endif
     using int_types_t =
         std::tuple<int32_t, int16_t, int8_t, uint32_t, uint16_t, uint8_t>;
     using int_types_cpu_t = std::tuple<uint64_t, int64_t, int32_t, int16_t,
@@ -1520,94 +1529,100 @@ public:
     TV_ASSERT_RT_ERR(this->size() == tensor.size(), "must have same size");
     TV_ASSERT_RT_ERR(this->dtype() == tensor.dtype(), "must have same dtype",
                      dtype_str(this->dtype()), dtype_str(tensor.dtype()));
-#ifdef TV_HARDWARE_ACC_METAL
-    // use apple metal api to copy
-    bool sync_op = is_cpu(); // always sync if cpu to simulate cuda behavior
-    if (!ctx.has_item(ContextType::kAppleMetal)) {
-      ctx = Context().create_apple_metal_context();
-      sync_op = true;
-    }
-    auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
-                              ctx.get_item(ContextType::kAppleMetal));
-    auto cb = metal_ctx->commandBuffer();
-    TV_ASSERT_RT_ERR(cb, "error");
-    auto bce = detail::make_apple_mtl_ptr(cb->blitCommandEncoder());
-    TV_ASSERT_RT_ERR(bce, "error");
+    detail::TensorStorage<uint8_t>::copy(
+        *(tensor.storage_), tensor.byte_offset(), *(this->storage_),
+        this->byte_offset(), this->raw_size(), ctx);
+    // #ifdef TV_HARDWARE_ACC_METAL
+    //     // use apple metal api to copy
+    //     bool sync_op = is_cpu(); // always sync if cpu to simulate cuda
+    //     behavior if (!ctx.has_item(ContextType::kAppleMetal)) {
+    //       ctx = Context().create_apple_metal_context();
+    //       sync_op = true;
+    //     }
+    //     auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
+    //                               ctx.get_item(ContextType::kAppleMetal));
+    //     auto cb = metal_ctx->commandBuffer();
+    //     TV_ASSERT_RT_ERR(cb, "error");
+    //     auto bce = detail::make_apple_mtl_ptr(cb->blitCommandEncoder());
+    //     TV_ASSERT_RT_ERR(bce, "error");
 
-    auto src = tensor.storage_->apple_metal_buffer_ptr();
-    auto dst = storage_->apple_metal_buffer_ptr();
-    auto src_offset = tensor.byte_offset() + tensor.storage_->byte_offset();
-    auto dst_offset = byte_offset() + storage_->byte_offset();
-    auto size = raw_size();
-    bce->copyFromBuffer(src, src_offset, dst, dst_offset, size);
-    bce->endEncoding();
-    
-    if (sync_op) {
-      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
-    }else{
-      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
-    }
-    return;
-#else
+    //     auto src = tensor.storage_->apple_metal_buffer_ptr();
+    //     auto dst = storage_->apple_metal_buffer_ptr();
+    //     auto src_offset = tensor.byte_offset() +
+    //     tensor.storage_->byte_offset(); auto dst_offset = byte_offset() +
+    //     storage_->byte_offset(); auto size = raw_size();
+    //     bce->copyFromBuffer(src, src_offset, dst, dst_offset, size);
+    //     bce->endEncoding();
 
-    if (this->device() == -1 && tensor.device() == -1) {
-#if defined(TV_HARDWARE_ACC_CUDA)
-      // use memcpy instead to avoid cuda context init
-      if (this->pinned()) {
-        if (ctx.has_cuda_stream()) {
-          host2host(this->raw_data(), tensor.raw_data(),
-                    this->size() * detail::sizeof_dtype(dtype_),
-                    ctx.cuda_stream());
+    //     if (sync_op) {
+    //       metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
+    //     }else{
+    //       metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
+    //     }
+    //     return;
+    // #else
 
-        } else {
-          host2host(this->raw_data(), tensor.raw_data(),
-                    this->size() * detail::sizeof_dtype(dtype_));
-        }
-      } else {
-        std::copy(tensor.raw_data(),
-                  tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
-                  raw_data());
-      }
-#else
-      std::copy(tensor.raw_data(),
-                tensor.raw_data() + size() * detail::sizeof_dtype(dtype_),
-                raw_data());
-#endif
-    }
-#if defined(TV_HARDWARE_ACC_CUDA)
-    else if (device() >= 0 && tensor.device() == -1) {
-      if (ctx.has_cuda_stream()) {
-        host2dev(raw_data(), tensor.raw_data(),
-                 size() * detail::sizeof_dtype(dtype_), ctx.cuda_stream());
+    //     if (this->device() == -1 && tensor.device() == -1) {
+    // #if defined(TV_HARDWARE_ACC_CUDA)
+    //       // use memcpy instead to avoid cuda context init
+    //       if (this->pinned()) {
+    //         if (ctx.has_cuda_stream()) {
+    //           host2host(this->raw_data(), tensor.raw_data(),
+    //                     this->size() * detail::sizeof_dtype(dtype_),
+    //                     ctx.cuda_stream());
 
-      } else {
-        host2dev(raw_data(), tensor.raw_data(),
-                 size() * detail::sizeof_dtype(dtype_));
-      }
+    //         } else {
+    //           host2host(this->raw_data(), tensor.raw_data(),
+    //                     this->size() * detail::sizeof_dtype(dtype_));
+    //         }
+    //       } else {
+    //         std::copy(tensor.raw_data(),
+    //                   tensor.raw_data() + size() *
+    //                   detail::sizeof_dtype(dtype_), raw_data());
+    //       }
+    // #else
+    //       std::copy(tensor.raw_data(),
+    //                 tensor.raw_data() + size() *
+    //                 detail::sizeof_dtype(dtype_), raw_data());
+    // #endif
+    //     }
+    // #if defined(TV_HARDWARE_ACC_CUDA)
+    //     else if (device() >= 0 && tensor.device() == -1) {
+    //       if (ctx.has_cuda_stream()) {
+    //         host2dev(raw_data(), tensor.raw_data(),
+    //                  size() * detail::sizeof_dtype(dtype_),
+    //                  ctx.cuda_stream());
 
-    } else if (device() == -1 && tensor.device() >= 0) {
-      if (ctx.has_cuda_stream()) {
-        dev2host(raw_data(), tensor.raw_data(),
-                 size() * detail::sizeof_dtype(dtype_), ctx.cuda_stream());
+    //       } else {
+    //         host2dev(raw_data(), tensor.raw_data(),
+    //                  size() * detail::sizeof_dtype(dtype_));
+    //       }
 
-      } else {
-        dev2host(raw_data(), tensor.raw_data(),
-                 size() * detail::sizeof_dtype(dtype_));
-      }
-    } else if (device() >= 0 && tensor.device() >= 0) {
-      if (ctx.has_cuda_stream()) {
-        dev2dev(raw_data(), tensor.raw_data(),
-                size() * detail::sizeof_dtype(dtype_), ctx.cuda_stream());
-      } else {
-        dev2dev(raw_data(), tensor.raw_data(),
-                size() * detail::sizeof_dtype(dtype_));
-      }
-    }
-#endif
-    else {
-      TV_THROW_RT_ERR("only support cpu tensor");
-    }
-#endif
+    //     } else if (device() == -1 && tensor.device() >= 0) {
+    //       if (ctx.has_cuda_stream()) {
+    //         dev2host(raw_data(), tensor.raw_data(),
+    //                  size() * detail::sizeof_dtype(dtype_),
+    //                  ctx.cuda_stream());
+
+    //       } else {
+    //         dev2host(raw_data(), tensor.raw_data(),
+    //                  size() * detail::sizeof_dtype(dtype_));
+    //       }
+    //     } else if (device() >= 0 && tensor.device() >= 0) {
+    //       if (ctx.has_cuda_stream()) {
+    //         dev2dev(raw_data(), tensor.raw_data(),
+    //                 size() * detail::sizeof_dtype(dtype_),
+    //                 ctx.cuda_stream());
+    //       } else {
+    //         dev2dev(raw_data(), tensor.raw_data(),
+    //                 size() * detail::sizeof_dtype(dtype_));
+    //       }
+    //     }
+    // #endif
+    //     else {
+    //       TV_THROW_RT_ERR("only support cpu tensor");
+    //     }
+    // #endif
   }
 
   void copy_storage_(const Tensor &tensor, Context ctx = Context()) {
@@ -1617,87 +1632,10 @@ public:
                      "storage must have same size", this->shape(),
                      tensor.shape(), this->storage_->size(),
                      tensor.storage_->size());
-#ifdef TV_HARDWARE_ACC_METAL
-    // use apple metal api to copy
-    bool sync_op = false;
-    if (!ctx.has_item(ContextType::kAppleMetal)) {
-      ctx = Context().create_apple_metal_context();
-      sync_op = true;
-    }
-    auto *metal_ctx = reinterpret_cast<AppleMetalContext *>(
-                              ctx.get_item(ContextType::kAppleMetal));
-    auto cb = metal_ctx->commandBuffer();
-    auto bce = detail::make_apple_mtl_ptr(cb->blitCommandEncoder());
-    auto src = tensor.storage_->apple_metal_buffer_ptr();
-    auto dst = storage_->apple_metal_buffer_ptr();
-    bce->copyFromBuffer(src, tensor.storage_->byte_offset(), dst,
-                        storage_->byte_offset(), storage_->size());
-    bce->endEncoding();
-    if (sync_op) {
-      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT_AND_WAIT);
-    }else{
-      metal_ctx->synchronize(AppleMetalContext::SyncType::COMMIT);
-    }
-    return;
-#else
 
-    if (this->device() == -1 && tensor.device() == -1) {
-#if defined(TV_HARDWARE_ACC_CUDA)
-      // use memcpy instead to avoid cuda context init
-      if (this->pinned()) {
-        if (ctx.has_cuda_stream()) {
-          host2host(this->storage_->data(), tensor.storage_->data(),
-                    this->storage_->size(), ctx.cuda_stream());
-
-        } else {
-          host2host(this->storage_->data(), tensor.storage_->data(),
-                    this->storage_->size());
-        }
-      } else {
-        std::copy(tensor.storage_->data(),
-                  tensor.storage_->data() + this->storage_->size(),
-                  this->storage_->data());
-      }
-#else
-      std::copy(tensor.storage_->data(),
-                tensor.storage_->data() + this->storage_->size(),
-                this->storage_->data());
-#endif
-    }
-#if defined(TV_HARDWARE_ACC_CUDA)
-    else if (device() >= 0 && tensor.device() == -1) {
-      if (ctx.has_cuda_stream()) {
-        host2dev(this->storage_->data(), tensor.storage_->data(),
-                 this->storage_->size(), ctx.cuda_stream());
-
-      } else {
-        host2dev(this->storage_->data(), tensor.storage_->data(),
-                 this->storage_->size());
-      }
-
-    } else if (device() == -1 && tensor.device() >= 0) {
-      if (ctx.has_cuda_stream()) {
-        dev2host(this->storage_->data(), tensor.storage_->data(),
-                 this->storage_->size(), ctx.cuda_stream());
-
-      } else {
-        dev2host(this->storage_->data(), tensor.storage_->data(),
-                 this->storage_->size());
-      }
-    } else if (device() >= 0 && tensor.device() >= 0) {
-      if (ctx.has_cuda_stream()) {
-        dev2dev(this->storage_->data(), tensor.storage_->data(),
-                this->storage_->size(), ctx.cuda_stream());
-      } else {
-        dev2dev(this->storage_->data(), tensor.storage_->data(),
-                this->storage_->size());
-      }
-    }
-#endif
-    else {
-      TV_THROW_RT_ERR("only support cpu tensor");
-    }
-#endif
+    detail::TensorStorage<uint8_t>::copy(*(tensor.storage_), 0,
+                                         *(this->storage_), 0,
+                                         this->storage_->size(), ctx);
   }
 
   void copy_2d_pitched_(const Tensor &tensor, Context ctx = Context()) {

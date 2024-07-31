@@ -171,6 +171,7 @@ class NVRTCModule:
     kArray = 1
     kTensorView = 2
     kScalar = 3
+    kConstant = 4
 
     @overload
     def __init__(self,

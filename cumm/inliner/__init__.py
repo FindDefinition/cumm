@@ -63,6 +63,8 @@ import abc
 import contextlib
 import contextvars
 import re
+import time
+
 import pccm
 from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME, PCCM_INLINE_FUNCTION_NAME_FORMAT
 from cumm.nvrtc import CummLLVMModule, CummMetalModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
@@ -129,6 +131,15 @@ def _cached_get_torch_dtype_to_tv():
             torch.uint8: tv.uint8,
             torch.bfloat16: tv.bfloat16,
         })
+        torch_version = torch.__version__.split(".")
+        major_version = int(torch_version[0])
+        minor_version = int(torch_version[1])
+        if (major_version, minor_version) >= (2, 3):
+            _TORCH_DTYPE_TO_TV.update({
+                torch.uint16: tv.uint16,
+                torch.uint32: tv.uint32,
+                torch.uint64: tv.uint64,
+            })
     return _TORCH_DTYPE_TO_TV
 
 
@@ -216,6 +227,20 @@ _NPDTYPE_TO_LIST_TYPE_STR: Dict[np.dtype, str] = {
     np.dtype(np.uint16): "uint16_t",
     np.dtype(np.uint32): "uint32_t",
     np.dtype(np.uint64): "uint64_t",
+    np.dtype(np.bool_): "bool",
+}
+
+_NPDTYPE_TO_METAL_STR: Dict[np.dtype, str] = {
+    np.dtype(np.float16): "half",
+    np.dtype(np.float32): "float",
+    np.dtype(np.int8): "char",
+    np.dtype(np.int16): "short",
+    np.dtype(np.int32): "int",
+    np.dtype(np.int64): "long",
+    np.dtype(np.uint8): "uchar",
+    np.dtype(np.uint16): "ushort",
+    np.dtype(np.uint32): "uint",
+    np.dtype(np.uint64): "ulong",
     np.dtype(np.bool_): "bool",
 }
 
@@ -382,7 +407,7 @@ class NVRTCInlineBuilder(InlineBuilder):
 
     @contextlib.contextmanager
     def enter_inliner_scope(self):
-        if self._mps_context is not None:
+        if compat.IsAppleSiliconMacOs and self._mps_context is not None:
             # if we use context from pytorch, we don't need to perform sync
             # because kernel will run on the same context.
             # the only problem is we must update the context after any pytorch operation.
@@ -414,7 +439,7 @@ class NVRTCInlineBuilder(InlineBuilder):
         if compat.IsAppleSiliconMacOs:
             self.ctx.synchronize()
 
-    def get_nvrtc_module(self, name: str) -> Optional[CummNVRTCModule]:
+    def get_nvrtc_module(self, name: str) -> Optional[Union[CummNVRTCModule, CummMetalModule]]:
         for k, v in self.modules.items():
             if name == k[1]:
                 return v.func
@@ -450,33 +475,58 @@ class NVRTCInlineBuilder(InlineBuilder):
             return meta
         if not is_cpu and compat.InMacOS:
             # metal 
+            capture_nparray_as_func_constant: bool = False
             func_const_cnt = 0
             new_args: List[pccm.Argument] = []
             func_constants: List[str] = []
             for prev_arg in code.arguments:
                 if isinstance(prev_arg.userdata, np.ndarray):
-                    new_name = f"__cumm_metal_arg_{prev_arg.name}"
-                    cpp_type_scalar = _NPDTYPE_TO_LIST_TYPE_STR[prev_arg.userdata.dtype]
-                    cpp_type_arr = NumpyPlugin.get_cpp_type_static(prev_arg.userdata)
-                    prev_arg.type_str = f"constant {cpp_type_scalar}*"
-                    code.raw(f"thread {cpp_type_arr} {prev_arg.name} = reinterpret_cast<constant {cpp_type_arr}*>({new_name})[0];")
-                    prev_arg.name = new_name
-                    new_args.append(prev_arg)
+                    if not capture_nparray_as_func_constant:
+                        new_name = f"__cumm_metal_arg_{prev_arg.name}"
+                        cpp_type_arr = NumpyPlugin.get_cpp_type_static(prev_arg.userdata)
+                        prev_arg.type_str = f"constant {cpp_type_arr} &"
+                        new_args.append(prev_arg)
+                    else:
+                        arr = prev_arg.userdata
+                        if arr.ndim == 1:
+                            arr = arr[np.newaxis]
+                        vec_cnt = arr.shape[1]
+                        names = []
+                        cpp_type_scalar = _NPDTYPE_TO_LIST_TYPE_STR[prev_arg.userdata.dtype]
+                        for i in range(arr.shape[0]):
+                            new_name = f"__cumm_varg_{prev_arg.name}_{i}"
+                            # names.append(new_name)
+                            metal_type_base = _NPDTYPE_TO_METAL_STR[arr.dtype]
+                            metal_type = f"{metal_type_base}{arr.shape[1]}"
+                            cur_arg = prev_arg.copy()
+                            cur_arg.name = new_name
+                            cur_arg.type_str = metal_type
+                            func_constants.append(f"constant {metal_type} {new_name} [[function_constant({func_const_cnt})]];")
+                            names.append(f"tv::array<{cpp_type_scalar}, {vec_cnt}>{{" + ", ".join(f"{new_name}[{j}]" for j in range(arr.shape[1])) + "}")
+                            func_const_cnt += 1
+                        cpp_type_arr = NumpyPlugin.get_cpp_type_static(prev_arg.userdata)
+                        arr_name = f", ".join(names)
+                        code.raw(f"thread {cpp_type_arr} {prev_arg.name}{{{arr_name}}};")
+
                 elif get_qualname_of_type(type(prev_arg.userdata)) == TORCH_TENSOR_NAME:
                     prev_arg.type_str = f"device {prev_arg.type_str}"
                     new_args.append(prev_arg)
                 elif isinstance(prev_arg.userdata, tv.Tensor):
                     prev_arg.type_str = f"device {prev_arg.type_str}"
                     new_args.append(prev_arg)
-                else:
-                    assert isinstance(prev_arg.userdata, (int, float, bool))
-                    dtype = "int64_t"
-                    if isinstance(prev_arg.userdata, float):
-                        dtype = "float"
-                    elif isinstance(prev_arg.userdata, bool):
-                        dtype = "bool"
-                    func_constants.append(f"constant {dtype} {prev_arg.name} [[function_constant({func_const_cnt})]];")
+                elif isinstance(prev_arg.userdata, bool):
+                    func_constants.append(f"constant bool {prev_arg.name} [[function_constant({func_const_cnt})]];")
                     func_const_cnt += 1
+                else:
+                    assert isinstance(prev_arg.userdata, (int, float, np.floating, np.integer))
+                    # dtype = "int64_t"
+                    # if isinstance(prev_arg.userdata, (float, np.floating)):
+                    #     dtype = "float"
+                    prev_arg.type_str = f"constant {prev_arg.type_str}&"
+                    new_args.append(prev_arg)
+
+                    # func_constants.append(f"constant {dtype} {prev_arg.name} [[function_constant({func_const_cnt})]];")
+                    # func_const_cnt += 1
             if arg.mode != CUDAMode.KernelRaw:
                 code.arguments = new_args + [
                     pccm.Argument(self.index_name, "uint32_t", attributes=["thread_position_in_grid"])

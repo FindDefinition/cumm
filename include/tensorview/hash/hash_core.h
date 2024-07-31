@@ -80,7 +80,7 @@ struct platform_not_support_atomic_64_metas {
   
 //   // in platform without 64bit atomic cas, user can only use 62bit data.
 //   // drop 2nd and 3rd bit, keep sign and rest
-//   static constexpr TV_METAL_CONSTANT bool kMask = 0x9fff'ffff'7fff'ffff;
+//   static constexpr TV_METAL_CONSTANT uint64_t kMask = 0x9fff'ffff'7fff'ffff;
 
 //   TV_HOST_DEVICE_INLINE static constexpr auto map_user_key(uint64_t key) {
 //     auto res = key & kMask;
@@ -97,7 +97,7 @@ struct platform_not_support_atomic_64_metas {
 template <>
 struct platform_not_support_atomic_64_metas<uint64_t> {
   // drop 1st and 2nd bit
-  static constexpr TV_METAL_CONSTANT bool kMask = 0x3fff'ffff'7fff'ffff;
+  static constexpr TV_METAL_CONSTANT uint64_t kMask = 0x3fff'ffff'7fff'ffff;
 
   TV_HOST_DEVICE_INLINE static constexpr auto map_user_key(uint64_t key) {
     auto res = key & kMask;

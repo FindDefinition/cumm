@@ -12,6 +12,30 @@ from cumm import dtypes
 import pccm 
 import numba 
 
+def test_metal_capture():
+    """inliner for metal support small 1d/2d array capture (must smaller than 4x4)
+    small capture is passed by func constants to get best performance.
+    unlike nvrtc, only 4x4 or smaller matrix are allowed.
+    """
+    # init cuda
+    data = torch.rand([1000, 3], dtype=torch.float32, device="mps")
+    datares = torch.empty_like(data)
+    arr4x4 = np.random.uniform(-1, 1, size=[4, 4]).astype(np.float32)
+    arr4x4_th = torch.from_numpy(arr4x4).to("mps")
+    inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], root=PACKAGE_ROOT.parent, std="c++17")
+    wtf: bool = False
+    inliner.kernel_1d("kernel_capture", data.shape[0], 0, 
+                    f"""
+    namespace op = tv::arrayops;
+    auto p = op::reinterpret_cast_array_nd<float, 3>($data)[i];
+    auto tr = $arr4x4;
+    $wtf;
+    op::reinterpret_cast_array_nd<float, 3>($datares)[i] = p.op<op::transform_3d>(tr);
+    """)
+    data_res_ref = data @ (arr4x4_th[:3, :3].T) + arr4x4_th[:3, 3]
+    erro = torch.linalg.norm(data_res_ref - datares)
+    assert torch.allclose(data_res_ref, datares, atol=1e-5)
+
 def test_metal_basic():
     # init cuda
     a = tv.zeros([100000, 3], tv.float32, 0)
@@ -33,7 +57,7 @@ def test_metal_basic():
         if (i <= 32){{
             auto wtf_max = metal::numeric_limits<tv::parallel::vote_t>::max();
             $data[i] = tv::parallel::detail::lanemask_lt();
-            $data[i] = op::MathScalarOp<float>::atan2(1.0f, 1.0f);
+            // $data[i] = op::MathScalarOp<float>::atan2(1.0f, 1.0f);
             // $data[i] = tv::parallel::warp_size() - tv::parallel::lane_index();
         }}
         
@@ -108,7 +132,7 @@ class _TestMetalHash(pccm.Class):
 
 @numba.njit 
 def _test_hash_table_insert(keys: np.ndarray, values: np.ndarray, acc_values: np.ndarray):
-    error = np.ones_like(values)
+    res = np.ones_like(values)
     hash_dict = {}
     for i in range(keys.shape[0]):
         k = keys[i]
@@ -118,9 +142,9 @@ def _test_hash_table_insert(keys: np.ndarray, values: np.ndarray, acc_values: np
             hash_dict[k] += values[i]
     for i in range(keys.shape[0]):
         k = keys[i]
-        error[i] = acc_values[i] - hash_dict[k]
+        res[i] = hash_dict[k]
 
-    return error
+    return res
     
 
 def _template_test_metal_hash(is_u64: bool, num: int = 25000):
@@ -136,9 +160,14 @@ def _template_test_metal_hash(is_u64: bool, num: int = 25000):
     keys_np = np.random.randint(0, 2000, size=(num)).astype(np_dtype)
     value_fp = np.random.uniform(-1, 1, size=keys_np.size).astype(np.float32)
     # we still need to use .cuda to make code compatabile with cuda
+    keys_dev = tv.zeros([keys_np.size], dtype, -1, managed=True)
+    keys_dev.numpy_view()[:] = keys_np
     keys = tv.from_numpy(keys_np).cuda()
+    # print(keys.shape)
+    # breakpoint()
     values = tv.from_numpy(value_fp).cuda()
     acc_values = tv.from_numpy(value_fp).cuda()
+
     hash_length = int(keys.shape[0] * 1.3)
     hashkeys = tv.empty([hash_length], dtype, 0)
     hashvalues = tv.zeros([hash_length], tv.float32, 0)
@@ -149,8 +178,6 @@ def _template_test_metal_hash(is_u64: bool, num: int = 25000):
         using table_t = tv::hash::LinearHashTableSplit<{cpp_dtype}, float>;
         $hashkeys[i] = table_t::empty_key;
         """)
-        # print(keys.cpu().numpy())
-        # breakpoint()
         code = pccm.code(f"""
         using table_t = tv::hash::LinearHashTableSplit<{cpp_dtype}, float>;
         table_t table($hashkeys, $hashvalues, $hash_length);
@@ -160,12 +187,6 @@ def _template_test_metal_hash(is_u64: bool, num: int = 25000):
         """)
         code.add_dependency(_TestMetalHash)
         inliner.kernel_1d("insert_table", keys.dim(0), 0, code)
-        # inliner.kernel_1d("collect_unique_res", hashkeys.dim(0), 0, f"""
-        # using table_t = tv::hash::LinearHashTableSplit<{cpp_dtype}, float>;
-        # if ($hashkeys[i] != table_t::empty_key){{
-        #     tv::parallel::atomicAdd($cnt, 1);
-        # }}
-        # """)
         inliner.kernel_1d("query_key", keys.dim(0), 0, f"""
         using table_t = tv::hash::LinearHashTableSplit<{cpp_dtype}, float>;
         table_t table($hashkeys, $hashvalues, $hash_length);
@@ -175,9 +196,17 @@ def _template_test_metal_hash(is_u64: bool, num: int = 25000):
             $acc_values[i] = table.value_ptr()[offset];
         }}
         """)
-    error = _test_hash_table_insert(keys_np, value_fp, acc_values.cpu().numpy())
-    print(np.linalg.norm(error))
+    res = _test_hash_table_insert(keys_np, value_fp, acc_values.cpu().numpy())
+    print(np.linalg.norm(res - acc_values.cpu().numpy()))
+    assert np.allclose(res, acc_values.cpu().numpy(), atol=1e-5)
 
+def test_metal_hash():
+    _template_test_metal_hash(False)
+
+    _template_test_metal_hash(True)
 
 if __name__ == "__main__":
-    _template_test_metal_hash(True)
+    torch.manual_seed(42)
+    test_metal_capture()
+    # test_metal_torch_cumm()
+    test_metal_hash()
