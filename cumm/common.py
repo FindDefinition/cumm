@@ -1,4 +1,4 @@
-# Copyright 2021 Yan Yan
+# Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -287,7 +287,8 @@ class CUDALibs(pccm.Class):
             path = Path.home() / "metal-cpp"
             if CUMM_APPLE_METAL_CPP_ROOT is not None:
                 path = Path(CUMM_APPLE_METAL_CPP_ROOT)
-            assert path.exists(), "if you use mac os, you must download metal-cpp and save it to home folder or use CUMM_APPLE_METAL_CPP_ROOT."
+            assert path.exists(), ("if you use mac os, you must download metal-cpp and save"
+                f" it to home folder or use CUMM_APPLE_METAL_CPP_ROOT. {CUMM_APPLE_METAL_CPP_ROOT}")
             self.build_meta.add_includes(str(path))
             self.build_meta.add_ldflags("clang++", "-framework Metal", "-framework CoreGraphics")
         else:

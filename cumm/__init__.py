@@ -1,4 +1,4 @@
-# Copyright 2021 Yan Yan
+# Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ from .__version__ import __version__
 from .constants import CUMM_CPU_ONLY_BUILD, CUMM_DISABLE_JIT, PACKAGE_NAME
 from cumm.constants import PACKAGE_ROOT
 from ccimport import compat
+
 if project_is_installed(PACKAGE_NAME) and project_is_editable(
         PACKAGE_NAME) and not CUMM_DISABLE_JIT:
     from cumm.csrc.arrayref import ArrayPtr

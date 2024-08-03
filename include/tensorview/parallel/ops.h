@@ -1,4 +1,4 @@
-// Copyright 2021 Yan Yan
+// Copyright 2024 Yan Yan
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,17 +56,19 @@ template <typename T1, typename T2> union DataPairUnion {
 
 #if defined(TV_METAL_RTC) && defined(__METAL_VERSION__) &&                     \
     __METAL_VERSION__ >= 310
+namespace internal {
 uint __apple_metal_warp_size [[threads_per_simdgroup]];
 uint __apple_metal_warp_index [[simdgroup_index_in_threadgroup]];
 uint __apple_metal_lane_index [[thread_index_in_simdgroup]];
+}
 
 using vote_t = metal::simd_vote::vote_t;
 
-TV_DEVICE_INLINE uint warp_size() { return __apple_metal_warp_size; }
+TV_DEVICE_INLINE uint warp_size() { return internal::__apple_metal_warp_size; }
 
-TV_DEVICE_INLINE uint warp_index() { return __apple_metal_warp_index; }
+TV_DEVICE_INLINE uint warp_index() { return internal::__apple_metal_warp_index; }
 
-TV_DEVICE_INLINE uint lane_index() { return __apple_metal_lane_index; }
+TV_DEVICE_INLINE uint lane_index() { return internal::__apple_metal_lane_index; }
 
 namespace detail {
 TV_DEVICE_INLINE vote_t lanemask_lt() {
@@ -91,8 +93,6 @@ TV_DEVICE_INLINE vote_t lanemask_lt() {
   asm("mov.u32 %0, %%lanemask_lt;" : "=r"(lanemask32_lt));
   return (lanemask32_lt);
 }
-
-
 
 } // namespace detail
 
@@ -145,6 +145,71 @@ template <typename T> TV_DEVICE_INLINE T atomicMax(TV_METAL_DEVICE T *ctr, T val
   return ::atomicMax(ctr, val);
 #endif
 }
+
+template <typename T> TV_DEVICE_INLINE T atomicMin(TV_METAL_DEVICE T *ctr, T val) {
+#ifdef TV_METAL_RTC
+  return metal::atomic_fetch_min_explicit(reinterpret_cast<device metal::atomic<T>*>(ctr), val, metal::memory_order_relaxed);
+#else
+  return ::atomicMin(ctr, val);
+#endif
+}
+
+#ifdef TV_CUDA_RTC
+TV_DEVICE_INLINE float atomicMax (float * addr, float value) {
+    float old;
+    old = (value >= 0) ? __int_as_float(atomicMax((int *)addr, __float_as_int(value))) :
+         __uint_as_float(atomicMin((unsigned int *)addr, __float_as_uint(value)));
+
+    return old;
+}
+
+TV_DEVICE_INLINE float atomicMin (float * addr, float value) {
+    float old;
+    old = (value >= 0) ? __int_as_float(atomicMin((int *)addr, __float_as_int(value))) :
+          __uint_as_float(atomicMax((unsigned int *)addr, __float_as_uint(value)));
+
+    return old;
+}
+
+#endif
+
+#ifdef TV_METAL_RTC
+
+TV_DEVICE_INLINE float __int_as_float(int x){
+  return *reinterpret_cast<thread float*>(&x);
+}
+
+TV_DEVICE_INLINE int __float_as_int(float x){
+  return *reinterpret_cast<thread int*>(&x);
+}
+
+TV_DEVICE_INLINE float __uint_as_float(unsigned int x){
+  return *reinterpret_cast<thread float*>(&x);
+}
+
+TV_DEVICE_INLINE unsigned int __float_as_uint(float x){
+  return *reinterpret_cast<thread unsigned int*>(&x);
+}
+
+TV_DEVICE_INLINE float atomicMax (device float * addr, float value) {
+    float old;
+    // *reinterpret_cast<float*>( &val )
+    old = (value >= 0) ? __int_as_float(atomicMax((device int *)addr, __float_as_int(value))) :
+         __uint_as_float(atomicMin((device unsigned int *)addr, __float_as_uint(value)));
+
+    return old;
+}
+
+TV_DEVICE_INLINE float atomicMin (device float * addr, float value) {
+    float old;
+    old = (value >= 0) ? __int_as_float(atomicMin((device int *)addr, __float_as_int(value))) :
+          __uint_as_float(atomicMax((device unsigned int *)addr, __float_as_uint(value)));
+
+    return old;
+}
+
+#endif
+
 
 #ifdef TV_METAL_RTC
 

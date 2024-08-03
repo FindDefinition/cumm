@@ -1,4 +1,4 @@
-// Copyright 2021 Yan Yan
+// Copyright 2024 Yan Yan
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,10 @@
 #pragma once
 #include "hash_core.h"
 #include <tensorview/core/all.h>
+#ifdef __METAL_VERSION__ 
+#pragma METAL internals : enable
+
+#endif
 
 namespace tv {
 namespace hash {
@@ -241,3 +245,8 @@ struct FNV1aHash : detail::FNVInternal<tv::hash::to_unsigned_t<K>> {
 
 } // namespace hash
 } // namespace tv
+
+#ifdef __METAL_VERSION__ 
+#pragma METAL internals : disable
+
+#endif

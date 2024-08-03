@@ -1,4 +1,4 @@
-// Copyright 2021 Yan Yan
+// Copyright 2024 Yan Yan
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,6 +31,11 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#endif
+
+#ifdef __METAL_VERSION__ 
+#pragma METAL internals : enable
+
 #endif
 
 namespace tv {
@@ -89,68 +94,6 @@ template <typename T> TV_HOST_DEVICE_INLINE constexpr T array_mul(T l, T r) {
 template <typename T> TV_HOST_DEVICE_INLINE constexpr T array_div(T l, T r) {
   return l / r;
 }
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT & array_isum(T TV_METAL_CONSTANT &l, T r) {
-  return l += r;
-}
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT &array_isub(T TV_METAL_CONSTANT &l, T r) {
-  return l -= r;
-}
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT &array_imul(T TV_METAL_CONSTANT &l, T r) {
-  return l *= r;
-}
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T TV_METAL_CONSTANT &array_idiv(T TV_METAL_CONSTANT &l, T r) {
-  return l /= r;
-}
-#ifdef TV_METAL_RTC
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread & array_isum(T thread &l, T r) {
-  return l += r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup & array_isum(T threadgroup &l, T r) {
-  return l += r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_isum(T device &l, T r) {
-  return l += r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread &array_isub(T thread &l, T r) {
-  return l -= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup &array_isub(T threadgroup &l, T r) {
-  return l -= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_isub(T device &l, T r) {
-  return l -= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread &array_imul(T thread &l, T r) {
-  return l *= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup &array_imul(T threadgroup &l, T r) {
-  return l *= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_imul(T device &l, T r) {
-  return l *= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T thread &array_idiv(T thread &l, T r) {
-  return l /= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T threadgroup &array_idiv(T threadgroup &l, T r) {
-  return l /= r;
-}
-
-template <typename T> TV_HOST_DEVICE_INLINE constexpr T device &array_idiv(T device &l, T r) {
-  return l /= r;
-}
-#endif
 
 template <typename T> TV_HOST_DEVICE_INLINE constexpr T array_minus(T x) {
   return -x;
@@ -327,29 +270,25 @@ public:
 
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
-  operator+=(TV_METAL_CONSTANT TOther const &other) {
-    arrayops::apply(detail::array_isum<T>, *this, other);
-    return *this;
+  operator+=(TV_METAL_CONSTANT TOther const &other) TV_METAL_CONSTANT {
+    return *this = *this + other;
   }
 
 #ifdef TV_METAL_RTC
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
-  operator+=(thread TOther const &other) {
-    arrayops::apply(detail::array_isum<T>, *this, other);
-    return *this;
+  operator+=(thread TOther const &other) thread {
+    return *this = *this + other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
-  operator+=(threadgroup TOther const &other) {
-    arrayops::apply(detail::array_isum<T>, *this, other);
-    return *this;
+  operator+=(threadgroup TOther const &other) threadgroup {
+    return *this = *this + other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
-  operator+=(device TOther const &other) {
-    arrayops::apply(detail::array_isum<T>, *this, other);
-    return *this;
+  operator+=(device TOther const &other) device {
+    return *this = *this + other;
   }
 
 
@@ -357,87 +296,75 @@ public:
 
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
-  operator-=(TV_METAL_CONSTANT TOther const &other) {
-    arrayops::apply(detail::array_isub<T>, *this, other);
-    return *this;
+  operator-=(TV_METAL_CONSTANT TOther const &other) TV_METAL_CONSTANT {
+    return *this = *this - other;
   }
 
 #ifdef TV_METAL_RTC
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
-  operator-=(thread TOther const &other) {
-    arrayops::apply(detail::array_isub<T>, *this, other);
-    return *this;
+  operator-=(thread TOther const &other) thread {
+    return *this = *this - other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
-  operator-=(threadgroup TOther const &other) {
-    arrayops::apply(detail::array_isub<T>, *this, other);
-    return *this;
+  operator-=(threadgroup TOther const &other) threadgroup {
+    return *this = *this - other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
-  operator-=(device TOther const &other) {
-    arrayops::apply(detail::array_isub<T>, *this, other);
-    return *this;
+  operator-=(device TOther const &other) device {
+    return *this = *this - other;
   }
 
 #endif
 
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
-  operator*=(TV_METAL_CONSTANT TOther const &other) {
-    arrayops::apply(detail::array_imul<T>, *this, other);
-    return *this;
+  operator*=(TV_METAL_CONSTANT TOther const &other) TV_METAL_CONSTANT {
+    return *this = *this * other;
   }
 
 #ifdef TV_METAL_RTC
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
-  operator*=(thread TOther const &other) {
-    arrayops::apply(detail::array_imul<T>, *this, other);
-    return *this;
+  operator*=(thread TOther const &other) thread {
+    return *this = *this * other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
-  operator*=(threadgroup TOther const &other) {
-    arrayops::apply(detail::array_imul<T>, *this, other);
-    return *this;
+  operator*=(threadgroup TOther const &other) threadgroup {
+    return *this = *this * other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
-  operator*=(device TOther const &other) {
-    arrayops::apply(detail::array_imul<T>, *this, other);
-    return *this;
+  operator*=(device TOther const &other) device {
+    return *this = *this * other;
   }
 
 #endif
 
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr TV_METAL_CONSTANT array<T, N, Align> &
-  operator/=(TV_METAL_CONSTANT TOther const &other) {
-    arrayops::apply(detail::array_idiv<T>, *this, other);
-    return *this;
+  operator/=(TV_METAL_CONSTANT TOther const &other) TV_METAL_CONSTANT {
+    return *this = *this / other;
   }
 
 #ifdef TV_METAL_RTC
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr thread array<T, N, Align> &
-  operator/=(thread TOther const &other) {
-    arrayops::apply(detail::array_idiv<T>, *this, other);
-    return *this;
+  operator/=(thread TOther const &other) thread {
+    return *this = *this / other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr threadgroup array<T, N, Align> &
-  operator/=(threadgroup TOther const &other) {
-    arrayops::apply(detail::array_idiv<T>, *this, other);
-    return *this;
+  operator/=(threadgroup TOther const &other) threadgroup {
+    return *this = *this / other;
   }
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
-  operator/=(device TOther const &other) {
-    arrayops::apply(detail::array_idiv<T>, *this, other);
-    return *this;
+  operator/=(device TOther const &other) device {
+    return *this = *this / other;
   }
 
 #endif
@@ -1161,4 +1088,9 @@ operator|(TV_METAL_THREAD const array<T, N1> &lfs, TV_METAL_THREAD const array<T
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif
+
+#ifdef __METAL_VERSION__ 
+#pragma METAL internals : disable
+
 #endif

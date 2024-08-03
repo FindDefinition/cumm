@@ -1,4 +1,4 @@
-# Copyright 2022 Yan Yan
+# Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -348,6 +348,11 @@ class MPSContextBase(abc.ABC):
     def commit(self):
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def flush_command_encoder(self):
+        raise NotImplementedError
+
+
     # @abc.abstractmethod
     # def synchronize(self):
     #     raise NotImplementedError
@@ -413,6 +418,8 @@ class NVRTCInlineBuilder(InlineBuilder):
             # the only problem is we must update the context after any pytorch operation.
             self.ctx.create_or_update_metal_context_from_blob(self._mps_context.get_command_buffer(),
                                                             self._mps_context.get_dispatch_queue()) 
+            # pytorch mps kernels won't clear command encoding, so we need to flush it.
+            self._mps_context.flush_command_encoder()
             yield
         elif not compat.IsAppleSiliconMacOs or _has_inliner_kernel_ctx():
             yield 

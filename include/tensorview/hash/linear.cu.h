@@ -1,4 +1,4 @@
-// Copyright 2021 Yan Yan
+// Copyright 2024 Yan Yan
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -61,8 +61,9 @@ template <> class AtomicCASDispatch<ulong> {
   to implement a fake 64bit (actually 62bit) lock-free hash table
    */
 public:
-  static bool atomic_cas_weak_for_hash(device ulong *object,
-                                       thread ulong empty_key, ulong desired) {
+  static TV_DEVICE_INLINE bool atomic_cas_weak_for_hash(device ulong *object,
+                                                        thread ulong empty_key,
+                                                        ulong desired) {
     uint empty_first_part = reinterpret_cast<thread uint *>(&empty_key)[0];
     uint empty_second_part = reinterpret_cast<thread uint *>(&empty_key)[1];
 
@@ -137,21 +138,29 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint hash(TV_METAL_CONSTANT Args &&...keys) const {
-    return hash_type::hash(keys...);
+    return hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
   }
 #ifdef TV_METAL_CC
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint hash(TV_METAL_DEVICE Args &&...keys) const {
-    return hash_type::hash(keys...);
+    return hash_type::hash(
+        reinterpret_cast<TV_METAL_DEVICE const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
   }
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint
   hash(TV_METAL_THREADGROUP Args &&...keys) const {
-    return hash_type::hash(keys...);
+    return hash_type::hash(
+        reinterpret_cast<TV_METAL_THREADGROUP const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
   }
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint hash(TV_METAL_THREAD Args &&...keys) const {
-    return hash_type::hash(keys...);
+    return hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
   }
 
 #endif
@@ -201,9 +210,11 @@ private:
   TV_DEVICE_INLINE void insert_raw(TV_METAL_THREAD const V &value,
                                    TV_METAL_THREAD Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
             std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -252,14 +263,16 @@ private:
   }
 
   template <class F, class KT, int... Inds, class... FArgs, class... Args>
-  TV_DEVICE_INLINE void
-  insert_raw_custom_value_base(TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
-                          mp_list_int<Inds...>,
-                          TV_METAL_THREAD F &&f,
-                          TV_METAL_THREAD FArgs &&...fargs) {
-    key_type_uint key_u = hash_type::encode(reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+  TV_DEVICE_INLINE void insert_raw_custom_value_base(
+      TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
+      mp_list_int<Inds...>, TV_METAL_THREAD F &&f,
+      TV_METAL_THREAD FArgs &&...fargs) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<KT> &>(
             key_arr[Inds])...);
-    key_type_uint hash_val = hash_type::hash(key_arr[Inds]...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<KT> &>(
+            key_arr[Inds])...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -287,7 +300,8 @@ private:
       bool success = prev == empty_key_uint || prev == key_u;
 #endif
       if (success) {
-        TV_FORWARD_EXCEPT_METAL(F, f)(&table_[slot].second, std::forward<FArgs>(fargs)...);
+        TV_FORWARD_EXCEPT_METAL(F, f)
+        (&table_[slot].second, std::forward<FArgs>(fargs)...);
         break;
       }
       if (Power2) {
@@ -307,7 +321,8 @@ private:
 
   // template <class F, int... Inds>
   // TV_DEVICE_INLINE void
-  // insert_raw_custom_value(TV_METAL_THREAD const array<K, kNumHashArgs> &key_arr,
+  // insert_raw_custom_value(TV_METAL_THREAD const array<K, kNumHashArgs>
+  // &key_arr,
   //                         TV_METAL_THREAD F &&f, mp_list_int<Inds...>) {
   //   return insert_raw_custom_value(TV_FORWARD_EXCEPT_METAL(F, f),
   //                                  key_arr[Inds]...);
@@ -330,26 +345,32 @@ public:
 
   template <class F, class... FArgs>
   TV_DEVICE_INLINE void insert_custom_value(TV_METAL_THREAD const K &key,
-                                            TV_METAL_THREAD F &&f, TV_METAL_THREAD FArgs&&... fargs) {
+                                            TV_METAL_THREAD F &&f,
+                                            TV_METAL_THREAD FArgs &&...fargs) {
     static_assert(kNumHashArgs == 1,
                   "you must use tv::array if hash multiple values.");
-    return insert_raw_custom_value_base(tv::array<K, 1>{key}, mp_make_list_c_sequence<int, 1>{}, TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
+    return insert_raw_custom_value_base(
+        tv::array<K, 1>{key}, mp_make_list_c_sequence<int, 1>{},
+        TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
   }
 
   template <class F, class KT, class... FArgs>
   TV_DEVICE_INLINE void
   insert_custom_value(TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
-                      TV_METAL_THREAD F &&f, TV_METAL_THREAD FArgs&&... fargs) {
+                      TV_METAL_THREAD F &&f, TV_METAL_THREAD FArgs &&...fargs) {
     return insert_raw_custom_value_base(
-        key_arr, mp_make_list_c_sequence<int, kNumHashArgs>{}, TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
+        key_arr, mp_make_list_c_sequence<int, kNumHashArgs>{},
+        TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
   }
 
   template <class... Args>
   TV_DEVICE_INLINE value_type lookup(TV_METAL_THREAD Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
             std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -378,9 +399,11 @@ public:
   template <class... Args>
   TV_DEVICE_INLINE size_type lookup_offset(TV_METAL_THREAD Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
             std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -435,7 +458,9 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE key_type_uint hash(TV_METAL_THREAD Args &&...keys) const {
-    return hash_type::hash(keys...);
+    return hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
   }
   TV_DEVICE_INLINE int probe_length(int index, value_type key) {
     return (index -
@@ -455,9 +480,11 @@ public:
   template <class... Args>
   TV_DEVICE_INLINE void insert(TV_METAL_THREAD Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
             std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -497,9 +524,11 @@ public:
   template <class... Args>
   TV_DEVICE_INLINE size_type lookup_offset(TV_METAL_THREAD Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
             std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -579,11 +608,13 @@ public:
 private:
   template <class... Args>
   TV_DEVICE_INLINE void insert_raw(TV_METAL_THREAD const V &value,
-                                  TV_METAL_THREAD Args &&...keys) {
+                                   TV_METAL_THREAD Args &&...keys) {
     key_type_uint key_u = hash_type::encode(
-        reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
             std::forward<Args>(keys))...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -630,14 +661,16 @@ private:
   }
 
   template <class F, class KT, int... Inds, class... FArgs, class... Args>
-  TV_DEVICE_INLINE void
-  insert_raw_custom_value_base(TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
-                          mp_list_int<Inds...>,
-                          TV_METAL_THREAD F &&f,
-                          TV_METAL_THREAD FArgs &&...fargs) {
-    key_type_uint key_u = hash_type::encode(reinterpret_cast<TV_METAL_THREAD const key_type_uint &>(
+  TV_DEVICE_INLINE void insert_raw_custom_value_base(
+      TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
+      mp_list_int<Inds...>, TV_METAL_THREAD F &&f,
+      TV_METAL_THREAD FArgs &&...fargs) {
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<KT> &>(
             key_arr[Inds])...);
-    key_type_uint hash_val = hash_type::hash(key_arr[Inds]...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<KT> &>(
+            key_arr[Inds])...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -665,7 +698,8 @@ private:
       bool success = prev == empty_key_uint || prev == key_u;
 #endif
       if (success) {
-        TV_FORWARD_EXCEPT_METAL(F, f)(value_ptr_ + slot, std::forward<FArgs>(fargs)...);
+        TV_FORWARD_EXCEPT_METAL(F, f)
+        (value_ptr_ + slot, std::forward<FArgs>(fargs)...);
         break;
       }
       if (Power2) {
@@ -700,18 +734,22 @@ public:
 
   template <class F, class... FArgs>
   TV_DEVICE_INLINE void insert_custom_value(TV_METAL_THREAD const K &key,
-                                            TV_METAL_THREAD F &&f, TV_METAL_THREAD FArgs&&... fargs) {
+                                            TV_METAL_THREAD F &&f,
+                                            TV_METAL_THREAD FArgs &&...fargs) {
     static_assert(kNumHashArgs == 1,
                   "you must use tv::array if hash multiple values.");
-    return insert_raw_custom_value_base(tv::array<K, 1>{key}, mp_make_list_c_sequence<int, 1>{}, TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
+    return insert_raw_custom_value_base(
+        tv::array<K, 1>{key}, mp_make_list_c_sequence<int, 1>{},
+        TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
   }
 
   template <class F, class KT, class... FArgs>
   TV_DEVICE_INLINE void
   insert_custom_value(TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
-                      TV_METAL_THREAD F &&f, TV_METAL_THREAD FArgs&&... fargs) {
+                      TV_METAL_THREAD F &&f, TV_METAL_THREAD FArgs &&...fargs) {
     return insert_raw_custom_value_base(
-        key_arr, mp_make_list_c_sequence<int, kNumHashArgs>{}, TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
+        key_arr, mp_make_list_c_sequence<int, kNumHashArgs>{},
+        TV_FORWARD_EXCEPT_METAL(F, f), std::forward<FArgs>(fargs)...);
   }
 
   TV_DEVICE_INLINE int probe_length(int index, key_type key) {
@@ -723,8 +761,12 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE void insert_key_only(TV_METAL_THREAD Args &&...keys) {
-    const key_type_uint key_u = hash_type::encode(std::forward<Args>(keys)...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    const key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);
@@ -764,8 +806,12 @@ public:
 
   template <class... Args>
   TV_DEVICE_INLINE size_type lookup_offset(TV_METAL_THREAD Args &&...keys) {
-    key_type_uint key_u = hash_type::encode(std::forward<Args>(keys)...);
-    key_type_uint hash_val = hash_type::hash(keys...);
+    key_type_uint key_u = hash_type::encode(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
+    key_type_uint hash_val = hash_type::hash(
+        reinterpret_cast<TV_METAL_THREAD const to_unsigned_t<Args> &>(
+            std::forward<Args>(keys))...);
     key_type_uint slot;
     if (Power2) {
       slot = hash_val & (hash_size_ - 1);

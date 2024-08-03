@@ -197,6 +197,7 @@ template <typename T, size_t N, size_t Align> struct full {
     return constant<T, N, Align>(val);
   }
 };
+
 #endif
 
 // constexpr tv::array<float, 3> a{1, 2, 3};

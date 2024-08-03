@@ -35,7 +35,7 @@ class PyTorchLibNoPybind(pccm.Class):
         self.add_include("ATen/ATen.h")
         if compat.InMacOS:
             self.build_meta.add_ldflags("clang++", "-Wl,-undefined,dynamic_lookup")
-            self.build_meta.add_ldflags("clang++", "-framework Metal", "-framework CoreGraphics")
+            self.build_meta.add_ldflags("clang++", "-framework Metal", "-framework CoreGraphics", "-framework Foundation")
 
 class PyTorchLib(pccm.Class):
     def __init__(self):
@@ -43,6 +43,11 @@ class PyTorchLib(pccm.Class):
         self.add_dependency(PyTorchLibNoPybind)
         self.add_include("torch/extension.h") # include this to add pybind for torch.Tensor
         self.add_include("tensorview/torch_utils.h")
+
+class PyTorchMPSInclude(pccm.Class):
+    def __init__(self):
+        super().__init__()
+        self.add_include("ATen/native/mps/OperationUtils.h")
 
 class PyTorchTools(pccm.Class):
     def __init__(self):
@@ -113,6 +118,19 @@ class PyTorchTools(pccm.Class):
         """)
         return code
 
+    @pccm.pybind.mark
+    @pccm.static_function(impl_file_suffix=".mm" if compat.InMacOS else ".cc")
+    def mps_flush_command_encoder(self):
+        # pytorch mps kernels won't clear command encoding, so we need to flush it.
+        code = pccm.FunctionCode()
+        if compat.InMacOS:
+            code.add_dependency(PyTorchMPSInclude)
+            code.raw(f"""
+            getCurrentMPSStream()->endKernelCoalescing();
+            """)
+        return code
+
+
 def build_pytorch_bindings(name: str, lib_store_root: Path):
     import torch 
     torch_version = torch.__version__.split("+")[0]
@@ -125,4 +143,5 @@ def build_pytorch_bindings(name: str, lib_store_root: Path):
                             # namespace_root=PACKAGE_ROOT / "csrc",
                             verbose=True,
                             load_library=False,
+                            disable_pch=True, # object-c don't support pch
                             std="c++17")

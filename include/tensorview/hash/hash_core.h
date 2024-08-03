@@ -1,4 +1,4 @@
-// Copyright 2021 Yan Yan
+// Copyright 2024 Yan Yan
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ template <typename T> struct MapTypeToUnsignedInt {
 template <typename K>
 struct platform_not_support_atomic_64_metas {
 #ifdef TV_METAL_CC
-  static_assert(!std::is_same_v<K, int64_t>, "int64 not supported when 64bit CAS not supported");
+  static_assert(!std::is_same_v<K, int64_t>, "int64 key not supported when 64bit CAS not supported, use uint64 instead.");
 #endif
   TV_HOST_DEVICE_INLINE static constexpr auto map_user_key(K key) {
     return key;

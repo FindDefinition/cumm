@@ -1,4 +1,4 @@
-// Copyright 2021 Yan Yan
+// Copyright 2024 Yan Yan
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -244,7 +244,6 @@ public:
       default:;
       }
     }
-    // TODO find a way to cache func pso
     if (func_pso_map_.find(cache_ley) == func_pso_map_.end()) {
       auto nameNS = detail::make_apple_mtl_ptr(
           NS::String::string(name.c_str(), NS::ASCIIStringEncoding));
@@ -295,12 +294,7 @@ public:
         }
         case ArgType::kScalar:
         case ArgType::kArray: {
-          // TODO I don't know if buffer still valid for kernel
-          // after I release it here. in CUDA, cudaFree is sync,
-          // cudaFreeAsync is encoded in the stream.
-          // so metal?
           TV_ASSERT_INVALID_ARG(ten.device() == -1, "array tensor must be CPU");
-          // const check is performed in python
           TV_ASSERT_INVALID_ARG(ten.storage()->apple_metal_buffer_ptr() == nullptr,
                                 "array metal buffer must be empty");
           computeEncoder->setBytes(ten.raw_data(), ten.raw_size(), buffer_cnt);

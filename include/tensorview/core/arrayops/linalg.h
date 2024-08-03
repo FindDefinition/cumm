@@ -8,6 +8,78 @@
 namespace tv {
 namespace arrayops {
 
+template <typename T, size_t N, size_t Align> struct diagonal;
+
+template <typename T> struct diagonal<array<T, 1, 0>, 1, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 1>
+  operator()(const TV_METAL_THREAD array<array<T, 1>, 1> &self) {
+    return {self[0][0]};
+  }
+};
+template <typename T> struct diagonal<array<T, 2, 0>, 2, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 2>
+  operator()(const TV_METAL_THREAD array<array<T, 2>, 2> &self) {
+    return {self[0][0], self[1][1]};
+  }
+};
+
+template <typename T> struct diagonal<array<T, 3, 0>, 3, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3>
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 3> &self) {
+    return {self[0][0], self[1][1], self[2][2]};
+  }
+};
+
+template <typename T> struct diagonal<array<T, 4, 0>, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4>
+  operator()(const TV_METAL_THREAD array<array<T, 4>, 4> &self) {
+    return {self[0][0], self[1][1], self[2][2], self[3][3]};
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct from_diagonal;
+
+template <typename T> struct from_diagonal<T, 1, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 1>, 1>
+  operator()(const TV_METAL_THREAD array<T, 1> &self) {
+    return {{self[0]}};
+  }
+};
+
+template <typename T> struct from_diagonal<T, 2, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 2>, 2>
+  operator()(const TV_METAL_THREAD array<T, 2> &self) {
+    return {
+      array<T, 2>{self[0], T(0)}, 
+      array<T, 2>{T(0), self[1]}
+    };
+  }
+};
+
+template <typename T> struct from_diagonal<T, 3, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 3>
+  operator()(const TV_METAL_THREAD array<T, 3> &self) {
+    return {
+      array<T, 3>{self[0], T(0), T(0)}, 
+      array<T, 3>{T(0), self[1], T(0)}, 
+      array<T, 3>{T(0), T(0), self[2]}
+    };
+  }
+};
+
+template <typename T> struct from_diagonal<T, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 4>, 4>
+  operator()(const TV_METAL_THREAD array<T, 4> &self) {
+    return {
+      array<T, 4>{self[0], T(0), T(0), T(0)}, 
+      array<T, 4>{T(0), self[1], T(0), T(0)}, 
+      array<T, 4>{T(0), T(0), self[2], T(0)}, 
+      array<T, 4>{T(0), T(0), T(0), self[3]}
+    };
+  }
+};
+
+
 template <typename T, size_t N, size_t Align> struct determinant;
 
 template <typename T> struct determinant<array<T, 1, 0>, 1, 0> {
@@ -550,21 +622,96 @@ struct transform_matrix<array<T, 3>, 3, 0> {
 template <typename T, size_t N, size_t Align> struct qxdir;
 template <typename T, size_t N, size_t Align> struct qydir;
 template <typename T, size_t N, size_t Align> struct qzdir;
+
+template <typename T, size_t N, size_t Align> struct uqxdir;
+template <typename T, size_t N, size_t Align> struct uqydir;
+template <typename T, size_t N, size_t Align> struct uqzdir;
+
 template <typename T, size_t N, size_t Align> struct qangle;
 template <typename T, size_t N, size_t Align> struct qaxis;
+
+template <typename T, size_t N, size_t Align> struct uqxdir_grad;
+template <typename T, size_t N, size_t Align> struct uqydir_grad;
+template <typename T, size_t N, size_t Align> struct uqzdir_grad;
 
 template <typename T> struct qxdir<T, 4, 0> {
   TV_HOST_DEVICE_INLINE constexpr array<T, 3> operator()(const TV_METAL_THREAD array<T, 4> &q) {
     return {q[3] * q[3] + q[0] * q[0] - q[1] * q[1] - q[2] * q[2],
-            (q[0] * q[1] + q[2] * q[3]) * 2, (q[2] * q[0] - q[1] * q[3]) * 2};
+            (q[0] * q[1] + q[2] * q[3]) * T(2), (q[2] * q[0] - q[1] * q[3]) * T(2)};
+  }
+};
+
+template <typename T> struct uqxdir<T, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3> operator()(const TV_METAL_THREAD array<T, 4> &q) {
+    return {T(1) - 2 * q[1] * q[1] - 2 * q[2] * q[2],
+            (q[0] * q[1] + q[2] * q[3]) * T(2), (q[2] * q[0] - q[1] * q[3]) * T(2)};
+  }
+};
+
+
+template <typename T> struct uqxdir_grad<T, 3, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4> operator()(const TV_METAL_THREAD array<T, 3> &dqdir,
+                                                        const TV_METAL_THREAD array<T, 4> &q) {
+    return {
+        T(2) * q[1] * dqdir[1] + T(2) * q[2] * dqdir[2], // dL/dq0
+        -T(4) * q[1] * dqdir[0] + T(2) * q[0] * dqdir[1] - T(2) * q[3] * dqdir[2],  // dL/dq1
+        -T(4) * q[2] * dqdir[0] + T(2) * q[3] * dqdir[1] + T(2) * q[0] * dqdir[2],  // dL/dq2
+        T(2) * q[2] * dqdir[1] - T(2) * q[1] * dqdir[2]
+      }; 
   }
 };
 
 template <typename T> struct qydir<T, 4, 0> {
   TV_HOST_DEVICE_INLINE constexpr array<T, 3> operator()(const TV_METAL_THREAD array<T, 4> &q) {
-    return {(q[0] * q[1] - q[2] * q[3]) * 2,
+    return {(q[0] * q[1] - q[2] * q[3]) * T(2),
             q[3] * q[3] - q[0] * q[0] + q[1] * q[1] - q[2] * q[2],
-            (q[1] * q[2] + q[0] * q[3]) * 2};
+            (q[1] * q[2] + q[0] * q[3]) * T(2)};
+  }
+};
+template <typename T> struct uqydir<T, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3> operator()(const TV_METAL_THREAD array<T, 4> &q) {
+    return {(q[0] * q[1] - q[2] * q[3]) * T(2),
+            T(1) - T(2) * q[0] * q[0] - T(2) * q[2] * q[2],
+            (q[1] * q[2] + q[0] * q[3]) * T(2)
+    };
+  }
+};
+
+template <typename T> struct uqydir_grad<T, 3, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4> operator()(const TV_METAL_THREAD array<T, 3> &dqdir,
+                                                        const TV_METAL_THREAD array<T, 4> &q) {
+    return {
+        dqdir[0] * T(2) * q[1] - dqdir[1] * T(4) * q[0] + dqdir[2] * T(2) * q[3], // dL/dq0
+        T(2) * q[0] * dqdir[0] + T(2) * q[2] * dqdir[2], // dL/dq1
+        dqdir[0] * T(-2) * q[3] - dqdir[1] * T(4) * q[2] + T(2) * q[1] * dqdir[2], // dL/dq2
+        T(-2) * q[2] * dqdir[0] + T(2) * q[0] * dqdir[2]
+    };
+  }
+};
+
+template <typename T> struct qzdir<T, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3> operator()(const TV_METAL_THREAD array<T, 4> &q) {
+    return {(q[2] * q[0] + q[1] * q[3]) * T(2), (q[1] * q[2] - q[0] * q[3]) * T(2),
+            q[3] * q[3] - q[0] * q[0] - q[1] * q[1] + q[2] * q[2]};
+  }
+};
+
+template <typename T> struct uqzdir<T, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 3> operator()(const TV_METAL_THREAD array<T, 4> &q) {
+    return {(q[2] * q[0] + q[1] * q[3]) * T(2), (q[1] * q[2] - q[0] * q[3]) * T(2),
+            T(1) - 2 * q[0] * q[0] - 2 * q[1] * q[1]};
+  }
+};
+
+template <typename T> struct uqzdir_grad<T, 3, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4> operator()(const TV_METAL_THREAD array<T, 3> &dqdir,
+                                                        const TV_METAL_THREAD array<T, 4> &q) {
+    return {
+        T(2) * q[2] * dqdir[0] - T(2) * q[3] * dqdir[1] - T(4) * q[0] * dqdir[2], // dL/dq0
+        T(2) * q[3] * dqdir[0] - T(2) * q[2] * dqdir[1] - T(4) * q[2] * dqdir[2], // dL/dq1
+        T(2) * q[0] * dqdir[0] + T(2) * q[1] * dqdir[1], // dL/dq1
+        T(2) * q[1] * dqdir[0] - T(2) * q[0] * dqdir[1] // dL/dq1
+    };
   }
 };
 
@@ -582,12 +729,6 @@ template <typename T> struct qangle<T, 4, 0> {
   }
 };
 
-template <typename T> struct qzdir<T, 4, 0> {
-  TV_HOST_DEVICE_INLINE constexpr array<T, 3> operator()(const TV_METAL_THREAD array<T, 4> &q) {
-    return {(q[2] * q[0] + q[1] * q[3]) * 2, (q[1] * q[2] - q[0] * q[3]) * 2,
-            q[3] * q[3] - q[0] * q[0] - q[1] * q[1] + q[2] * q[2]};
-  }
-};
 template <typename T, size_t N, size_t Align> struct rotation_quat;
 
 template <typename T> struct rotation_quat<T, 3, 0> {
@@ -668,6 +809,39 @@ template <typename T> struct qmat<T, 4, 0> {
         .template op<transpose>();
   }
 };
+
+template <typename T, size_t N, size_t Align> struct qmat_colmajor;
+
+template <typename T> struct qmat_colmajor<T, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 3>
+  operator()(const TV_METAL_THREAD array<T, 4> &self) {
+    return array<array<T, 3>, 3>{self.template op<qxdir>(),
+                                  self.template op<qydir>(),
+                                  self.template op<qzdir>()};
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct uqmat_colmajor;
+
+template <typename T> struct uqmat_colmajor<T, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 3>
+  operator()(const TV_METAL_THREAD array<T, 4> &self) {
+    return array<array<T, 3>, 3>{self.template op<uqxdir>(),
+                                  self.template op<uqydir>(),
+                                  self.template op<uqzdir>()};
+  }
+};
+
+
+template <typename T, size_t N, size_t Align> struct uqmat_colmajor_grad;
+
+template <typename T> struct uqmat_colmajor_grad<array<T, 3>, 3, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<T, 4>
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 3> &grad, const TV_METAL_THREAD array<T, 4> &q) {
+    return grad[0].template op<uqxdir_grad>(q) + grad[1].template op<uqydir_grad>(q) + grad[2].template op<uqzdir_grad>(q);
+  }
+};
+
 
 template <typename T, size_t N, size_t Align> struct angleaxis_mat;
 

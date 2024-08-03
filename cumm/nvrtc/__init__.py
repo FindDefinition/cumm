@@ -770,9 +770,9 @@ class CummMetalModule:
                         "-o", str(out_lib_name), str(out_name)
                     ])
                 except:
-                    for k, v in self.params.headers.items():
-                        print(f"------ Header {k} -------")
-                        print(v)
+                    # for k, v in self.params.headers.items():
+                    #     print(f"------ Header {k} -------")
+                    #     print(v)
                     print("Build Error. Opts: {} Kernel Code:\n{}".format(opts, self.params.debug_code))
                     raise
             with out_lib_name.open("rb") as f:
