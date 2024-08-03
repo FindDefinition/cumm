@@ -708,7 +708,7 @@ template <typename T> struct uqzdir_grad<T, 3, 0> {
                                                         const TV_METAL_THREAD array<T, 4> &q) {
     return {
         T(2) * q[2] * dqdir[0] - T(2) * q[3] * dqdir[1] - T(4) * q[0] * dqdir[2], // dL/dq0
-        T(2) * q[3] * dqdir[0] - T(2) * q[2] * dqdir[1] - T(4) * q[2] * dqdir[2], // dL/dq1
+        T(2) * q[3] * dqdir[0] + T(2) * q[2] * dqdir[1] - T(4) * q[1] * dqdir[2], // dL/dq1
         T(2) * q[0] * dqdir[0] + T(2) * q[1] * dqdir[1], // dL/dq1
         T(2) * q[1] * dqdir[0] - T(2) * q[0] * dqdir[1] // dL/dq1
     };

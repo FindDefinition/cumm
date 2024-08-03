@@ -70,8 +70,22 @@ using equivalent_data_type_t = typename detail::equivalent_data_type<T>::type;
 
 template <typename T>
 constexpr int TV_METAL_CONSTANT sizeof_v = detail::sizeof_subbyte_impl<T>::value;
-
+template <typename T, size_t N, size_t Align> struct array;
 namespace detail {
+
+
+template <typename T> struct get_nested_element_type_impl {
+  using type = std::decay_t<T>;
+};
+
+template <typename T, size_t N, size_t Align>
+struct get_nested_element_type_impl<array<T, N, Align>> {
+  using type = typename get_nested_element_type_impl<std::decay_t<T>>::type;
+};
+
+template <typename T>
+using get_nested_element_t = typename get_nested_element_type_impl<T>::type;
+
 template <typename K, typename V> struct InitPair {
   K first;
   V second;
@@ -370,7 +384,7 @@ public:
 #endif
 
   TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> operator-() const {
-    return arrayops::apply(detail::array_minus<T>, *this);
+    return arrayops::apply(detail::array_minus<detail::get_nested_element_t<T>>, *this);
   }
 
   template <typename TCast>
@@ -587,17 +601,6 @@ struct is_tv_array<tv::array<T, N, Align>> {
   static constexpr TV_METAL_CONSTANT bool value = true;
 };
 
-template <typename T> struct get_nested_element_type_impl {
-  using type = std::decay_t<T>;
-};
-
-template <typename T, size_t N, size_t Align>
-struct get_nested_element_type_impl<tv::array<T, N, Align>> {
-  using type = typename get_nested_element_type_impl<std::decay_t<T>>::type;
-};
-
-template <typename T>
-using get_nested_element_t = typename get_nested_element_type_impl<T>::type;
 
 template <typename TCast, typename T> struct cast_nested_element_type_impl {
   using type = TCast;

@@ -527,12 +527,19 @@ template <class L, class F> TV_HOST_DEVICE_INLINE constexpr F mp_for_each_cuda(F
 }
 #endif
 
-template <unsigned N, unsigned... Ns> struct mp_prod_int {
-  static constexpr unsigned TV_METAL_CONSTANT value = N * mp_prod_int<Ns...>::value;
+template <unsigned N, unsigned... Ns> struct mp_prod_uint {
+  static constexpr unsigned TV_METAL_CONSTANT value = N * mp_prod_uint<Ns...>::value;
 };
 
-template <unsigned N> struct mp_prod_int<N> {
+template <unsigned N> struct mp_prod_uint<N> {
   static constexpr unsigned TV_METAL_CONSTANT value = N;
+};
+template <int N, int... Ns> struct mp_prod_int {
+  static constexpr int TV_METAL_CONSTANT value = N * mp_prod_int<Ns...>::value;
+};
+
+template <int N> struct mp_prod_int<N> {
+  static constexpr int TV_METAL_CONSTANT value = N;
 };
 
 namespace detail {
@@ -550,6 +557,20 @@ template <typename TA, typename TB> struct mp_sum_op_impl {
   using type =
       std::integral_constant<typename TA::value_type, TA::value + TB::value>;
 };
+template <typename TA, typename TB> struct mp_prod_op_impl {
+  using type =
+      std::integral_constant<typename TA::value_type, TA::value * TB::value>;
+};
+template <typename TA, typename TB> struct mp_or_op_impl {
+  using type =
+      std::integral_constant<typename TA::value_type, TA::value || TB::value>;
+};
+
+template <typename TA, typename TB> struct mp_and_op_impl {
+  using type =
+      std::integral_constant<typename TA::value_type, TA::value && TB::value>;
+};
+
 } // namespace detail
 
 template <class L, class Init>
@@ -560,6 +581,15 @@ using mp_reduce_min = mp_reduce<detail::mp_min_op_impl, L, Init>;
 
 template <class L, class Init>
 using mp_reduce_sum = mp_reduce<detail::mp_sum_op_impl, L, Init>;
+
+template <class L, class Init>
+using mp_reduce_prod = mp_reduce<detail::mp_prod_op_impl, L, Init>;
+
+template <class L, class Init>
+using mp_reduce_or = mp_reduce<detail::mp_or_op_impl, L, Init>;
+
+template <class L, class Init>
+using mp_reduce_and = mp_reduce<detail::mp_and_op_impl, L, Init>;
 
 template <class T, T... Ns>
 constexpr T TV_METAL_CONSTANT mp_reduce_sum_v =

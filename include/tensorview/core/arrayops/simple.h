@@ -15,6 +15,30 @@ TV_HOST_DEVICE_INLINE TV_METAL_CONSTANT tv::array_nd<T, Ns...>* reinterpret_cast
   return reinterpret_cast<TV_METAL_CONSTANT tv::array_nd<T, Ns...> *>(ptr);
 }
 
+template <int... Ns, typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE TV_METAL_CONSTANT auto& reshape(TV_METAL_CONSTANT array<T, N, Align>& arr) {  
+  using shape = typename detail::get_tv_array_shape<array<T, N, Align>>::type;
+  constexpr size_t shapeProd = mp_reduce_prod<shape, std::integral_constant<size_t, size_t(1)>>::value;
+  constexpr int reshapeProd = mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? 1 : Ns)...>, std::integral_constant<size_t, size_t(1)>>::value;
+  static_assert(shapeProd == mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...>, std::integral_constant<int, int(1)>>::value, "reshape size mismatch");
+  static_assert(1 == mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>, std::integral_constant<int, int(0)>>::value, "shape can only have one -1");
+  static_assert(0 == mp_reduce_sum<mp_list_c<int, int(Ns < -1)...>, std::integral_constant<int, int(0)>>::value, "shape can't have negative number other than -1");
+  return reinterpret_cast<TV_METAL_CONSTANT tv::array_nd<detail::get_nested_element_t<T>, (Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...> &>(arr);
+}
+
+#ifndef TV_METAL_RTC
+template <int... Ns, typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE const auto& reshape(const TV_METAL_CONSTANT array<T, N, Align>& arr) {
+  using shape = typename detail::get_tv_array_shape<array<T, N, Align>>::type;
+  constexpr size_t shapeProd = mp_reduce_prod<shape, std::integral_constant<size_t, size_t(1)>>::value;
+  constexpr int reshapeProd = mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? 1 : Ns)...>, std::integral_constant<size_t, size_t(1)>>::value;
+  static_assert(shapeProd == mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...>, std::integral_constant<int, int(1)>>::value, "reshape size mismatch");
+  static_assert(1 == mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>, std::integral_constant<int, int(0)>>::value, "shape can only have one -1");
+  static_assert(0 == mp_reduce_sum<mp_list_c<int, int(Ns < -1)...>, std::integral_constant<int, int(0)>>::value, "shape can't have negative number other than -1");
+  return reinterpret_cast<const tv::array_nd<detail::get_nested_element_t<T>, (Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...> &>(arr);
+}
+#endif
+
 #ifdef TV_METAL_RTC
 template <size_t N, typename T>
 TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(const thread T *ptr) {
@@ -43,6 +67,50 @@ TV_HOST_DEVICE_INLINE device tv::array_nd<T, Ns...>* reinterpret_cast_array_nd(d
 template <typename T, size_t... Ns>
 TV_HOST_DEVICE_INLINE threadgroup tv::array_nd<T, Ns...>* reinterpret_cast_array_nd(threadgroup T *ptr) {
   return reinterpret_cast<threadgroup tv::array_nd<T, Ns...> *>(ptr);
+}
+
+template <int... Ns, typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE thread auto& reshape(thread array<T, N, Align>& arr) {
+  using shape = typename detail::get_tv_array_shape<array<T, N, Align>>::type;
+  constexpr size_t shapeProd = mp_reduce_prod<shape, std::integral_constant<size_t, size_t(1)>>::value;
+  constexpr int reshapeProd = mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? 1 : Ns)...>, std::integral_constant<size_t, size_t(1)>>::value;
+  static_assert(shapeProd == mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...>, std::integral_constant<int, int(1)>>::value, "reshape size mismatch");
+  static_assert(1 == mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>, std::integral_constant<int, int(0)>>::value, "shape can only have one -1");
+  static_assert(0 == mp_reduce_sum<mp_list_c<int, int(Ns < -1)...>, std::integral_constant<int, int(0)>>::value, "shape can't have negative number other than -1");
+  return reinterpret_cast<thread tv::array_nd<detail::get_nested_element_t<T>, (Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...> &>(arr);
+}
+
+template <int... Ns, typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE threadgroup auto& reshape(threadgroup array<T, N, Align>& arr) {
+  using shape = typename detail::get_tv_array_shape<array<T, N, Align>>::type;
+  constexpr size_t shapeProd = mp_reduce_prod<shape, std::integral_constant<size_t, size_t(1)>>::value;
+  constexpr int reshapeProd = mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? 1 : Ns)...>, std::integral_constant<size_t, size_t(1)>>::value;
+  static_assert(shapeProd == mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...>, std::integral_constant<int, int(1)>>::value, "reshape size mismatch");
+  static_assert(1 == mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>, std::integral_constant<int, int(0)>>::value, "shape can only have one -1");
+  static_assert(0 == mp_reduce_sum<mp_list_c<int, int(Ns < -1)...>, std::integral_constant<int, int(0)>>::value, "shape can't have negative number other than -1");
+  return reinterpret_cast<threadgroup tv::array_nd<detail::get_nested_element_t<T>, (Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...> &>(arr);
+}
+
+template <int... Ns, typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE thread const auto& reshape(const thread array<T, N, Align>& arr) {
+  using shape = typename detail::get_tv_array_shape<array<T, N, Align>>::type;
+  constexpr size_t shapeProd = mp_reduce_prod<shape, std::integral_constant<size_t, size_t(1)>>::value;
+  constexpr int reshapeProd = mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? 1 : Ns)...>, std::integral_constant<size_t, size_t(1)>>::value;
+  static_assert(shapeProd == mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...>, std::integral_constant<int, int(1)>>::value, "reshape size mismatch");
+  static_assert(1 == mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>, std::integral_constant<int, int(0)>>::value, "shape can only have one -1");
+  static_assert(0 == mp_reduce_sum<mp_list_c<int, int(Ns < -1)...>, std::integral_constant<int, int(0)>>::value, "shape can't have negative number other than -1");
+  return reinterpret_cast<const thread tv::array_nd<detail::get_nested_element_t<T>, (Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...> &>(arr);
+}
+
+template <int... Ns, typename T, size_t N, size_t Align>
+TV_HOST_DEVICE_INLINE threadgroup const auto& reshape(const threadgroup array<T, N, Align>& arr) {
+  using shape = typename detail::get_tv_array_shape<array<T, N, Align>>::type;
+  constexpr size_t shapeProd = mp_reduce_prod<shape, std::integral_constant<size_t, size_t(1)>>::value;
+  constexpr int reshapeProd = mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? 1 : Ns)...>, std::integral_constant<size_t, size_t(1)>>::value;
+  static_assert(shapeProd == mp_reduce_prod<mp_list_c<int, int(Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...>, std::integral_constant<int, int(1)>>::value, "reshape size mismatch");
+  static_assert(1 == mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>, std::integral_constant<int, int(0)>>::value, "shape can only have one -1");
+  static_assert(0 == mp_reduce_sum<mp_list_c<int, int(Ns < -1)...>, std::integral_constant<int, int(0)>>::value, "shape can't have negative number other than -1");
+  return reinterpret_cast<const threadgroup tv::array_nd<detail::get_nested_element_t<T>, (Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...> &>(arr);
 }
 
 #endif
