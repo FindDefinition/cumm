@@ -10,9 +10,12 @@ def check_array_op_grad(inp: np.ndarray, inp_shape: list[int], out_shape: list[i
     inliner = NVRTCInlineBuilder([TensorViewArrayLinalg], std="c++17")
     dtype = np.float64
     tv_dtype = tv.float64
+    dtype_str = "double"
     if compat.IsAppleSiliconMacOs:
         dtype = np.float32 
         tv_dtype = tv.float32 
+        dtype_str = "float"
+
     inp = inp.astype(dtype)
     inp_tv = tv.from_numpy(inp).cuda()
 
@@ -31,14 +34,15 @@ def check_array_op_grad(inp: np.ndarray, inp_shape: list[int], out_shape: list[i
         inp_delta.reshape(-1)[i] = delta 
         slice_indexes = rowmajor_inverse(i, inp_shape_np)
         slice_indexes_str = "".join(map(lambda x: f"[{x}]", slice_indexes))
-        inliner.kernel_1d(f"check_grad_op_{op}_{grad_op}_{inp_shape}", num_check, 0, f"""
+        inliner.kernel_1d(f"check_grad_op_{op}_{grad_op}_{inp_shape}_{dtype_str}", num_check, 0, f"""
         namespace op = tv::arrayops;
-        auto inp_ptr = op::reinterpret_cast_array_nd<float, {inp_shape_str}>($inp_tv);
+        auto inp_ptr = op::reinterpret_cast_array_nd<{dtype_str}, {inp_shape_str}>($inp_tv);
         auto inp_arr = inp_ptr[i];
         auto grad_scale = $grad_scalar;
         auto inp_delta_val = $inp_delta;
 
-        auto out_arr = inp_arr.op<op::{op}>() * grad_scale;
+        tv::array_nd<float, 3, 3> out_arr = inp_arr.op<op::{op}>() * grad_scale;
+        auto out_arr_2 = out_arr.op<op::max>(1.0f);
         auto out_arr_with_delta = (inp_arr + inp_delta_val).op<op::{op}>() * grad_scale;
         auto out_arr_with_delta_sum = op::reshape<-1>(out_arr_with_delta - out_arr).op<op::sum>(); 
         $my_val_tv[i] = op::reshape<-1>(grad_scale.op<op::{grad_op}>(inp_arr))[$index];

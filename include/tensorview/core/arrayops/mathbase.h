@@ -896,11 +896,11 @@ template <> struct MathScalarOp<__nv_bfloat16> {
 #endif
   }
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 max(__half x, __half y) { return __hmax(x, y); }
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 max(__nv_bfloat16 x, __nv_bfloat16 y) { return __hmax(x, y); }
 
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 min(__half x, __half y) { return __hmin(x, y); }
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 min(__nv_bfloat16 x, __nv_bfloat16 y) { return __hmin(x, y); }
 
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 clamp(__half v, __half lo, __half hi) { return min(hi, max(lo, v)); }
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 clamp(__nv_bfloat16 v, __nv_bfloat16 lo, __nv_bfloat16 hi) { return min(hi, max(lo, v)); }
 #endif
 
 };
