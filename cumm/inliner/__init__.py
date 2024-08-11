@@ -143,14 +143,23 @@ def _cached_get_torch_dtype_to_tv():
     return _TORCH_DTYPE_TO_TV
 
 
+RESERVED_NAMES = set([
+    "threadPositionInGrid",
+    "threadGroupPositionInGrid",
+])
+
 class CUDAMode(enum.Enum):
     Kernel1D = "Kernel1D"
+    Kernel2D = "Kernel2D"
+    Kernel3D = "Kernel3D"
+
     KernelRaw = "KernelRaw"
 
 
 def torch_tensor_to_tv(ten,
                        dtype: Optional[int] = None,
-                       shape: Optional[List[int]] = None):
+                       shape: Optional[List[int]] = None,
+                       to_const: bool = False):
     # assert ten.is_contiguous(), "must be contiguous tensor"
     device = ten.device
     if device.type == "cpu":
@@ -175,9 +184,41 @@ def torch_tensor_to_tv(ten,
         shape = list(ten.shape)
     if dtype is None:
         dtype = _cached_get_torch_dtype_to_tv()[ten.dtype]
+    if to_const:
+        return tv.from_const_blob_strided(ptr, shape, list(ten.stride()), dtype,
+                                    tv_device, offset)
     return tv.from_blob_strided(ptr, shape, list(ten.stride()), dtype,
                                 tv_device, offset)
 
+@contextlib.contextmanager
+def measure_and_print_torch(name: str = "CUDATimer", *, stream: int = 0, out: Optional[List[float]] = None, enable: bool = True):
+    if not enable:
+        yield
+    else:
+        import torch
+        if compat.IsAppleSiliconMacOs:
+            start_ev = torch.mps.Event(enable_timing=True)
+            end_ev = torch.mps.Event(enable_timing=True)
+            start_ev.record()
+            yield 
+            end_ev.record()
+            torch.mps.synchronize()
+            # TODO sync event will hang
+            # start_ev.synchronize()
+            # end_ev.synchronize()
+            duration = start_ev.elapsed_time(end_ev)
+            print(f"{name} duration: {duration} ms")
+        else:
+            start_ev = torch.cuda.Event(enable_timing=True)
+            end_ev = torch.cuda.Event(enable_timing=True)
+
+            start_ev.record(torch.cuda.default_stream())
+            yield 
+            end_ev.record(torch.cuda.default_stream())
+            start_ev.synchronize()
+            end_ev.synchronize()
+            duration = start_ev.elapsed_time(end_ev)
+            print(f"{name} duration: {duration} ms")
 
 def get_current_stream():
     import torch
@@ -455,7 +496,7 @@ class NVRTCInlineBuilder(InlineBuilder):
     def get_nvrtc_kernel_attrs(self, name: str) -> Dict[str, int]:
         nvrtc_mod = self.get_nvrtc_module(name)
         assert nvrtc_mod is not None
-        return nvrtc_mod.get_kernel_attrs(nvrtc_mod.get_lowered_name(_NVRTC_FUNC_NAME_FORMAT.format(name)))
+        return nvrtc_mod.get_kernel_attrs(nvrtc_mod.get_lowered_name(self._get_nvrtc_inline_func_name_for_debug(name)))
 
     def get_save_root(self,
                       path: Path,
@@ -537,6 +578,12 @@ class NVRTCInlineBuilder(InlineBuilder):
             if arg.mode != CUDAMode.KernelRaw:
                 code.arguments = new_args + [
                     pccm.Argument(self.index_name, "uint32_t", attributes=["thread_position_in_grid"])
+                ]
+            else:
+                code.arguments = new_args + [
+                    pccm.Argument("threadPositionInGrid", "uint3", attributes=["thread_position_in_grid"]),
+                    pccm.Argument("threadgroupPositionInGrid", "uint3", attributes=["threadgroup_position_in_grid"]),
+                    pccm.Argument("threadPositionInThreadgroup", "uint3", attributes=["thread_position_in_threadgroup"]),
                 ]
             code.code_before_func_def = "\n".join(func_constants)
         trycatch_ctx = contextlib.nullcontext()
@@ -632,20 +679,22 @@ class NVRTCInlineBuilder(InlineBuilder):
                  *args,
                  user_args: Optional[_NVRTCInlineParams] = None):
         assert user_args is not None
+        real_name = self._get_nvrtc_inline_func_name_for_debug(name)
         launch = user_args.launch.copy()
         if launch.ctx is None or not launch.ctx.has_apple_metal_context():
             launch.ctx = self.ctx
         if isinstance(func, CummMetalModule):
+            is_kernel_raw = user_args.mode == CUDAMode.KernelRaw
             with self.enter_inliner_scope():
-                res = func.run_kernel(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args, perf_context=user_args.perf_context)
+                res = func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context, use_nonuniform_threadgroup=not is_kernel_raw)
                 if self._mps_context is not None:
                     self._mps_context.commit()
                 return res
         else:
             if user_args.run_in_process:
-                return func.run_kernel_in_spawn_process(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args)
+                return func.run_kernel_in_spawn_process(real_name, launch, *args)
             else:
-                return func.run_kernel(self._get_nvrtc_inline_func_name_for_debug(name), launch, *args, perf_context=user_args.perf_context)
+                return func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context)
 
     def kernel_raw(self,
                    name: str,

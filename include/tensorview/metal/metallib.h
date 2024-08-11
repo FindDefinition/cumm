@@ -165,8 +165,6 @@ public:
   MetalModule(tv::Tensor binary) {
 #ifdef TV_HARDWARE_ACC_METAL
     ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
-    auto option =
-        detail::make_apple_mtl_ptr(MTL::CompileOptions::alloc()->init());
     auto data = dispatch_data_create(binary.const_raw_data(), binary.raw_size(),
                                      dispatch_get_main_queue(),
                                      DISPATCH_DATA_DESTRUCTOR_DEFAULT);
@@ -176,23 +174,38 @@ public:
     TV_THROW_RT_ERR("you must compile with apple first to use metal program");
 #endif
   }
-  MetalModule(std::string code, std::vector<std::string> opts) {
+  MetalModule(std::string code, std::unordered_map<std::string, std::string> preprocessorMacros, bool fastMathEnabled = true) {
 #ifdef TV_HARDWARE_ACC_METAL
     ptr_mtl_device_ = MTL::CreateSystemDefaultDevice();
-    auto codeNS = detail::make_apple_mtl_ptr(
-        NS::String::string(code.c_str(), NS::ASCIIStringEncoding));
-    auto option =
+    auto options =
         detail::make_apple_mtl_ptr(MTL::CompileOptions::alloc()->init());
+    NS::SharedPtr< NS::AutoreleasePool > pPool = NS::TransferPtr( NS::AutoreleasePool::alloc()->init() );
+    auto codeNS = NS::String::string(code.c_str(), NS::ASCIIStringEncoding);
+    std::vector<NS::Object* > macroKeys;
+    std::vector<NS::Object* > macroValues;
+    for (auto &pair : preprocessorMacros) {
+      macroKeys.push_back(NS::String::string(pair.first.c_str(), NS::ASCIIStringEncoding));
+      macroValues.push_back(NS::String::string(pair.second.c_str(), NS::ASCIIStringEncoding));
+    }
+    auto nd = NS::Dictionary::dictionary(macroKeys.data(), macroValues.data(), macroKeys.size());
+    options->setPreprocessorMacros(nd);
+    if (!fastMathEnabled){
+      // default is yes, so only set if false
+      options->setFastMathEnabled(fastMathEnabled);
+    }
     NS::Error *error = nullptr;
+    mtl_lib_ = ptr_mtl_device_->newLibrary(codeNS, options.get(), &error);
+    TV_ASSERT_INVALID_ARG(mtl_lib_ && error == nullptr,
+                          "new library failed.");
 
-    mtl_lib_ = ptr_mtl_device_->newLibrary(codeNS.get(), option.get(), &error);
 #else
     TV_THROW_RT_ERR("you must compile with apple first to use metal program");
 #endif
   }
   void run_kernel(std::string name, std::array<int, 3> blocks,
                   std::array<int, 3> threads, int smem_size, Context ctx,
-                  std::vector<std::tuple<tv::Tensor, int>> args) {
+                  std::vector<std::tuple<tv::Tensor, int>> args,
+                  bool use_nonuniform_threadgroup = true) {
 #ifdef TV_HARDWARE_ACC_METAL
     bool sync_op = false;
     if (!ctx.has_item(ContextType::kAppleMetal)) {
@@ -206,9 +219,6 @@ public:
         ctx.get_item(ContextType::kAppleMetal));
     auto cb = ctx_ptr->commandBuffer();
     TV_ASSERT_RT_ERR(cb, "command buffer is null");
-    auto constants = detail::make_apple_mtl_ptr(
-        MTL::FunctionConstantValues::alloc()->init());
-    TV_ASSERT_RT_ERR(constants, "command buffer is null");
     int cnt = 0;
     std::string cache_ley = name;
     for (auto &arg : args) {
@@ -221,32 +231,37 @@ public:
         // auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype(), ten.dim(0));
         auto mtl_dtype = MTL::DataType::DataTypeBool;
         bool val = ten.item<uint8_t>() > 0;
-        constants->setConstantValue(&val, mtl_dtype, cnt);
         cache_ley += std::string("_") + std::to_string(ten.item<uint8_t>());
         cnt += 1;
-        // TV_ASSERT_INVALID_ARG(ten.dim(0) <= 4,
-        //                       "array tensor smaller than 4");
-        // if (ten.ndim() == 2){
-        //   TV_ASSERT_INVALID_ARG(ten.dim(1) <= 4,
-        //                         "array tensor smaller than 4");
-        //   auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype(), ten.dim(1));
-        //   for (int j = 0; j < ten.dim(0); ++j){
-        //     constants->setConstantValue(ten.raw_data() + j * ten.dim(1) * tv::bit_size(ten.dtype()) / 8, mtl_dtype, cnt);
-        //     cnt += 1;
-        //   }
-        // }else{
-        //   auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype(), ten.dim(0));
-        //   constants->setConstantValue(ten.raw_data(), mtl_dtype, cnt);
-        //   cnt += 1;
-        // }
         break;
       }
       default:;
       }
     }
     if (func_pso_map_.find(cache_ley) == func_pso_map_.end()) {
+      auto constants = detail::make_apple_mtl_ptr(
+          MTL::FunctionConstantValues::alloc()->init());
+      TV_ASSERT_RT_ERR(constants, "command buffer is null");
+      for (auto &arg : args) {
+        auto &ten = std::get<0>(arg);
+        auto arg_type = std::get<1>(arg);
+        switch (arg_type) {
+        case ArgType::kConstant: {
+          TV_ASSERT_INVALID_ARG(ten.device() == -1 && ten.size() == 1 && ten.dtype() == tv::uint8,
+                                "array tensor must be CPU and scalar and uint8 (bool)");
+          // auto mtl_dtype = detail::tv_dtype_to_mtl_data_type(ten.dtype(), ten.dim(0));
+          auto mtl_dtype = MTL::DataType::DataTypeBool;
+          bool val = ten.item<uint8_t>() > 0;
+          constants->setConstantValue(&val, mtl_dtype, cnt);
+          cache_ley += std::string("_") + std::to_string(ten.item<uint8_t>());
+          cnt += 1;
+          break;
+        }
+        default:;
+        }
+      }
       auto nameNS = detail::make_apple_mtl_ptr(
-          NS::String::string(name.c_str(), NS::ASCIIStringEncoding));
+          NS::String::string(name.c_str(), NS::ASCIIStringEncoding)->retain());
       NS::Error *error = nullptr;
       auto computeFunction = NS::TransferPtr(
           mtl_lib_->newFunction(nameNS.get(), constants.get(), &error));
@@ -271,7 +286,7 @@ public:
               };
       auto computeEncoder =
           std::unique_ptr<MTL::ComputeCommandEncoder, decltype(deleter)>(
-              cb->computeCommandEncoder(), deleter);
+              cb->computeCommandEncoder()->retain(), deleter);
       TV_ASSERT_RT_ERR(computeEncoder, "compute encoder is null");
       int buffer_cnt = 0;
 
@@ -317,7 +332,11 @@ public:
       MTL::Size threadgroupSize = MTL::Size(threads[0], threads[1], threads[2]);
       MTL::Size gridSize = MTL::Size(blocks[0], blocks[1], blocks[2]);
       // Encode the compute command.
-      computeEncoder->dispatchThreads(gridSize, threadgroupSize);
+      if (use_nonuniform_threadgroup){
+        computeEncoder->dispatchThreads(gridSize, threadgroupSize);
+      }else{
+        computeEncoder->dispatchThreadgroups(gridSize, threadgroupSize);
+      }
       computeEncoder->endEncoding();
       ce_is_end_encoding = true;
       // if from blob (use external context), do sync with external library by

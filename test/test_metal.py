@@ -27,10 +27,10 @@ def test_metal_capture():
     inliner.kernel_1d("kernel_capture", data.shape[0], 0, 
                     f"""
     namespace op = tv::arrayops;
-    auto p = op::reinterpret_cast_array_nd<float, 3>($data)[i];
+    auto p = op::reinterpret_cast_array_nd<3>($data)[i];
     auto tr = $arr4x4;
     $wtf;
-    op::reinterpret_cast_array_nd<float, 3>($datares)[i] = p.op<op::transform_3d>(tr);
+    op::reinterpret_cast_array_nd<3>($datares)[i] = p.op<op::transform_3d>(tr);
     """)
     data_res_ref = data @ (arr4x4_th[:3, :3].T) + arr4x4_th[:3, 3]
     erro = torch.linalg.norm(data_res_ref - datares)
@@ -48,7 +48,7 @@ def test_metal_basic():
         inliner.kernel_1d("nvrtc_std", a.shape[0], 0, 
                         f"""
         namespace op = tv::arrayops;
-        auto a_ptr = op::reinterpret_cast_array_nd<float, 3>($a);
+        auto a_ptr = op::reinterpret_cast_array_nd<3>($a);
         auto a_val = a_ptr[i];
         a_ptr[i] = a_val.op<op::transform_3d>($aa);
 

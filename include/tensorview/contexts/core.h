@@ -180,7 +180,7 @@ public:
         return command_buffer_ptr_external_;
       }
       if (!_commandBuffer) {
-        _commandBuffer = NS::TransferPtr(command_queue_ptr_->commandBuffer());
+        _commandBuffer = NS::RetainPtr(command_queue_ptr_->commandBuffer());
       }
       return _commandBuffer.get();
     }
@@ -232,7 +232,7 @@ public:
       TV_ASSERT_RT_ERR(!from_blob_, "you can't synchronize when context is from blob");
       TV_ASSERT_RT_ERR(_commandBuffer, "error");
       _commandBuffer->commit();
-      _commandBuffer = NS::TransferPtr(command_queue_ptr_->commandBuffer());
+      _commandBuffer = NS::RetainPtr(command_queue_ptr_->commandBuffer());
     }
     void commitAndWait() {
       TV_ASSERT_RT_ERR(!from_blob_, "you can't synchronize when context is from blob");

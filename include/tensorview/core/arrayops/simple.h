@@ -10,12 +10,62 @@ template <size_t N, typename T>
 TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(TV_METAL_CONSTANT const T *ptr) {
   return reinterpret_cast<const TV_METAL_CONSTANT tv::array<T, N> *>(ptr)[0];
 }
-template <typename T, size_t... Ns>
+template <size_t... Ns, typename T>
 TV_HOST_DEVICE_INLINE TV_METAL_CONSTANT tv::array_nd<T, Ns...> *
 reinterpret_cast_array_nd(TV_METAL_CONSTANT T *ptr) {
   return reinterpret_cast<TV_METAL_CONSTANT tv::array_nd<T, Ns...> *>(ptr);
 }
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE TV_METAL_CONSTANT tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(TV_METAL_CONSTANT T *ptr) {
+  return reinterpret_cast<TV_METAL_CONSTANT tv::alignedarray<T, N> *>(ptr);
+}
 
+#ifndef TV_METAL_RTC
+template <typename T>
+class PointerValueReader {
+public:
+  TV_HOST_DEVICE_INLINE constexpr PointerValueReader(T *ptr) : ptr_(ptr) {}
+  TV_HOST_DEVICE_INLINE constexpr T operator[](size_t i) const {
+    T res = ptr_[i];
+    return res;
+  }
+private:
+  T* ptr_;
+};
+#else 
+template <typename T>
+class PointerValueReader {
+public:
+  TV_HOST_DEVICE_INLINE constexpr PointerValueReader(thread T *ptr) : ptr_(ptr) {}
+  TV_HOST_DEVICE_INLINE constexpr T operator[](size_t i) const {
+    T res = ptr_[i];
+    return res;
+  }
+private:
+  thread T* ptr_;
+};
+#endif
+
+// template <class T>
+// TV_HOST_DEVICE_INLINE PointerValueReader<T> create_pointer_value_reader(TV_METAL_CONSTANT T *ptr) {
+//   return PointerValueReader<T>(ptr);
+// }
+
+#ifndef TV_METAL_RTC
+template <size_t... Ns, typename T>
+TV_HOST_DEVICE_INLINE const tv::array_nd<T, Ns...> *
+reinterpret_cast_array_nd(const T *ptr) {
+  return reinterpret_cast<const tv::array_nd<T, Ns...> *>(ptr);
+}
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE const tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(const T *ptr) {
+  return reinterpret_cast<const tv::alignedarray<T, N> *>(ptr);
+}
+
+
+#endif
 #define OP_RESHAPE_DECLARE_FOR_METAL(metal_type, ref_type)                     \
   template <int... Ns, typename T, size_t N, size_t Align>                     \
   TV_HOST_DEVICE_INLINE metal_type auto ref_type reshape(                      \
@@ -36,7 +86,7 @@ reinterpret_cast_array_nd(TV_METAL_CONSTANT T *ptr) {
                 std::integral_constant<int, int(1)>>::value,                   \
         "reshape size mismatch");                                              \
     static_assert(                                                             \
-        1 == mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>,                   \
+        1 >= mp_reduce_sum<mp_list_c<int, int(Ns == -1)...>,                   \
                            std::integral_constant<int, int(0)>>::value,        \
         "shape can only have one -1");                                         \
     static_assert(                                                             \
@@ -57,6 +107,31 @@ OP_RESHAPE_DECLARE_FOR_METAL(const, &&);
 #endif
 
 #ifdef TV_METAL_RTC
+template <typename T>
+class PointerValueReader<device T> {
+public:
+  TV_HOST_DEVICE_INLINE constexpr PointerValueReader(device T *ptr) : ptr_(ptr) {}
+  TV_HOST_DEVICE_INLINE T constexpr operator[](size_t i) const {
+    T res = ptr_[i];
+    return res;
+  }
+private:
+  device T* ptr_;
+};
+
+
+template <typename T>
+class PointerValueReader<threadgroup T> {
+public:
+  TV_HOST_DEVICE_INLINE constexpr PointerValueReader(threadgroup T *ptr) : ptr_(ptr) {}
+  TV_HOST_DEVICE_INLINE constexpr T operator[](size_t i) const {
+    T res = ptr_[i];
+    return res;
+  }
+private:
+  threadgroup T* ptr_;
+};
+
 template <size_t N, typename T>
 TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(const thread T *ptr) {
   return reinterpret_cast<const thread tv::array<T, N> *>(ptr)[0];
@@ -71,22 +146,76 @@ TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(const threadgroup T *ptr) {
   return reinterpret_cast<const threadgroup tv::array<T, N> *>(ptr)[0];
 }
 
-template <typename T, size_t... Ns>
+template <size_t... Ns, typename T>
 TV_HOST_DEVICE_INLINE thread tv::array_nd<T, Ns...> *
 reinterpret_cast_array_nd(thread T *ptr) {
   return reinterpret_cast<thread tv::array_nd<T, Ns...> *>(ptr);
 }
 
-template <typename T, size_t... Ns>
+template <size_t... Ns, typename T>
 TV_HOST_DEVICE_INLINE device tv::array_nd<T, Ns...> *
 reinterpret_cast_array_nd(device T *ptr) {
   return reinterpret_cast<device tv::array_nd<T, Ns...> *>(ptr);
 }
 
-template <typename T, size_t... Ns>
+template <size_t... Ns, typename T>
 TV_HOST_DEVICE_INLINE threadgroup tv::array_nd<T, Ns...> *
 reinterpret_cast_array_nd(threadgroup T *ptr) {
   return reinterpret_cast<threadgroup tv::array_nd<T, Ns...> *>(ptr);
+}
+
+template <size_t... Ns, typename T>
+TV_HOST_DEVICE_INLINE thread const tv::array_nd<T, Ns...> *
+reinterpret_cast_array_nd(thread const T *ptr) {
+  return reinterpret_cast<thread const tv::array_nd<T, Ns...> *>(ptr);
+}
+
+template <size_t... Ns, typename T>
+TV_HOST_DEVICE_INLINE device const tv::array_nd<T, Ns...> *
+reinterpret_cast_array_nd(device const T *ptr) {
+  return reinterpret_cast<device const tv::array_nd<T, Ns...> *>(ptr);
+}
+
+template <size_t... Ns, typename T>
+TV_HOST_DEVICE_INLINE threadgroup const tv::array_nd<T, Ns...> *
+reinterpret_cast_array_nd(threadgroup const T *ptr) {
+  return reinterpret_cast<threadgroup const tv::array_nd<T, Ns...> *>(ptr);
+}
+
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE thread tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(thread T *ptr) {
+  return reinterpret_cast<thread tv::alignedarray<T, N> *>(ptr);
+}
+
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE threadgroup tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(threadgroup T *ptr) {
+  return reinterpret_cast<threadgroup tv::alignedarray<T, N> *>(ptr);
+}
+
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE device tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(device T *ptr) {
+  return reinterpret_cast<device tv::alignedarray<T, N> *>(ptr);
+}
+
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE thread const tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(thread const T *ptr) {
+  return reinterpret_cast<thread const tv::alignedarray<T, N> *>(ptr);
+}
+
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE threadgroup const tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(threadgroup const T *ptr) {
+  return reinterpret_cast<threadgroup const tv::alignedarray<T, N> *>(ptr);
+}
+
+template <size_t N, typename T>
+TV_HOST_DEVICE_INLINE device const tv::alignedarray<T, N> *
+reinterpret_cast_alignedarray(device const T *ptr) {
+  return reinterpret_cast<device const tv::alignedarray<T, N> *>(ptr);
 }
 
 OP_RESHAPE_DECLARE_FOR_METAL(thread, &);
@@ -178,7 +307,7 @@ template <typename T, size_t N, size_t Align> struct clamp {
 
 private:
   TV_HOST_DEVICE_INLINE static constexpr const Tnested
-  clamp_impl(const TV_METAL_THREAD Tnested& val, const TV_METAL_THREAD Tnested &max_v, const TV_METAL_THREAD Tnested &min_v) {
+  clamp_impl(const TV_METAL_THREAD Tnested& val, const TV_METAL_THREAD Tnested &min_v, const TV_METAL_THREAD Tnested &max_v) {
     return MathScalarOp<Tnested>::clamp(val, min_v, max_v);
   }
 };
@@ -255,6 +384,17 @@ template <typename T, size_t N, size_t Align> struct normalize {
   }
 };
 
+template <typename T, size_t N, size_t Align> struct normalize_grad {
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &out) {
+    auto length_squ = out.template op<length2>();
+    T length2_minus_3_div_2 = T(1) / MathScalarOp<T>::sqrt(length_squ * length_squ * length_squ);
+    auto grad_mul_out = grad * out;
+    auto grad_mul_out_sum = grad_mul_out.template op<sum>();
+    return ((length_squ - out * out) * grad - out * (grad_mul_out_sum - grad_mul_out)) * length2_minus_3_div_2;
+  }
+};
+
 template <typename T, size_t N, size_t Align> struct cross {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, 2, Align> &a,
@@ -290,14 +430,14 @@ template <typename T, size_t N, size_t Align> struct zeros {
 template <typename T, size_t N, size_t Align> struct ones {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
-    return constant<T, N, Align>(T(1));
+    return constant_array<T, N, Align>(T(1));
   }
 };
 
 template <typename T, size_t N, size_t Align> struct full {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self, T val) {
-    return constant<T, N, Align>(val);
+    return constant_array<T, N, Align>(val);
   }
 };
 

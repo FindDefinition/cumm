@@ -52,6 +52,14 @@ template <typename T> struct MathScalarOp {
 
   TV_HOST_DEVICE_INLINE static T exp(T x) { return std::exp(x); }
 
+  TV_HOST_DEVICE_INLINE static T fast_exp(T x) { 
+#ifdef TV_METAL_RTC
+    return metal::fast::exp(x);
+#else 
+    return std::exp(x);
+#endif
+  }
+  
   TV_HOST_DEVICE_INLINE static T exp2(T x) { return std::exp2(x); }
 
   TV_HOST_DEVICE_INLINE static T floor(T x) { return std::floor(x); }
@@ -136,6 +144,8 @@ template <typename T> struct MathScalarOp {
 
   TV_HOST_DEVICE_INLINE static T exp(T x) { return T(expf(float(x))); }
 
+  TV_HOST_DEVICE_INLINE static T fast_exp(T x) { return __expf(float(x)); }
+
   TV_HOST_DEVICE_INLINE static T exp2(T x) { return T(exp2f(float(x))); }
 
   TV_HOST_DEVICE_INLINE static T floor(T x) { return T(floorf(float(x))); }
@@ -217,6 +227,8 @@ template <> struct MathScalarOp<float> {
 
   TV_HOST_DEVICE_INLINE static float exp(float x) { return expf(x); }
 
+  TV_HOST_DEVICE_INLINE static float fast_exp(float x) { return __expf(x); }
+
   TV_HOST_DEVICE_INLINE static float exp10(float x) { return exp10f(x); }
 
   TV_HOST_DEVICE_INLINE static float exp2(float x) { return exp2f(x); }
@@ -266,6 +278,90 @@ template <> struct MathScalarOp<float> {
   TV_HOST_DEVICE_INLINE static float clamp(float v, float lo, float hi) { return min(hi, max(lo, v)); }
 
 };
+
+template <> struct MathScalarOp<double> {
+
+  TV_HOST_DEVICE_INLINE static double copysign(double x, double y) {
+    return ::copysign(x, y);
+  }
+
+  TV_HOST_DEVICE_INLINE static double atan2(double y, double x) {
+    return ::atan2(y, x);
+  }
+
+  TV_HOST_DEVICE_INLINE static double scalbn(double x, int n) {
+    return ::scalbn(x, n);
+  }
+
+  TV_HOST_DEVICE_INLINE static double pow(double x, double n) {
+    return ::pow(x, n);
+  }
+
+  TV_HOST_DEVICE_INLINE static double fmod(double x, double n) {
+    return ::fmod(x, n);
+  }
+  TV_HOST_DEVICE_INLINE static double neg(double x) { return -x; }
+
+  TV_HOST_DEVICE_INLINE static double sqrt(double x) { return ::sqrt(x); }
+
+  TV_HOST_DEVICE_INLINE static double rsqrt(double x) { return ::rsqrt(x); }
+
+  TV_HOST_DEVICE_INLINE static double ceil(double x) { return ::ceil(x); }
+
+  TV_HOST_DEVICE_INLINE static double cos(double x) { return ::cos(x); }
+
+  TV_HOST_DEVICE_INLINE static double exp(double x) { return ::exp(x); }
+
+  TV_HOST_DEVICE_INLINE static double exp10(double x) { return ::exp10(x); }
+
+  TV_HOST_DEVICE_INLINE static double exp2(double x) { return ::exp2(x); }
+
+  TV_HOST_DEVICE_INLINE static double floor(double x) { return ::floor(x); }
+
+  TV_HOST_DEVICE_INLINE static double log(double x) { return ::log(x); }
+
+  TV_HOST_DEVICE_INLINE static double log10(double x) { return ::log10(x); }
+
+  TV_HOST_DEVICE_INLINE static double log2(double x) { return ::log2(x); }
+
+  TV_HOST_DEVICE_INLINE static double rint(double x) { return ::rint(x); }
+
+  TV_HOST_DEVICE_INLINE static double sin(double x) { return ::sin(x); }
+
+  TV_HOST_DEVICE_INLINE static double trunc(double x) { return ::trunc(x); }
+
+  TV_HOST_DEVICE_INLINE static double abs(double x) { return ::fabs(x); }
+
+  TV_HOST_DEVICE_INLINE static double tan(double x) { return ::tan(x); }
+
+  TV_HOST_DEVICE_INLINE static double asin(double x) { return ::asin(x); }
+
+  TV_HOST_DEVICE_INLINE static double acos(double x) { return ::acos(x); }
+
+  TV_HOST_DEVICE_INLINE static double atan(double x) { return ::atan(x); }
+
+  TV_HOST_DEVICE_INLINE static double round(double x) { return ::round(x); }
+
+  TV_HOST_DEVICE_INLINE static double sinh(double x) { return ::sinh(x); }
+
+  TV_HOST_DEVICE_INLINE static double cosh(double x) { return ::cosh(x); }
+
+  TV_HOST_DEVICE_INLINE static double tanh(double x) { return ::tanh(x); }
+
+  TV_HOST_DEVICE_INLINE static double asinh(double x) { return ::asinh(x); }
+
+  TV_HOST_DEVICE_INLINE static double acosh(double x) { return ::acosh(x); }
+
+  TV_HOST_DEVICE_INLINE static double atanh(double x) { return ::atanh(x); }
+
+  TV_HOST_DEVICE_INLINE static double max(double x, double y) { return ::max(x, y); }
+
+  TV_HOST_DEVICE_INLINE static double min(double x, double y) { return ::min(x, y); }
+
+  TV_HOST_DEVICE_INLINE static double clamp(double v, double lo, double hi) { return min(hi, max(lo, v)); }
+
+};
+
 #ifdef __CUDACC__
 template <> struct MathScalarOp<__half> {
 

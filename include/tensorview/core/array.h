@@ -1038,13 +1038,11 @@ TV_HOST_DEVICE_INLINE constexpr T reduce(TV_METAL_THREAD F &&f,
   return detail::array_reduce_impl<N>::run(TV_FORWARD_EXCEPT_METAL(F, f), a);
 }
 
-#ifndef TV_METAL_RTC
 template <typename T, size_t N, size_t Align = 0>
-TV_HOST_DEVICE_INLINE constexpr auto constant(T val) TV_NOEXCEPT_EXCEPT_METAL {
+TV_HOST_DEVICE_INLINE constexpr auto constant_array(T val) TV_NOEXCEPT_EXCEPT_METAL {
   return detail::constant_impl<T, N, Align>(
       val, mp_make_list_c_sequence_reverse<int, N>{});
 }
-#endif
 
 template <typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<T, N>

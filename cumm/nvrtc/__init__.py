@@ -760,7 +760,7 @@ class CummMetalModule:
                 try:
                     subprocess.check_output([
                         "xcrun", "-sdk", "macosx", "metal", "-c",
-                        f2.name, *opts, "-std=metal3.1",
+                        f2.name, *opts, "-std=metal3.1", # "-frecord-sources", "-gline-tables-only",
                         "-I",
                         str(inc_dir), "-o",
                         str(out_name)
@@ -784,11 +784,13 @@ class CummMetalModule:
     def run_kernel(self, name: str, launch: tv.LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],
                                 Tuple[float, ...], Tuple[int, ...]],
-                    perf_context: Optional[ContextManager] = None):
+                    perf_context: Optional[ContextManager] = None,
+                    use_nonuniform_threadgroup: bool = True):
         if self._metal_mod is None:
             self.load()
         assert self._metal_mod is not None 
-        return self._metal_mod.run_kernel(name, launch, *args, perf_context=perf_context)
+        return self._metal_mod.run_kernel(name, launch, *args, perf_context=perf_context,
+            use_nonuniform_threadgroup = use_nonuniform_threadgroup)
 
 
 if __name__ == "__main__":

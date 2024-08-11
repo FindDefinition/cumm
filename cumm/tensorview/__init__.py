@@ -188,7 +188,10 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                             Tuple[float, ...], Tuple[int, ...]],
                 perf_context: Optional[ContextManager] = None,
                 name_to_meta: Optional[Dict[str, NVRTCKernelMeta]] = None,
-                lower_name: Optional[str] = None):
+                lower_name: Optional[str] = None,
+                use_nonuniform_threadgroup: bool = True):
+    # WARNING: use_nonuniform_threadgroup only used on apple silicon
+    
     # t = time.time()
     metas: List[NVRTCArgMeta] = [NVRTCArgMeta(NVRTCArgBaseType.Scalar, False, -1, [])] * len(args)
     if name_to_meta:
@@ -294,7 +297,8 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
         # print("preprocess time", time.time() - t)
         # t = time.time()
         res = mod.run_kernel(name, launch.blocks, launch.threads,
-                                    launch.smem, launch.ctx, kernel_args)
+                                    launch.smem, launch.ctx, kernel_args,
+                                    use_nonuniform_threadgroup)
         # print(f"kernel {name} time: {time.time() - t}")
         return res 
 
@@ -497,8 +501,10 @@ class MetalModule:
     def run_kernel(self, name: str, launch: LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],
                                 Tuple[float, ...], Tuple[int, ...]],
-                   perf_context: Optional[ContextManager] = None):
-        return _run_kernel(self._mod, name, launch, *args, perf_context=perf_context, name_to_meta=self.name_to_meta)
+                   perf_context: Optional[ContextManager] = None,
+                   use_nonuniform_threadgroup: bool = True):
+        return _run_kernel(self._mod, name, launch, *args, perf_context=perf_context, name_to_meta=self.name_to_meta, 
+            use_nonuniform_threadgroup=use_nonuniform_threadgroup)
 
     def tensor_scalar(self, val, dtype: int):
         return full([1], val, dtype)

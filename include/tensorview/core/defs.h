@@ -23,6 +23,7 @@
 #define TV_HOST_DEVICE __device__ __host__
 #define TV_GPU_LAMBDA __device__ __host__
 #define TV_GPU_LAMBDA_DEVICE __device__
+#define TV_SHARED_MEMORY __shared__
 #define TV_ASSERT(expr) assert(expr)
 #define TV_IS_EXTEND_LAMBDA(x)                                                 \
   __nv_is_extended_host_device_lambda_closure_type(x)
@@ -42,6 +43,7 @@
 #define TV_DEVICE __device__
 #define TV_GPU_LAMBDA __device__ __host__
 #define TV_GPU_LAMBDA_DEVICE __device__
+#define TV_SHARED_MEMORY __shared__
 #define TV_IS_EXTEND_LAMBDA(x)                                                 \
   __nv_is_extended_host_device_lambda_closure_type(x)
 #define TV_IS_EXTEND_DEVICE_LAMBDA(x)                                          \
@@ -53,6 +55,7 @@
 #define TV_HOST_DEVICE
 #define TV_DEVICE
 #define TV_DEVICE_INLINE __attribute__((__always_inline__))
+#define TV_SHARED_MEMORY threadgroup
 #define TV_GPU_LAMBDA
 #define TV_GPU_LAMBDA_DEVICE
 #define TV_IS_EXTEND_LAMBDA(x) true
@@ -66,6 +69,7 @@
 #define TV_DEVICE_INLINE inline
 #define TV_GPU_LAMBDA
 #define TV_GPU_LAMBDA_DEVICE
+#define TV_SHARED_MEMORY
 #define TV_IS_EXTEND_LAMBDA(x) true
 #define TV_IS_EXTEND_DEVICE_LAMBDA(x) true
 #endif

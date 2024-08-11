@@ -203,7 +203,7 @@ class MetalModule:
         ...
 
     @overload
-    def __init__(self, code: str, opts: List[str]):
+    def __init__(self, code: str, preprocessorMacros: Dict[str, str], fastMathEnabled: bool = True):
         ...
 
     def run_kernel(self, name: str, blocks: List[int], threads: List[int],

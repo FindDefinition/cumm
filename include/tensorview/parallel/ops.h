@@ -70,6 +70,9 @@ TV_DEVICE_INLINE uint warp_index() { return internal::__apple_metal_warp_index; 
 
 TV_DEVICE_INLINE uint lane_index() { return internal::__apple_metal_lane_index; }
 
+TV_DEVICE_INLINE void block_sync() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup | metal::mem_flags::mem_device); }
+TV_DEVICE_INLINE void block_sync_shared_io() { metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup); }
+
 namespace detail {
 TV_DEVICE_INLINE vote_t lanemask_lt() {
   return ~(metal::numeric_limits<vote_t>::max() << lane_index());
@@ -81,11 +84,26 @@ TV_DEVICE_INLINE vote_t lanemask_lt() {
 #if defined(TV_CUDA_CC)
 
 using vote_t = uint32_t;
-TV_DEVICE_INLINE uint32_t warp_size() { return 32; }
+TV_DEVICE_INLINE constexpr uint32_t warp_size() { return 32; }
 
-TV_DEVICE_INLINE uint32_t warp_index() { return threadIdx.x / 32; }
+TV_DEVICE_INLINE uint32_t thread_index() { 
+  return ((uint32_t)threadIdx.z * blockDim.y * blockDim.x) +
+               ((uint32_t)threadIdx.y * blockDim.x) +
+                (uint32_t)threadIdx.x; 
+}
 
-TV_DEVICE_INLINE uint32_t lane_index() { return threadIdx.x % 32; }
+TV_DEVICE_INLINE uint32_t warp_index() { 
+  return thread_index() / warp_size(); 
+}
+
+TV_DEVICE_INLINE uint32_t lane_index() { 
+    unsigned int laneid;
+    asm ("mov.u32 %0, %%laneid;" : "=r"(laneid));
+    return laneid;
+}
+
+TV_DEVICE_INLINE void block_sync() { __syncthreads(); }
+TV_DEVICE_INLINE void block_sync_shared_io() { __syncthreads(); }
 
 namespace detail {
 TV_DEVICE_INLINE vote_t lanemask_lt() {
@@ -310,6 +328,240 @@ TV_DEVICE_INLINE DataPair<T1, T2> atomicArgMin(TV_METAL_DEVICE DataPair<T1, T2> 
   return ret.data;
 }
 
+
+template <typename T> TV_DEVICE_INLINE T warp_broadcast(T val, int src_lane) {
+#if defined(TV_CUDA_CC)
+  return __shfl_sync(0xffffffff, val, src_lane);
+#elif defined(TV_METAL_RTC)
+  return metal::simd_broadcast(val, src_lane);
+#else 
+  static_assert(false, "not implemented");
+#endif
+}
+
+template <typename T> TV_DEVICE_INLINE T warp_sum(T val) {
+#if defined(TV_CUDA_CC)
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val += __shfl_down_sync(0xffffffff, val, offset);
+  }
+  return val;
+#elif defined(TV_METAL_RTC)
+  return metal::simd_sum(val);
+#else 
+  static_assert(false, "not implemented");
+#endif
+}
+
+#ifdef TV_CUDA_CC
+template <> TV_DEVICE_INLINE uint32_t warp_sum(uint32_t val) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_add_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val += __shfl_down_sync(0xffffffff, val, offset);
+  }
+  return val;
+#endif
+}
+
+template <> TV_DEVICE_INLINE int32_t warp_sum(int32_t val) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_add_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val += __shfl_down_sync(0xffffffff, val, offset);
+  }
+  return val;
+#endif
+}
+
+#endif 
+
+\
+template <typename T> TV_DEVICE_INLINE T  warp_max(T val) {
+#if defined(TV_CUDA_CC)
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val = max(val, __shfl_down_sync(0xffffffff, val, offset));
+  }
+  return val;
+#elif defined(TV_METAL_RTC)
+  return metal::simd_max(val);
+#else
+  static_assert(false, "not implemented");  
+#endif
+}
+
+#ifdef TV_CUDA_CC
+template <> TV_DEVICE_INLINE uint32_t warp_max(uint32_t val) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_max_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val = max(val, __shfl_down_sync(0xffffffff, val, offset));
+  }
+  return val;
+#endif
+}
+template <> TV_DEVICE_INLINE int32_t warp_max(int32_t val) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_max_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val = max(val, __shfl_down_sync(0xffffffff, val, offset));
+  }
+  return val;
+#endif
+}
+
+#endif 
+
+
+
+
+template <typename T> TV_DEVICE_INLINE T warp_min(T val) {
+#if defined(TV_CUDA_CC)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_min_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val = min(val, __shfl_down_sync(0xffffffff, val, offset));
+  }
+  return val;
+#endif
+#elif defined(TV_METAL_RTC)
+  return metal::simd_min(val);
+#else
+  static_assert(false, "not implemented");
+#endif
+}
+
+#ifdef TV_CUDA_CC
+template <> TV_DEVICE_INLINE uint32_t warp_min(uint32_t val) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_min_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val = min(val, __shfl_down_sync(0xffffffff, val, offset));
+  }
+  return val;
+#endif
+}
+template <> TV_DEVICE_INLINE int32_t warp_min(int32_t val) {
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_min_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val = min(val, __shfl_down_sync(0xffffffff, val, offset));
+  }
+  return val;
+#endif
+}
+
+#endif 
+
+
+TV_DEVICE_INLINE unsigned warp_and(unsigned val) {
+#if defined(TV_CUDA_CC)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_and_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val &= __shfl_down_sync(0xffffffff, val, offset);
+  }
+  return val;
+#endif
+#elif defined(TV_METAL_RTC)
+  return metal::simd_and(val);
+#else
+  static_assert(false, "not implemented");
+#endif
+}
+
+TV_DEVICE_INLINE unsigned warp_or(unsigned val) {
+#if defined(TV_CUDA_CC)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_or_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val |= __shfl_down_sync(0xffffffff, val, offset);
+  }
+  return val;
+#endif
+#elif defined(TV_METAL_RTC)
+  return metal::simd_or(val);
+#else
+  static_assert(false, "not implemented");
+#endif
+}
+
+TV_DEVICE_INLINE unsigned warp_xor(unsigned val) {
+#if defined(TV_CUDA_CC)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
+  return __reduce_xor_sync(0xffffffff, val);
+#else
+  #pragma unroll
+  for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
+    val ^= __shfl_down_sync(0xffffffff, val, offset);
+  }
+  return val;
+#endif
+#elif defined(TV_METAL_RTC)
+  return metal::simd_xor(val);
+#else
+  static_assert(false, "not implemented");
+#endif
+}
+
+TV_DEVICE_INLINE bool warp_all(bool val) {
+#if defined(TV_CUDA_CC)
+  return __all_sync(0xffffffff, val);
+#elif defined(TV_METAL_RTC)
+  return metal::simd_all(val);
+#else
+  static_assert(false, "not implemented");
+#endif
+}
+
+TV_DEVICE_INLINE bool warp_any(bool val) {
+#if defined(TV_CUDA_CC)
+  return __any_sync(0xffffffff, val);
+#elif defined(TV_METAL_RTC)
+  return metal::simd_any(val);
+#else
+  static_assert(false, "not implemented");
+#endif
+}
+
+TV_DEVICE_INLINE vote_t active_mask() {
+#if defined(TV_CUDA_CC)
+  return __activemask();
+#elif defined(TV_METAL_RTC)
+  return vote_t(metal::simd_active_threads_mask());
+#else
+  static_assert(false, "not implemented");
+#endif
+}
+
+TV_DEVICE_INLINE vote_t warp_ballot(bool val) {
+#if defined(TV_CUDA_CC)
+  return __ballot_sync(0xffffffff, val);
+#elif defined(TV_METAL_RTC)
+  return vote_t(metal::simd_ballot(val));
+#else
+  static_assert(false, "not implemented");
+#endif
+}
 
 } // namespace parallel
 

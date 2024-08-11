@@ -550,10 +550,10 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
 
   py::class_<tv::MetalModule, std::shared_ptr<tv::MetalModule>> metal_rtc_m(m, "MetalModule");
   metal_rtc_m.def(py::init<tv::Tensor>(), py::arg("binary"))
-    .def(py::init<std::string, std::vector<std::string>>(), py::arg("code"), py::arg("opts"))
+    .def(py::init<std::string, std::unordered_map<std::string, std::string>, bool>(), py::arg("code"), py::arg("preprocessorMacros"), py::arg("fastMathEnabled") = true)
     .def("run_kernel", &tv::MetalModule::run_kernel, py::arg("name"), py::arg("blocks"), 
       py::arg("threads"), py::arg("smem_size"), py::arg("ctx"),
-      py::arg("args"));
+      py::arg("args"), py::arg("use_nonuniform_threadgroup") = true);
 
   py::enum_<tv::NVRTCModule::ArgType>(nvrtc_m, "ArgType")
       .value("kTensor", tv::NVRTCModule::ArgType::kTensor)
