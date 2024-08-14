@@ -204,7 +204,7 @@ public:
   }
   void run_kernel(std::string name, std::array<int, 3> blocks,
                   std::array<int, 3> threads, int smem_size, Context ctx,
-                  std::vector<std::tuple<tv::Tensor, int>> args,
+                  std::vector<std::tuple<tv::Tensor, int, std::uintptr_t, size_t>> args,
                   bool use_nonuniform_threadgroup = true) {
 #ifdef TV_HARDWARE_ACC_METAL
     bool sync_op = false;
@@ -295,6 +295,17 @@ public:
         auto arg_type = std::get<1>(arg);
         // tv::ssprint(ten.shape(), ten.dtype(), arg_type);
         switch (arg_type) {
+        case ArgType::kDevicePointer: {
+          auto ptr = reinterpret_cast<MTL::Buffer *>(std::get<2>(arg));
+          auto offset = std::get<3>(arg);
+            computeEncoder->setBuffer(
+                reinterpret_cast<MTL::Buffer *>(
+                    ptr),
+                offset, buffer_cnt);
+          buffer_cnt += 1;
+          break;
+        }
+
         case ArgType::kTensor: {
           if (ten.empty()) {
           } else {

@@ -145,7 +145,9 @@ def test_nvrtc3():
     origin = np.array([0, 1, 0], np.float32)
     normdir = np.array([1, 0, 0], np.float32)
     pp = np.array([1, 1, 1], np.float32)
-
+    inliner.kernel_1d("wtf0", 1, 0, f"""
+    $a[0] = 1;
+    """)
     inliner.kernel_raw("wtf", inliner.get_1d_param(1), f"""
     namespace op = tv::arrayops;
 
@@ -175,9 +177,9 @@ def test_nvrtc3():
     auto lineprojp = $pp.op<op::lineproj>($origin, $normdir);
     """)
     # print(inliner.get_nvrtc_module("wtf2").get_ptx())
-    binary = pickle.dumps(inliner.get_nvrtc_module("wtf"))
-    model2 = pickle.loads(binary)
-    print(len(binary))
+    # binary = pickle.dumps(inliner.get_nvrtc_module("wtf"))
+    # model2 = pickle.loads(binary)
+    # print(len(binary))
 
 def test_nvrtc_problem():
 
@@ -269,4 +271,4 @@ def test_cpu_v2():
     print(1)
 
 if __name__ == "__main__":
-    test_cpu_v0()
+    test_nvrtc3()

@@ -235,6 +235,14 @@ TV_HOST_DEVICE_INLINE constexpr auto create_array(Ts... vals) {
   return array<mp_nth_t<0, Ts...>, sizeof...(Ts)>{vals...};
 }
 
+
+template <typename T, size_t N, size_t Align> struct identity {
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return self;
+  }
+};
+
 template <typename T, size_t N, size_t Align> struct reduce_max {
   using Tnested = detail::get_nested_element_t<T>;
 
@@ -363,6 +371,13 @@ template <typename T, size_t N, size_t Align> struct l2norm {
   }
 };
 
+template <typename T, size_t N, size_t Align> struct rl2norm {
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return MathScalarOp<T>::rsqrt(self.template op<dot>(self));
+  }
+};
+
 template <typename T, size_t N, size_t Align> struct length {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -380,7 +395,7 @@ template <typename T, size_t N, size_t Align> struct length2 {
 template <typename T, size_t N, size_t Align> struct normalize {
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
-    return self / self.template op<l2norm>();
+    return self * self.template op<rl2norm>();
   }
 };
 
@@ -388,10 +403,110 @@ template <typename T, size_t N, size_t Align> struct normalize_grad {
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &out) {
     auto length_squ = out.template op<length2>();
-    T length2_minus_3_div_2 = T(1) / MathScalarOp<T>::sqrt(length_squ * length_squ * length_squ);
+    T length2_minus_3_div_2 = MathScalarOp<T>::rsqrt(length_squ * length_squ * length_squ);
     auto grad_mul_out = grad * out;
     auto grad_mul_out_sum = grad_mul_out.template op<sum>();
     return ((length_squ - out * out) * grad - out * (grad_mul_out_sum - grad_mul_out)) * length2_minus_3_div_2;
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct log {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& self) {
+    return MathScalarOp<Tnested>::log(self);
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct log_grad {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, grad, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& grad, const TV_METAL_THREAD Tnested& self) {
+    return grad / self;
+  }
+};
+
+
+template <typename T, size_t N, size_t Align> struct sigmoid {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& self) {
+    return Tnested(1) / (Tnested(1) + MathScalarOp<Tnested>::exp(-self));
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct sigmoid_grad {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, grad, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& grad, const TV_METAL_THREAD Tnested& self) {
+    auto out = Tnested(1) / (Tnested(1) + MathScalarOp<Tnested>::exp(-self));
+    return grad * out * (1 - out);
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct exponential {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& val) {
+    return MathScalarOp<Tnested>::exp(val);
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct fast_exponential {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& self) {
+    return MathScalarOp<Tnested>::fast_exp(self);
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct exponential_grad {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE constexpr auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, grad, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& grad, const TV_METAL_THREAD Tnested& self) {
+    return grad * MathScalarOp<Tnested>::exp(self);
   }
 };
 

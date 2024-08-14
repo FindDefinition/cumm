@@ -65,8 +65,10 @@ import contextvars
 import re
 import time
 
+from requests import get
+
 import pccm
-from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME, PCCM_INLINE_FUNCTION_NAME_FORMAT
+from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME, PCCM_INLINE_FUNCTION_NAME_FORMAT, get_base_type_string
 from cumm.nvrtc import CummLLVMModule, CummMetalModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
 from pathlib import Path
 from cumm.common import TensorViewKernel
@@ -83,7 +85,9 @@ from ccimport import compat
 _TORCH_MPS_SYNC: Callable[[], Any] | None = None 
 
 _TORCH_DTYPE_TO_TV: Dict[Any, int] = {}
+_TORCH_DTYPE_TO_TV_STR: Dict[Any, str] = {}
 TORCH_TENSOR_NAME = "torch.Tensor"
+TORCH_PARAMETER_TENSOR_NAME = "torch.nn.parameter.Parameter"
 
 
 
@@ -142,6 +146,30 @@ def _cached_get_torch_dtype_to_tv():
             })
     return _TORCH_DTYPE_TO_TV
 
+def _cached_get_torch_dtype_to_tv_str():
+    import torch
+    if not _TORCH_DTYPE_TO_TV_STR:
+        _TORCH_DTYPE_TO_TV_STR.update({
+            torch.float32: "tv.float32",
+            torch.float64: "tv.float64",
+            torch.float16: "tv.float16",
+            torch.int32: "tv.int32",
+            torch.int64: "tv.int64",
+            torch.int8: "tv.int8",
+            torch.int16: "tv.int16",
+            torch.uint8: "tv.uint8",
+            torch.bfloat16: "tv.bfloat16",
+        })
+        torch_version = torch.__version__.split(".")
+        major_version = int(torch_version[0])
+        minor_version = int(torch_version[1])
+        if (major_version, minor_version) >= (2, 3):
+            _TORCH_DTYPE_TO_TV_STR.update({
+                torch.uint16: "tv.uint16",
+                torch.uint32: "tv.uint32",
+                torch.uint64: "tv.uint64",
+            })
+    return _TORCH_DTYPE_TO_TV_STR
 
 RESERVED_NAMES = set([
     "threadPositionInGrid",
@@ -202,7 +230,7 @@ def measure_and_print_torch(name: str = "CUDATimer", *, stream: int = 0, out: Op
             start_ev.record()
             yield 
             end_ev.record()
-            torch.mps.synchronize()
+            # torch.mps.synchronize()
             # TODO sync event will hang
             # start_ev.synchronize()
             # end_ev.synchronize()
@@ -239,12 +267,87 @@ class TVTensorPlugin(InlineBuilderPlugin):
         return None
 
     def type_conversion(self, obj: Any, user_arg: Optional[Any] = None):
-        if get_qualname_of_type(type(obj)) == TORCH_TENSOR_NAME:
+        qname = get_qualname_of_type(type(obj))
+        if qname == TORCH_TENSOR_NAME or qname == TORCH_PARAMETER_TENSOR_NAME:
             return torch_tensor_to_tv(obj)
         return obj
 
+    def type_conversion_code(self, obj, src_name: str, tgt_name: str, user_arg: Optional[Any] = None) -> Optional[Tuple[str, List[str]]]:
+        qname = get_qualname_of_type(type(obj))
+        assert user_arg is not None and isinstance(user_arg, _NVRTCInlineParams)
+        if user_arg.unchecked_mode:
+            if qname == TORCH_TENSOR_NAME or qname == TORCH_PARAMETER_TENSOR_NAME:
+                res: List[str] = []
+                device = obj.device
+                if device.type == "mps":
+                    # mps data ptr is MTLBuffer, not real ptr
+                    # if we use ten.data_ptr(), the result will be 
+                    # MTLBuffer + data_offset, which will cause
+                    # segfault.
+                    res.extend([
+                        f"__{tgt_name}_tmp0 = {src_name}",
+                        f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
+                        f"{tgt_name} = (EMPTY_TENSOR, kDevicePointer, ",
+                        f"    __{tgt_name}_tmp0.untyped_storage().data_ptr(), __{tgt_name}_tmp0.storage_offset())",
+                    ])
+                else:
+                    res.extend([
+                        f"__{tgt_name}_tmp0 = {src_name}",
+                        f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
+                        f"{tgt_name} = (EMPTY_TENSOR, kDevicePointer, ",
+                        f"    __{tgt_name}_tmp0.data_ptr(), 0)",
+                    ])
+                return "\n".join(res), [
+                    "import torch",
+                    "from cumm import tensorview as tv",
+                    "kDevicePointer = tv._NVRTCModule.kDevicePointer",
+                    "EMPTY_TENSOR = tv.Tensor()",
+                ]
+            else:
+                assert isinstance(obj, tv.Tensor)
+                res = [
+                    f"__{tgt_name}_tmp0 = {src_name}",
+                    f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
+                    f"{tgt_name} = (EMPTY_TENSOR, kDevicePointer, ",
+                    f"    __{tgt_name}_tmp0.byte_pointer(), 0)",
+                ]
+                return "\n".join(res), [
+                    "from cumm import tensorview as tv",
+                    "kDevicePointer = tv._NVRTCModule.kDevicePointer",
+                    "EMPTY_TENSOR = tv.Tensor()",
+                ]
+        else:
+            if qname == TORCH_TENSOR_NAME or qname == TORCH_PARAMETER_TENSOR_NAME:
+                res: List[str] = []
+                device = obj.device
+                tv_dtype_str = _cached_get_torch_dtype_to_tv_str()[obj.dtype]
+                if device.type == "mps":
+                    # mps data ptr is MTLBuffer, not real ptr
+                    # if we use ten.data_ptr(), the result will be 
+                    # MTLBuffer + data_offset, which will cause
+                    # segfault.
+                    res.extend([
+                        f"__{tgt_name}_tmp0 = {src_name}",
+                        f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
+                        f"{tgt_name} = tv.from_blob(__{tgt_name}_tmp0.untyped_storage().data_ptr(), ",
+                        f"    list(__{tgt_name}_tmp0.shape), {tv_dtype_str}, 0, __{tgt_name}_tmp0.storage_offset())"
+                    ])
+                else:
+                    res.extend([
+                        f"__{tgt_name}_tmp0 = {src_name}",
+                        f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
+                        f"{tgt_name} = tv.from_blob(__{tgt_name}_tmp0.data_ptr(), ",
+                        f"    list(__{tgt_name}_tmp0.shape), {tv_dtype_str}, 0)"
+                    ])
+                return "\n".join(res), [
+                    "import torch",
+                    "from cumm import tensorview as tv",
+                ]
+            return f"{tgt_name} = {src_name}", []
+
     def get_cpp_type(self, obj: Any, user_arg: Optional[Any] = None) -> str:
-        if get_qualname_of_type(type(obj)) == TORCH_TENSOR_NAME:
+        qname = get_qualname_of_type(type(obj))
+        if qname == TORCH_TENSOR_NAME or qname == TORCH_PARAMETER_TENSOR_NAME:
             # print("??????", obj.shape, obj.dtype)
             obj = torch_tensor_to_tv(obj)
         prefix = ""
@@ -255,6 +358,51 @@ class TVTensorPlugin(InlineBuilderPlugin):
                 return f"tv::TensorView<{prefix}{dtypes.get_dtype_from_tvdtype(obj.dtype, True)}, {obj.ndim}>"
         return f"{prefix}{dtypes.get_dtype_from_tvdtype(obj.dtype, True)}*"
 
+
+
+class BuiltinTypePlugin(InlineBuilderPlugin):
+    QualifiedName = get_qualname_of_type(tv.Tensor)
+
+    def handle_captured_type(
+            self,
+            name: str,
+            code: pccm.FunctionCode,
+            obj: Any,
+            user_arg: Optional[Any] = None) -> Optional[Tuple[str, str]]:
+        return None
+
+    def type_conversion(self, obj: Any, user_arg: Optional[Any] = None):
+        return obj
+
+    def type_conversion_code(self, obj, src_name: str, tgt_name: str, user_arg: Optional[Any] = None) -> Optional[Tuple[str, List[str]]]:
+        res: List[str] = []
+        assert isinstance(obj, (int, float, bool))
+        obj_type_str = get_qualname_of_type(type(obj))
+        if isinstance(obj, int):
+            tv_dtype = tv.int64 
+        elif isinstance(obj, float):
+            tv_dtype = tv.float32 
+        elif isinstance(obj, bool):
+            tv_dtype = tv.uint8
+        else:
+            raise NotImplementedError
+        assert user_arg is not None and isinstance(user_arg, _NVRTCInlineParams)
+        if user_arg.unchecked_mode:
+            res.extend([
+                f"__{tgt_name}_tmp0 = {src_name}",
+                # f"assert isinstance(__{tgt_name}_tmp0, {obj_type_str})",
+                f"{tgt_name} = (tv.full([1], __{tgt_name}_tmp0, {tv_dtype}), kScalar, ",
+                f"    0, 0)",
+            ])
+            return "\n".join(res), [
+                "from cumm import tensorview as tv",
+                "kScalar = tv._NVRTCModule.kScalar"
+            ]
+        else:
+            return f"{tgt_name} = {src_name}", [] 
+
+    def get_cpp_type(self, obj: Any, user_arg: Optional[Any] = None) -> str:
+        raise NotImplementedError("should not be called since std type is directly handled except compiled mode")
 
 _NPDTYPE_TO_LIST_TYPE_STR: Dict[np.dtype, str] = {
     np.dtype(np.float16): "__half",
@@ -305,6 +453,31 @@ class NumpyPlugin(InlineBuilderPlugin):
         assert obj.nbytes <= 256, "we only support capture small numpy which will be passed by value to kernel"
         return obj
 
+    def type_conversion_code(self, obj, src_name: str, tgt_name: str, user_arg: Optional[Any] = None) -> Optional[Tuple[str, List[str]]]:
+        assert isinstance(obj, np.ndarray)
+        assert user_arg is not None and isinstance(user_arg, _NVRTCInlineParams)
+        tv_dtype = dtypes.get_dtype_from_npdtype(obj.dtype).tv_dtype
+        if user_arg.unchecked_mode:
+            res = [
+                f"__{tgt_name}_tmp0 = {src_name}",
+                f"assert __{tgt_name}_tmp0.dtype == numpy.{obj.dtype}",
+                f"__{tgt_name}_tmp1 = tv.empty(__{tgt_name}_tmp0.shape, {tv_dtype})",
+                f"__{tgt_name}_tmp1.numpy_view()[:] = __{tgt_name}_tmp0",
+
+                f"{tgt_name} = (__{tgt_name}_tmp1, kScalar, ",
+                f"    0, 0)",
+            ]
+            return "\n".join(res), [
+                "from cumm import tensorview as tv",
+                "import numpy",
+                "kScalar = tv._NVRTCModule.kScalar",
+
+            ]
+        else:
+            return f"{tgt_name} = {src_name}", [] 
+
+        return f"{tgt_name} = {src_name}", []
+
     @staticmethod
     def get_cpp_type_static(
                      obj: np.ndarray,
@@ -340,7 +513,8 @@ class _NVRTCInlineParams:
                  is_cpu: bool = False,
                  capture_tensor_as_tview: bool = False,
                  perf_context: Optional[ContextManager] = None,
-                 run_in_process: bool = False) -> None:
+                 run_in_process: bool = False,
+                 unchecked_mode: bool = True) -> None:
         self.mode = mode
         self.launch = launch
         self.verbose = verbose
@@ -350,6 +524,7 @@ class _NVRTCInlineParams:
         self.capture_tensor_as_tview = capture_tensor_as_tview
         self.perf_context = perf_context
         self.run_in_process = run_in_process
+        self.unchecked_mode = unchecked_mode
 
 
 _NVRTC_FUNC_NAME = f"{PCCM_INLINE_NAMESPACE}::{PCCM_INLINE_FUNCTION_NAME}"
@@ -359,6 +534,10 @@ _DEFAULT_KERNEL_PLUGINS: Dict[str, InlineBuilderPlugin] = {
     "numpy.ndarray": NumpyPlugin(),
     TVTensorPlugin.QualifiedName: TVTensorPlugin(),
     TORCH_TENSOR_NAME: TVTensorPlugin(),
+    TORCH_PARAMETER_TENSOR_NAME: TVTensorPlugin(),
+    get_base_type_string(True)[0]: BuiltinTypePlugin(),
+    get_base_type_string(1)[0]: BuiltinTypePlugin(),
+    get_base_type_string(1.0)[0]: BuiltinTypePlugin(),
 }
 
 _CUMM_KERNEL_1D_SIZE_NAME = "_cumm_pccm_inline_size"
@@ -566,7 +745,7 @@ class NVRTCInlineBuilder(InlineBuilder):
                     func_constants.append(f"constant bool {prev_arg.name} [[function_constant({func_const_cnt})]];")
                     func_const_cnt += 1
                 else:
-                    assert isinstance(prev_arg.userdata, (int, float, np.floating, np.integer))
+                    assert isinstance(prev_arg.userdata, (int, float, np.floating, np.integer)), f"{prev_arg.name}, {type(prev_arg.userdata)}"
                     # dtype = "int64_t"
                     # if isinstance(prev_arg.userdata, (float, np.floating)):
                     #     dtype = "float"
@@ -686,15 +865,23 @@ class NVRTCInlineBuilder(InlineBuilder):
         if isinstance(func, CummMetalModule):
             is_kernel_raw = user_args.mode == CUDAMode.KernelRaw
             with self.enter_inliner_scope():
-                res = func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context, use_nonuniform_threadgroup=not is_kernel_raw)
+                if user_args.unchecked_mode:
+                    res = func.run_kernel_unchecked(real_name, launch, *args, use_nonuniform_threadgroup=not is_kernel_raw)
+                else:
+                    res = func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context, use_nonuniform_threadgroup=not is_kernel_raw)
+
                 if self._mps_context is not None:
                     self._mps_context.commit()
                 return res
         else:
             if user_args.run_in_process:
-                return func.run_kernel_in_spawn_process(real_name, launch, *args)
+                func.run_kernel_in_spawn_process(real_name, launch, *args)
             else:
-                return func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context)
+                if user_args.unchecked_mode:
+                    func.run_kernel_unchecked(real_name, launch, args)
+                else:
+                    func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context)
+        return 
 
     def kernel_raw(self,
                    name: str,
@@ -702,45 +889,22 @@ class NVRTCInlineBuilder(InlineBuilder):
                    code: Union[str, pccm.FunctionCode],
                    verbose_path: str = "",
                    disable_cache: bool = False,
-                   capture_tensor_as_tview: bool = False,
                    perf_context: Optional[ContextManager] = None,
                    run_in_process: bool = False,
                    *,
                    _frame_cnt: int = 2):
         verbose = verbose_path != ""
         user_arg = _NVRTCInlineParams(CUDAMode.KernelRaw, param, verbose,
-                                      verbose_path, capture_tensor_as_tview=capture_tensor_as_tview,
+                                      verbose_path,
                                       perf_context=perf_context, run_in_process=run_in_process)
-        if capture_tensor_as_tview:
-            if not isinstance(code, pccm.FunctionCode):
-                code_pccm = pccm.code()
-                code_pccm.raw(code)
-                code = code_pccm
-            code.add_dependency(TensorViewViewClass)
         return self.inline(name,
                         code,
                         ".cu",
                         _frame_cnt=_frame_cnt,
                         user_arg=user_arg,
-                        disable_cache=disable_cache)
+                        disable_cache=disable_cache,
+                        generate_non_nested_code=True)
     
-    def kernel_raw_capture_tview(self,
-                                name: str,
-                                param: tv.LaunchParam,
-                                code: Union[str, pccm.FunctionCode],
-                                verbose_path: str = "",
-                                disable_cache: bool = False):
-        """same as kernel_raw except all tensors (tv.Tensor, torch.Tensor)
-        are captured as tv::TensorView with shape/stride support inside kernel.
-        """
-        return self.kernel_raw(name=name, 
-                              param=param, 
-                              code=code, 
-                              verbose_path=verbose_path, 
-                              disable_cache=disable_cache, 
-                              capture_tensor_as_tview=True,
-                              _frame_cnt=3)
-
     def kernel_1d(self,
                   name: str,
                   num: int,
@@ -748,56 +912,32 @@ class NVRTCInlineBuilder(InlineBuilder):
                   code: Union[str, pccm.FunctionCode],
                   verbose_path: str = "",
                   disable_cache: bool = False,
-                  capture_tensor_as_tview: bool = False,
                   perf_context: Optional[ContextManager] = None,
                   run_in_process: bool = False,
                   *,
                   _frame_cnt: int = 2,
-                  maximum_1d_threads: Optional[int] = None):
+                  maximum_1d_threads: Optional[int] = None,
+                  num_1d_threads: Optional[int] = None):
         verbose = verbose_path != ""
         num = int(num)
+        launch_param = self.get_1d_param(num, stream=stream, maximum_1d_threads=maximum_1d_threads, num_1d_threads=num_1d_threads)
         user_arg = _NVRTCInlineParams(CUDAMode.Kernel1D,
-                                      self.get_1d_param(num, stream=stream, maximum_1d_threads=maximum_1d_threads),
+                                      launch_param,
                                       verbose, verbose_path,
-                                      capture_tensor_as_tview=capture_tensor_as_tview,
                                       perf_context=perf_context, run_in_process=run_in_process)
         additional_args = {
             _CUMM_KERNEL_1D_SIZE_NAME: num,
         }
         if compat.InMacOS:
             additional_args.clear()
-        if capture_tensor_as_tview:
-            if not isinstance(code, pccm.FunctionCode):
-                code_pccm = pccm.code()
-                code_pccm.raw(code)
-                code = code_pccm
-            code.add_dependency(TensorViewViewClass)
         return self.inline(name,
                            code,
                            ".cu",
                            additional_args,
                            _frame_cnt=_frame_cnt,
                            user_arg=user_arg,
-                           disable_cache=disable_cache)
-
-    def kernel_1d_capture_tview(self,
-                                name: str,
-                                num: int,
-                                stream: int,
-                                code: Union[str, pccm.FunctionCode],
-                                verbose_path: str = "",
-                                disable_cache: bool = False):
-        """same as kernel_1d except all tensors (tv.Tensor, torch.Tensor)
-        are captured as tv::TensorView with shape/stride support inside kernel.
-        """
-        return self.kernel_1d(name=name, 
-                              num=num, 
-                              stream=stream, 
-                              code=code, 
-                              verbose_path=verbose_path, 
-                              disable_cache=disable_cache, 
-                              capture_tensor_as_tview=True,
-                              _frame_cnt=3)
+                           disable_cache=disable_cache,
+                           generate_non_nested_code=True)
 
     def cpu_kernel_1d(self,
                       name: str,
@@ -845,15 +985,20 @@ class NVRTCInlineBuilder(InlineBuilder):
         for l in libs:
             llvm.load_library_permanently(l)
 
-    def get_1d_param(self, num: int, smem: int = 0, stream: int = 0, maximum_1d_threads: Optional[int] = None):
-        if maximum_1d_threads is None:
-            maximum_1d_threads = self.maximum_1d_threads
-        if num > maximum_1d_threads:
-            threads = maximum_1d_threads
+    def get_1d_param(self, num: int, smem: int = 0, stream: int = 0, maximum_1d_threads: Optional[int] = None, num_1d_threads: Optional[int] = None):
+        if num_1d_threads is not None:
+            threads = num_1d_threads
         else:
-            threads = div_up(num, 32) * 32
+            if maximum_1d_threads is None:
+                maximum_1d_threads = self.maximum_1d_threads
+            if num > maximum_1d_threads:
+                threads = maximum_1d_threads
+            else:
+                threads = div_up(num, 32) * 32
         if compat.InMacOS:
-            blocks = num # for metal, the grid size is the same as block size
+            # for metal, we use nonuniform as default, 
+            # so the grid size is the same as block size
+            blocks = num 
         else:
             blocks = div_up(num, threads)
         return tv.LaunchParam((blocks, 1, 1), (threads, 1, 1), smem, stream)

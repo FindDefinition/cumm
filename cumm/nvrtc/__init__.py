@@ -792,6 +792,14 @@ class CummMetalModule:
         return self._metal_mod.run_kernel(name, launch, *args, perf_context=perf_context,
             use_nonuniform_threadgroup = use_nonuniform_threadgroup)
 
+    def run_kernel_unchecked(self, name: str, launch: tv.LaunchParam,
+                    args: List[Tuple[Tensor, int, int, int]],
+                    use_nonuniform_threadgroup: bool = True):
+        if self._metal_mod is None:
+            self.load()
+        assert self._metal_mod is not None 
+        return self._metal_mod.run_kernel_unchecked(name, launch, args, 
+            use_nonuniform_threadgroup = use_nonuniform_threadgroup)
 
 if __name__ == "__main__":
     print(_array_struct_nested([4, 4], ctypes.c_float))

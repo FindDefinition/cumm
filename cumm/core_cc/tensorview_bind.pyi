@@ -172,6 +172,7 @@ class NVRTCModule:
     kTensorView = 2
     kScalar = 3
     kConstant = 4
+    kDevicePointer = 5
 
     @overload
     def __init__(self,
@@ -192,7 +193,7 @@ class NVRTCModule:
 
     def run_kernel(self, name: str, blocks: List[int], threads: List[int],
                    smem_size: int, stream: int, args: List[Tuple[Tensor,
-                                                                 int]]):
+                                                                 int, int, int]]):
         ...
 
     @property
@@ -211,13 +212,13 @@ class MetalModule:
         ...
 
     @overload
-    def __init__(self, code: str, opts: List[str]):
+    def __init__(self, code: str, preprocessorMacros: Dict[str, str], fastMathEnabled: bool = True):
         ...
 
     def run_kernel(self, name: str, blocks: List[int], threads: List[int],
                    smem_size: int, ctx: Context, args: List[Tuple[Tensor,
-                                                                 int]],
-                    treat_array_as_scalar: bool = True):
+                                                                 int, int, int]],
+                    use_nonuniform_threadgroup: bool = True):
         ...
 
 

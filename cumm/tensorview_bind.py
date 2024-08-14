@@ -561,6 +561,7 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
       .value("kTensorView", tv::NVRTCModule::ArgType::kTensorView)
       .value("kScalar", tv::NVRTCModule::ArgType::kScalar)
       .value("kConstant", tv::NVRTCModule::ArgType::kConstant)
+      .value("kDevicePointer", tv::NVRTCModule::ArgType::kDevicePointer)
       .export_values();
 
   py::class_<tv::Tensor, std::shared_ptr<tv::Tensor>>(m, "Tensor")

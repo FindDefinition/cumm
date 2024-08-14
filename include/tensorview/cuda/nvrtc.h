@@ -301,7 +301,7 @@ private:
 
 class NVRTCModule {
 public:
-  enum ArgType { kTensor = 0, kArray = 1, kTensorView = 2, kScalar = 3, kConstant = 4 };
+  enum ArgType { kTensor = 0, kArray = 1, kTensorView = 2, kScalar = 3, kConstant = 4, kDevicePointer = 5 };
 
   NVRTCModule(std::shared_ptr<NVRTCProgram> program,
               std::string cudadevrt_path = "")
@@ -438,7 +438,7 @@ public:
   void run_kernel(std::string name, std::array<int, 3> blocks,
                   std::array<int, 3> threads, int smem_size,
                   std::uintptr_t stream_int,
-                  std::vector<std::tuple<tv::Tensor, int>> args) {
+                  std::vector<std::tuple<tv::Tensor, int, std::uintptr_t, size_t>> args) {
 #if defined(TV_HARDWARE_ACC_CUDA)
     if (module_ == nullptr) {
       load();
@@ -453,6 +453,16 @@ public:
       auto &ten = std::get<0>(arg);
       auto arg_type = std::get<1>(arg);
       switch (arg_type) {
+      case ArgType::kDevicePointer: {
+        if (std::get<2>(arg) != 0){
+          tensor_ptrs[cnt] = reinterpret_cast<const char *>(std::get<2>(arg)) + std::get<3>(arg);
+        }else{
+          tensor_ptrs[cnt] = nullptr;
+        }
+        params.push_back(&tensor_ptrs[cnt]);
+        cnt += 1;
+        break;
+      }
       case ArgType::kTensor: {
         if (ten.empty()) {
           tensor_ptrs[cnt] = nullptr;

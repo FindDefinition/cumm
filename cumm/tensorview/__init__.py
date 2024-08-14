@@ -20,7 +20,7 @@ from functools import partial
 import io
 import time
 import traceback
-from typing import Callable, Dict, List, Optional, Tuple, Union, ContextManager
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union, ContextManager
 
 import numpy as np
 from pccm import Argument
@@ -200,7 +200,7 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
         metas = name_to_meta[name].arg_metas
     if lower_name is not None:
         name = lower_name
-    kernel_args: List[Tuple[Tensor, int]] = []
+    kernel_args: List[Tuple[Tensor, int, int, int]] = []
     for arg, meta in zip(args, metas):
         if meta.valid:
             # print(meta.shape)
@@ -214,7 +214,7 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                     raise ValueError(
                         f"your tensor {arg.shape}|{cur_dtype}"
                         f" dtype not equal to {expected_dtype}")
-                kernel_args.append((arg, _NVRTCModule.kTensor))
+                kernel_args.append((arg, _NVRTCModule.kTensor, 0, 0))
                 continue
             elif meta.base_type == NVRTCArgBaseType.TensorView:
                 if not isinstance(arg, Tensor):
@@ -227,7 +227,7 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                     raise ValueError(
                         f"your tensor {arg.shape}|{cur_dtype}"
                         f" dtype not equal to {expected_dtype}")
-                kernel_args.append((arg, _NVRTCModule.kTensorView))
+                kernel_args.append((arg, _NVRTCModule.kTensorView, 0, 0))
                 continue
             else:
                 # we can't ensure arg isn't tv::Tensor.
@@ -253,19 +253,19 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                     # TODO prevent floats assigned to ints
                     ten = empty(meta.shape, tv_dtype, -1)
                     ten.numpy_view()[:] = arg_array
-                    kernel_args.append((ten, arg_type))
+                    kernel_args.append((ten, arg_type, 0, 0))
                     continue
         # meta isn't valid, use regular dtypes.
         if isinstance(arg, bool):
             ten = full([1], arg, uint8)
-            kernel_args.append((ten, _NVRTCModule.kConstant))
+            kernel_args.append((ten, _NVRTCModule.kConstant, 0, 0))
 
         elif isinstance(arg, (int, float, np.integer, np.floating)):
             dtype = float32
             if isinstance(arg, (int, np.integer)):
                 dtype = int64
             ten = full([1], arg, dtype)
-            kernel_args.append((ten, _NVRTCModule.kArray))
+            kernel_args.append((ten, _NVRTCModule.kArray, 0, 0))
         elif isinstance(arg, (list, tuple)):
             raise NotImplementedError("don't support list or tuple, you must use np.ndarray")
             dtype = np.float32
@@ -276,10 +276,10 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
             kernel_args.append((ten, _NVRTCModule.kArray))
         elif isinstance(arg, np.ndarray):
             ten = from_numpy(arg).clone()
-            kernel_args.append((ten, _NVRTCModule.kArray))
+            kernel_args.append((ten, _NVRTCModule.kArray, 0, 0))
         else:
             assert isinstance(arg, Tensor)
-            kernel_args.append((arg, _NVRTCModule.kTensor))
+            kernel_args.append((arg, _NVRTCModule.kTensor, 0, 0))
     if perf_context is not None:
         with perf_context:
             if isinstance(mod, _NVRTCModule):
@@ -290,8 +290,9 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                 return mod.run_kernel(name, launch.blocks, launch.threads,
                                     launch.smem, launch.ctx, kernel_args)
     if isinstance(mod, _NVRTCModule):
-        return mod.run_kernel(name, launch.blocks, launch.threads,
-                                    launch.smem, launch.stream, kernel_args)
+        with measure_and_print(name):
+            return mod.run_kernel(name, launch.blocks, launch.threads,
+                                        launch.smem, launch.stream, kernel_args)
     else:
         assert launch.ctx is not None 
         # print("preprocess time", time.time() - t)
@@ -366,14 +367,14 @@ class NVRTCModule:
     def get_kernel_attrs(self, name: str):
         return self._mod.get_kernel_attributes(name)
 
-    def run_kernel_unchecked(self, name: str, launch: LaunchParam, *args: Tuple[Tensor, int]):
+    def run_kernel_unchecked(self, name: str, launch: LaunchParam, args: Sequence[Tuple[Tensor, int, int, int]]):
         if self.name_to_meta:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
             assert len(args) == len(self.name_to_meta[name].args)
         if self._name_exprs:
             name = self.get_lowered_name(name)
         return self._mod.run_kernel(name, launch.blocks, launch.threads,
-                                    launch.smem, launch.stream, list(args))
+                                    launch.smem, launch.stream, args)
 
     def run_kernel_in_spawn_process(self, name: str, launch: LaunchParam,
                    *args: Union[Tensor, int, float, List[int], List[float],
@@ -489,13 +490,13 @@ class MetalModule:
         return LaunchParam(blocks, threads, smem_size, stream)
 
 
-    def run_kernel_unchecked(self, name: str, launch: LaunchParam, *args: Tuple[Tensor, int]):
+    def run_kernel_unchecked(self, name: str, launch: LaunchParam, args: List[Tuple[Tensor, int, int, int]], use_nonuniform_threadgroup: bool):
         assert launch.ctx is not None 
         if self.name_to_meta:
             assert name in self.name_to_meta, f"can't find your kernel {name}, available: {self.name_to_meta.keys()}"
             assert len(args) == len(self.name_to_meta[name].args)
         return self._mod.run_kernel(name, launch.blocks, launch.threads,
-                                    launch.smem, launch.ctx, list(args))
+                                    launch.smem, launch.ctx, args, use_nonuniform_threadgroup)
 
 
     def run_kernel(self, name: str, launch: LaunchParam,

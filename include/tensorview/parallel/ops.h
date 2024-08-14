@@ -426,15 +426,11 @@ template <> TV_DEVICE_INLINE int32_t warp_max(int32_t val) {
 
 template <typename T> TV_DEVICE_INLINE T warp_min(T val) {
 #if defined(TV_CUDA_CC)
-#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
-  return __reduce_min_sync(0xffffffff, val);
-#else
   #pragma unroll
   for (int offset = warp_size() / 2; offset > 0; offset /= 2) {
     val = min(val, __shfl_down_sync(0xffffffff, val, offset));
   }
   return val;
-#endif
 #elif defined(TV_METAL_RTC)
   return metal::simd_min(val);
 #else
