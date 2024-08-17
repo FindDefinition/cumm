@@ -456,7 +456,6 @@ public:
                           "src size not match");
     TV_ASSERT_INVALID_ARG(dst.size_ >= dst_offset + copy_size,
                           "dst size not match");
-    size_t copy_size_in_bytes = copy_size * sizeof(T);
 #if defined(TV_HARDWARE_ACC_CUDA)
     if (src.device_ == -1 && dst.device_ == -1) {
       std::copy(src.data() + src_offset, src.data() + src_offset + copy_size,
@@ -487,6 +486,7 @@ public:
       }
     }
 #elif defined(TV_HARDWARE_ACC_METAL)
+    size_t copy_size_in_bytes = copy_size * sizeof(T);
     AppleMetalContext::SyncType sync_type = AppleMetalContext::SyncType::COMMIT;
     if (!ctx.has_item(ContextType::kAppleMetal)) {
       ctx = Context().create_apple_metal_context();

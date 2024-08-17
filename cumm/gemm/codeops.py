@@ -99,5 +99,5 @@ def dispatch(code: pccm.FunctionCode, dts: List[dtypes.DType], var: str):
                 yield dtype
     with code.else_():
         code.raw(f"""
-        TV_THROW_RT_ERR("unknown dtype {var}, available: {dts}")
+        TV_THROW_RT_ERR("unknown dtype {var}, ", tv::dtype_str({var}), " available: {dts}")
         """)

@@ -866,7 +866,7 @@ class NVRTCInlineBuilder(InlineBuilder):
             is_kernel_raw = user_args.mode == CUDAMode.KernelRaw
             with self.enter_inliner_scope():
                 if user_args.unchecked_mode:
-                    res = func.run_kernel_unchecked(real_name, launch, *args, use_nonuniform_threadgroup=not is_kernel_raw)
+                    res = func.run_kernel_unchecked(real_name, launch, args, use_nonuniform_threadgroup=not is_kernel_raw)
                 else:
                     res = func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context, use_nonuniform_threadgroup=not is_kernel_raw)
 

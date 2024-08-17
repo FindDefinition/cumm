@@ -241,3 +241,15 @@ TV_HOST_DEVICE_INLINE void printf2_array_block_once(Ts &&...args) {
 }
 
 } // namespace tv
+
+#define TV_DEVICE_ASSERT(x)                                            \
+  if (!(x)) {                                                                   \
+    tv::printf2("Device Assert:", #x);                                                       \
+    assert(x);                                                                 \
+  }
+
+#define TV_DEVICE_ASSERT_WITH_PRINT(x, ...)                                            \
+  if (!(x)) {                                                                   \
+    tv::printf2("Device Assert:", #x, __VA_ARGS__);                                                       \
+    assert(x);                                                                 \
+  }

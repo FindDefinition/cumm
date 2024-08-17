@@ -12,6 +12,17 @@ def test_nvrtc_std():
     inliner = NVRTCInlineBuilder([TensorViewNVRTCHashKernel, TensorViewArrayLinalg], root=PACKAGE_ROOT.parent, std="c++17")
     
     inliner.kernel_1d("nvrtc_std", 1, 0, f"""
+
+    using wtftype = tv::detail::determine_broadcast_array_type<float, tv::array_nd<float, 1, 4>, float>::type;
+    using wtftype2 = tv::detail::determine_broadcast_array_type<float, tv::array_nd<float, 1, 4>, tv::array_nd<float, 3, 1>>::type;
+
+    wtftype arr_test1 = tv::array_nd<float, 1, 4>{{}};
+    wtftype2 arr_test2 = tv::array_nd<float, 3, 4>{{}};
+    auto arr_test3 = tv::array_nd<float, 4>{{}};
+    auto arr_test4 = tv::array_nd<float, 1>{{}};
+
+    tv::printf2(tv::detail::get_tv_array_rank<wtftype2>::value);
+    auto wtf3 = arr_test1 + arr_test2;
     auto tup = std::make_tuple(1.0f, false);
     auto tup2 = tup;
     using debug_tuple_t = std::tuple<float>;      

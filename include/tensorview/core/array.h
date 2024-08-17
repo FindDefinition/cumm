@@ -73,6 +73,14 @@ constexpr int TV_METAL_CONSTANT sizeof_v = detail::sizeof_subbyte_impl<T>::value
 template <typename T, size_t N, size_t Align> struct array;
 namespace detail {
 
+template <typename T> struct get_array_value_type_or_scalar_impl {
+  using type = std::decay_t<T>;
+};
+
+template <typename T, size_t N, size_t Align>
+struct get_array_value_type_or_scalar_impl<array<T, N, Align>> {
+  using type = T;
+};
 
 template <typename T> struct get_nested_element_type_impl {
   using type = std::decay_t<T>;
@@ -85,6 +93,10 @@ struct get_nested_element_type_impl<array<T, N, Align>> {
 
 template <typename T>
 using get_nested_element_t = typename get_nested_element_type_impl<T>::type;
+
+template <typename T>
+using get_array_value_type_or_scalar_t = typename get_array_value_type_or_scalar_impl<T>::type;
+
 
 template <typename K, typename V> struct InitPair {
   K first;
@@ -305,6 +317,12 @@ public:
     return *this = *this + other;
   }
 
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator+=(thread TOther const &other) device {
+    auto lfs = *this;
+    return *this = lfs + other;
+  }
 
 #endif
 
@@ -330,7 +348,12 @@ public:
   operator-=(device TOther const &other) device {
     return *this = *this - other;
   }
-
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator-=(thread TOther const &other) device {
+    auto lfs = *this;
+    return *this = lfs - other;
+  }
 #endif
 
   template <typename TOther>
@@ -355,7 +378,12 @@ public:
   operator*=(device TOther const &other) device {
     return *this = *this * other;
   }
-
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator*=(thread TOther const &other) device {
+    auto lfs = *this;
+    return *this = lfs * other;
+  }
 #endif
 
   template <typename TOther>
@@ -380,7 +408,12 @@ public:
   operator/=(device TOther const &other) device {
     return *this = *this / other;
   }
-
+  template <typename TOther>
+  TV_HOST_DEVICE_INLINE constexpr device array<T, N, Align> &
+  operator/=(thread TOther const &other) device {
+    auto lfs = *this;
+    return *this = lfs / other;
+  }
 #endif
 
   TV_HOST_DEVICE_INLINE constexpr array<T, N, Align> operator-() const {
@@ -650,57 +683,6 @@ template <typename TA, typename TB> struct determine_array_type {
                                 __tb>::type>::type;
 };
 
-template <bool Enable> struct invoke_or_recursive;
-
-template <> struct invoke_or_recursive<true> {
-  template <class F, class... Args>
-  TV_HOST_DEVICE_INLINE static constexpr auto run(TV_METAL_THREAD F &&f, int i,
-                                                  TV_METAL_THREAD Args &&...args) {
-    return arrayops::apply(TV_FORWARD_EXCEPT_METAL(F, f),
-                           array_or_scalar(std::forward<Args>(args), i)...);
-  }
-};
-
-template <> struct invoke_or_recursive<false> {
-  template <class F, class... Args>
-  TV_HOST_DEVICE_INLINE static constexpr auto run(TV_METAL_THREAD F &&f, int i,
-                                                  TV_METAL_THREAD Args &&...args) {
-    return TV_FORWARD_EXCEPT_METAL(F, f)(array_or_scalar(std::forward<Args>(args), i)...);
-  }
-};
-
-template <class F, int... Is, class... Args>
-TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(TV_METAL_THREAD F &&f, seq<Is...>,
-                                                          TV_METAL_THREAD Args &&...args)
-    -> cast_nested_element_t<
-        array<typename mp_reduce<determine_array_type, mp_list<Args...>,
-                                 void>::value_type,
-              sizeof...(Is)>,
-        std::decay_t<return_type_t<F>>> {
-  using arr_type_t = cast_nested_element_t<
-      mp_reduce<determine_array_type, mp_list<Args...>, void>,
-      std::decay_t<return_type_t<F>>>;
-  static_assert(!std::is_same<arr_type_t, void>::value, "wtf");
-  return {{invoke_or_recursive<(get_tv_array_rank<arr_type_t>::value > 1)>::run(
-      TV_FORWARD_EXCEPT_METAL(F, f), Is, std::forward<Args>(args)...)...}};
-}
-// template <class F, int... Is, class... Args>
-// TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(TV_METAL_THREAD F &&f, seq<Is...>,
-//                                                           TV_METAL_CONSTANT Args &&...args)
-//     -> cast_nested_element_t<
-//         array<typename mp_reduce<determine_array_type, mp_list<Args...>,
-//                                  void>::value_type,
-//               sizeof...(Is)>,
-//         std::decay_t<return_type_t<F>>> {
-//   using arr_type_t = cast_nested_element_t<
-//       mp_reduce<determine_array_type, mp_list<Args...>, void>,
-//       std::decay_t<return_type_t<F>>>;
-//   static_assert(!std::is_same<arr_type_t, void>::value, "wtf");
-//   return {{invoke_or_recursive<(get_tv_array_rank<arr_type_t>::value > 1)>::run(
-//       TV_FORWARD_EXCEPT_METAL(F, f), Is, std::forward<Args>(args)...)...}};
-// }
-
-// we can't use std::extent here because the default value of extent is ZERO...
 template <typename T> struct get_array_extent {
   static constexpr TV_METAL_CONSTANT int value = -1;
 };
@@ -739,6 +721,84 @@ template <class... Ts>
 constexpr TV_METAL_CONSTANT int get_max_extent_v =
     mp_reduce_max<mp_transform<get_extent_helper, mp_list<Ts...>>,
                   std::integral_constant<int, -1>>::value;
+
+
+template <int N, class TElement, class... Args>
+struct determine_broadcast_array_type_impl {
+  static constexpr int NShape = get_max_extent_v<Args...>;
+  static_assert(NShape > 0, "error");
+  using extent_is_valid_t = mp_list_c<bool, (get_extent_helper<Args>::type::value == -1 || detail::get_extent_helper<Args>::type::value == 1 || detail::get_extent_helper<Args>::type::value == NShape)...>;
+  static_assert(true == mp_reduce_and<extent_is_valid_t, std::integral_constant<bool, true>>::value, "array shape must valid");
+  using type = array<typename determine_broadcast_array_type_impl<N - 1, TElement, 
+    typename std::conditional<is_tv_array<Args>::value, typename detail::get_array_value_type_or_scalar_t<Args>,
+                                  Args>::type...>::type, NShape>;
+};
+
+template <class TElement, class... Args>
+struct determine_broadcast_array_type_impl<0, TElement, Args...>{
+  static constexpr int N = get_max_extent_v<Args...>;
+  using type = typename std::conditional<(N <= 0), TElement, array<TElement, size_t(N)>>::type;
+};
+
+
+template <class TElement, class... Args>
+struct determine_broadcast_array_type {
+  static constexpr int Rank = mp_reduce_max<mp_transform<get_tv_array_rank, mp_list<std::decay_t<Args>...>>,
+                                    std::integral_constant<size_t, 0>>::value;
+  static_assert(Rank >= 0, "error");
+  using type = typename determine_broadcast_array_type_impl<Rank, TElement, std::decay_t<Args>...>::type;
+};
+
+
+template <bool Enable> struct invoke_or_recursive;
+
+template <> struct invoke_or_recursive<true> {
+  template <class F, class... Args>
+  TV_HOST_DEVICE_INLINE static constexpr auto run(TV_METAL_THREAD F &&f, int i,
+                                                  TV_METAL_THREAD Args &&...args) {
+    return arrayops::apply(TV_FORWARD_EXCEPT_METAL(F, f),
+                           array_or_scalar(std::forward<Args>(args), i)...);
+  }
+};
+
+template <> struct invoke_or_recursive<false> {
+  template <class F, class... Args>
+  TV_HOST_DEVICE_INLINE static constexpr auto run(TV_METAL_THREAD F &&f, int i,
+                                                  TV_METAL_THREAD Args &&...args) {
+    return TV_FORWARD_EXCEPT_METAL(F, f)(array_or_scalar(std::forward<Args>(args), i)...);
+  }
+};
+
+template <class F, int... Is, class... Args>
+TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(TV_METAL_THREAD F &&f, seq<Is...>,
+                                                          TV_METAL_THREAD Args &&...args)
+    -> typename determine_broadcast_array_type<std::decay_t<return_type_t<F>>, Args...>::type {
+  using arr_type_t = typename determine_broadcast_array_type<std::decay_t<return_type_t<F>>, Args...>::type;
+  // arr_type_t::asdwasfasf;
+  // using X = mp_list<Args...>;
+  // X::asdasfasfa;
+  // arr_type_t::asdwasfasf;
+  static_assert(!std::is_same<arr_type_t, void>::value, "wtf");
+  return {{invoke_or_recursive<(get_tv_array_rank<arr_type_t>::value > 1)>::run(
+      TV_FORWARD_EXCEPT_METAL(F, f), Is, std::forward<Args>(args)...)...}};
+}
+// template <class F, int... Is, class... Args>
+// TV_HOST_DEVICE_INLINE constexpr auto index_transform_impl(TV_METAL_THREAD F &&f, seq<Is...>,
+//                                                           TV_METAL_CONSTANT Args &&...args)
+//     -> cast_nested_element_t<
+//         array<typename mp_reduce<determine_array_type, mp_list<Args...>,
+//                                  void>::value_type,
+//               sizeof...(Is)>,
+//         std::decay_t<return_type_t<F>>> {
+//   using arr_type_t = cast_nested_element_t<
+//       mp_reduce<determine_array_type, mp_list<Args...>, void>,
+//       std::decay_t<return_type_t<F>>>;
+//   static_assert(!std::is_same<arr_type_t, void>::value, "wtf");
+//   return {{invoke_or_recursive<(get_tv_array_rank<arr_type_t>::value > 1)>::run(
+//       TV_FORWARD_EXCEPT_METAL(F, f), Is, std::forward<Args>(args)...)...}};
+// }
+
+// we can't use std::extent here because the default value of extent is ZERO...
 
 template <size_t N> struct array_reduce_impl {
   static_assert(N != 0, "N can't equal to zero");

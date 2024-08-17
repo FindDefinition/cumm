@@ -262,7 +262,7 @@ private:
     }
   }
 
-  template <class F, class KT, int... Inds, class... FArgs, class... Args>
+  template <class F, class KT, int... Inds, class... FArgs>
   TV_DEVICE_INLINE void insert_raw_custom_value_base(
       TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
       mp_list_int<Inds...>, TV_METAL_THREAD F &&f,
@@ -660,7 +660,7 @@ private:
     }
   }
 
-  template <class F, class KT, int... Inds, class... FArgs, class... Args>
+  template <class F, class KT, int... Inds, class... FArgs>
   TV_DEVICE_INLINE void insert_raw_custom_value_base(
       TV_METAL_THREAD const array<KT, kNumHashArgs> &key_arr,
       mp_list_int<Inds...>, TV_METAL_THREAD F &&f,

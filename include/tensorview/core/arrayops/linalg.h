@@ -326,12 +326,26 @@ template <typename T, size_t Col, size_t Align> struct mv_colmajor_grad_lfs {
   template <size_t Row>
   TV_HOST_DEVICE_INLINE constexpr array<array<T, Col>, Row>
   operator()(const TV_METAL_THREAD array<T, Col> &grad,
+             const TV_METAL_THREAD array<array<T, Col>, Row> &inp_lfs,
              const TV_METAL_THREAD array<T, Row> &inp_rfs) {
-    return reshape<Row, 1>(inp_rfs) * grad;
+    return reshape<Row, 1>(inp_rfs) * reshape<1, Col>(grad);
+  }
+  template <size_t Row>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, Col>, Row>
+  operator()(const TV_METAL_THREAD array<T, Col> &grad,
+             const TV_METAL_THREAD array<T, Row> &inp_rfs) {
+    return reshape<Row, 1>(inp_rfs) * reshape<1, Col>(grad);
   }
 };
 
 template <typename T, size_t Col, size_t Align> struct mv_colmajor_grad_rfs {
+  template <size_t Row>
+  TV_HOST_DEVICE_INLINE constexpr array<T, Row>
+  operator()(const TV_METAL_THREAD array<T, Col> &grad,
+             const TV_METAL_THREAD array<array<T, Col>, Row> &inp_lfs,
+             const TV_METAL_THREAD array<T, Row> &inp_rfs) {
+    return inp_lfs.template op<mv_rowmajor>(grad);
+  }
   template <size_t Row>
   TV_HOST_DEVICE_INLINE constexpr array<T, Row>
   operator()(const TV_METAL_THREAD array<T, Col> &grad,
@@ -400,12 +414,26 @@ template <typename T, size_t Row, size_t Align> struct mv_rowmajor_grad_lfs {
   template <size_t Col>
   TV_HOST_DEVICE_INLINE constexpr array<array<T, Col>, Row>
   operator()(const TV_METAL_THREAD array<T, Row> &grad,
+            const TV_METAL_THREAD array<array<T, Col>, Row> &inp_lfs,
              const TV_METAL_THREAD array<T, Col> &inp_rfs) {
-    return reshape<Row, 1>(grad) * inp_rfs;
+    return (reshape<Row, 1>(grad) * reshape<1, Col>(inp_rfs));
+  }
+  template <size_t Col>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, Col>, Row>
+  operator()(const TV_METAL_THREAD array<T, Row> &grad,
+             const TV_METAL_THREAD array<T, Col> &inp_rfs) {
+    return (reshape<Row, 1>(grad) * reshape<1, Col>(inp_rfs));
   }
 };
 
 template <typename T, size_t Row, size_t Align> struct mv_rowmajor_grad_rfs {
+  template <size_t Col>
+  TV_HOST_DEVICE_INLINE constexpr array<T, Col>
+  operator()(const TV_METAL_THREAD array<T, Row> &grad,
+             const TV_METAL_THREAD array<array<T, Col>, Row> &inp_lfs,
+             const TV_METAL_THREAD array<T, Col> &inp_rfs) {
+    return inp_lfs.template op<mv_colmajor>(grad);
+  }
   template <size_t Col>
   TV_HOST_DEVICE_INLINE constexpr array<T, Col>
   operator()(const TV_METAL_THREAD array<T, Row> &grad,
@@ -463,6 +491,13 @@ struct mm_nnn_grad_lfs<array<T, M>, N, 0> {
              const TV_METAL_THREAD array<array<T, K>, N> &other) {
     return grad.template op<mm_nnn>(other.template op<transpose>());
   }
+  template <size_t K>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, M>, K>
+  operator()(const TV_METAL_THREAD array<array<T, M>, N> &grad,
+             const TV_METAL_THREAD array<array<T, K>, N> &other) {
+    return grad.template op<mm_nnn>(other.template op<transpose>());
+  }
+
 };
 
 template <typename T, size_t M, size_t N>
@@ -472,6 +507,12 @@ struct mm_nnn_grad_rfs<array<T, M>, N, 0> {
   operator()(const TV_METAL_THREAD array<array<T, M>, N> &grad,
              const TV_METAL_THREAD array<array<T, M>, K> &self,
              const TV_METAL_THREAD array<array<T, K>, N> &other) {
+    return self.template op<transpose>().template op<mm_nnn>(grad);
+  }
+  template <size_t K>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, K>, N>
+  operator()(const TV_METAL_THREAD array<array<T, M>, N> &grad,
+             const TV_METAL_THREAD array<array<T, M>, K> &self) {
     return self.template op<transpose>().template op<mm_nnn>(grad);
   }
 };
@@ -485,6 +526,12 @@ struct mm_ttt_grad_lfs<array<T, N>, M, 0> {
              const TV_METAL_THREAD array<array<T, N>, K> &other) {
     return grad.template op<mm_ttt>(other.template op<transpose>());
   }
+  template <size_t K>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, K>, M>
+  operator()(const TV_METAL_THREAD array<array<T, N>, M> &grad,
+             const TV_METAL_THREAD array<array<T, N>, K> &other) {
+    return grad.template op<mm_ttt>(other.template op<transpose>());
+  }
 };
 
 template <typename T, size_t M, size_t N>
@@ -494,6 +541,12 @@ struct mm_ttt_grad_rfs<array<T, N>, M, 0> {
   operator()(const TV_METAL_THREAD array<array<T, N>, M> &grad,
              const TV_METAL_THREAD array<array<T, K>, M> &self,
              const TV_METAL_THREAD array<array<T, N>, K> &other) {
+    return self.template op<transpose>().template op<mm_ttt>(grad);
+  }
+  template <size_t K>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, N>, K>
+  operator()(const TV_METAL_THREAD array<array<T, N>, M> &grad,
+             const TV_METAL_THREAD array<array<T, K>, M> &self) {
     return self.template op<transpose>().template op<mm_ttt>(grad);
   }
 };
@@ -680,6 +733,15 @@ struct variance_transform_ttt_grad_rfs<array<T, M>, M, 0> {
         .template op<mm_ttt>(self)
         .template op<transpose>();
   }
+  template <size_t K>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, K>, K>
+  operator()(const TV_METAL_THREAD array<array<T, M>, M> &grad,
+             const TV_METAL_THREAD array<array<T, K>, M> &self) {
+    return grad.template op<mm_ttt>(self)
+        .template op<transpose>()
+        .template op<mm_ttt>(self)
+        .template op<transpose>();
+  }
 };
 
 template <typename T, size_t M>
@@ -729,6 +791,15 @@ struct variance_transform_nnn_grad_rfs<array<T, M>, M, 0> {
   operator()(const TV_METAL_THREAD array<array<T, M>, M> &grad,
              const TV_METAL_THREAD array<array<T, M>, K> &self,
              const TV_METAL_THREAD array<array<T, K>, K> &other) {
+    return grad.template op<mm_nnn>(self)
+        .template op<transpose>()
+        .template op<mm_nnn>(self)
+        .template op<transpose>();
+  }
+  template <size_t K>
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, K>, K>
+  operator()(const TV_METAL_THREAD array<array<T, M>, M> &grad,
+             const TV_METAL_THREAD array<array<T, M>, K> &self) {
     return grad.template op<mm_nnn>(self)
         .template op<transpose>()
         .template op<mm_nnn>(self)
@@ -924,6 +995,93 @@ template <typename T> struct transform_matrix<array<T, 3>, 3, 0> {
             array<T, 4>{self[2][0], self[2][1], self[2][2], other[2]},
             array<T, 4>{T(0), T(0), T(0), T(1)}};
   }
+};
+
+template <typename T, size_t N, size_t Align> struct transform_matrix_colmajor_inverse;
+template <typename T, size_t N, size_t Align> struct transform_matrix_colmajor_inverse_grad;
+
+template <typename T, size_t N, size_t Align> struct transform_matrix_mm_nnn;
+template <typename T, size_t N, size_t Align> struct transform_matrix_mm_nnn_grad_lfs;
+template <typename T, size_t N, size_t Align> struct transform_matrix_mm_nnn_grad_rfs;
+
+template <typename T> struct transform_matrix_colmajor_inverse<array<T, 3>, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 4>
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &self) {
+    return {array<T, 3>{self[0][0], self[1][0], self[2][0]},
+            array<T, 3>{self[0][1], self[1][1], self[2][1]},
+            array<T, 3>{self[0][2], self[1][2], self[2][2]},
+            -slice<0, 3>(self).template op<mv_rowmajor>(self[3])};
+  }
+};
+
+template <typename T> struct transform_matrix_colmajor_inverse_grad<array<T, 3>, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 4>
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &grad, const TV_METAL_THREAD array<array<T, 3>, 4> &self) {
+    auto grad_R_T = slice<0, 3>(grad).template op<transpose>() - grad[3].template op<mv_rowmajor_grad_lfs>(self[3]);
+    return concat(grad_R_T, reshape<1, 3>(-slice<0, 3>(self).template op<mv_colmajor>(grad[3])));
+  }
+};
+
+
+template <typename T> struct transform_matrix_mm_nnn<array<T, 3>, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 4>
+  // tr: self @ other
+  // y = self.R @ (other.R @ x + other.t) + self.t
+  //   = self.R @ other.R @ x + self.R @ other.t + self.t
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &self, const TV_METAL_THREAD array<array<T, 3>, 4> &other) {
+    return concat(slice<0, 3>(self).template op<mm_nnn>(slice<0, 3>(other)),
+                  reshape<1, 3>(slice<0, 3>(self).template op<mv_colmajor>(other[3]) + self[3]));
+  }
+};
+
+template <typename T> struct transform_matrix_mm_nnn_grad_lfs<array<T, 3>, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 4>
+  // tr: self @ other
+  // y = self.R @ (other.R @ x + other.t) + self.t
+  //   = self.R @ other.R @ x + self.R @ other.t + self.t
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &grad, const TV_METAL_THREAD array<array<T, 3>, 4> &self, const TV_METAL_THREAD array<array<T, 3>, 4> &other) {
+    auto grad_R = slice<0, 3>(grad);
+    auto other_R = slice<0, 3>(other);
+    auto self_R_grad = (grad_R.template op<mm_nnn_grad_lfs>(other_R)
+       + grad[3].template op<mv_colmajor_grad_lfs>(other[3]));
+    auto self_T_grad = grad[3];
+    return concat(self_R_grad, reshape<1, 3>(self_T_grad));
+  }
+  
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 4>
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &grad, const TV_METAL_THREAD array<array<T, 3>, 4> &other) {
+    auto grad_R = slice<0, 3>(grad);
+    auto other_R = slice<0, 3>(other);
+    auto self_R_grad = (grad_R.template op<mm_nnn_grad_lfs>(other_R)
+       + grad[3].template op<mv_colmajor_grad_lfs>(other[3]));
+    auto self_T_grad = grad[3];
+    return concat(self_R_grad, reshape<1, 3>(self_T_grad));
+  }
+
+};
+
+template <typename T> struct transform_matrix_mm_nnn_grad_rfs<array<T, 3>, 4, 0> {
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 4>
+  // tr: self @ other
+  // y = self.R @ (other.R @ x + other.t) + self.t
+  //   = self.R @ other.R @ x + self.R @ other.t + self.t
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &grad, const TV_METAL_THREAD array<array<T, 3>, 4> &self, const TV_METAL_THREAD array<array<T, 3>, 4> &other) {
+    auto grad_R = slice<0, 3>(grad);
+    auto self_R = slice<0, 3>(self);
+    auto other_R = slice<0, 3>(other);
+    auto other_R_grad = grad_R.template op<mm_nnn_grad_rfs>(self_R);
+    auto other_T_grad = grad[3].template op<mv_colmajor_grad_rfs>(self_R);
+    return concat(other_R_grad, reshape<1, 3>(other_T_grad));
+  }
+  TV_HOST_DEVICE_INLINE constexpr array<array<T, 3>, 4>
+  operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &grad, const TV_METAL_THREAD array<array<T, 3>, 4> &self) {
+    auto grad_R = slice<0, 3>(grad);
+    auto self_R = slice<0, 3>(self);
+    auto other_R_grad = grad_R.template op<mm_nnn_grad_rfs>(self_R);
+    auto other_T_grad = grad[3].template op<mv_colmajor_grad_rfs>(self_R);
+    return concat(other_R_grad, reshape<1, 3>(other_T_grad));
+  }
+
 };
 
 template <typename T, size_t N, size_t Align> struct qxdir;

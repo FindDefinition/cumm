@@ -3,7 +3,7 @@ from pathlib import Path
 import re
 import tempfile
 import traceback
-from typing import Any, ContextManager, Dict, List, Optional, Set, Tuple, Union, TYPE_CHECKING
+from typing import Any, ContextManager, Dict, List, Optional, Sequence, Set, Tuple, Union, TYPE_CHECKING
 import subprocess
 from cumm.utils import richprint
 from cumm.utils.richprint import HAS_RICH_PRINT, print_rich_cpp
@@ -793,7 +793,7 @@ class CummMetalModule:
             use_nonuniform_threadgroup = use_nonuniform_threadgroup)
 
     def run_kernel_unchecked(self, name: str, launch: tv.LaunchParam,
-                    args: List[Tuple[Tensor, int, int, int]],
+                    args: Sequence[Tuple[Tensor, int, int, int]],
                     use_nonuniform_threadgroup: bool = True):
         if self._metal_mod is None:
             self.load()

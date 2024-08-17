@@ -1,6 +1,7 @@
 
 import importlib.util 
-from pathlib import Path 
+from pathlib import Path
+from typing import List, Optional 
 
 from ccimport import compat
 import pccm 
@@ -131,13 +132,15 @@ class PyTorchTools(pccm.Class):
         return code
 
 
-def build_pytorch_bindings(name: str, lib_store_root: Path):
+def build_pytorch_bindings(name: str, lib_store_root: Path, custom_cus: Optional[List[pccm.Class]] = None):
     import torch 
     torch_version = torch.__version__.split("+")[0]
     torch_version = torch_version.replace(".", "_")
     cu = PyTorchTools()
     cu.namespace = "pytorch_tools"
-    pccm.builder.build_pybind([cu],
+    if custom_cus is None:
+        custom_cus = []
+    pccm.builder.build_pybind([cu] + custom_cus,
                             lib_store_root / name,
                             build_dir=lib_store_root / "build" / f"{name}_{torch_version}",
                             # namespace_root=PACKAGE_ROOT / "csrc",

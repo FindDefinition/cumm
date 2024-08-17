@@ -105,8 +105,8 @@ def check_array_binary_op_grad(inp_list: list[np.ndarray], out_shape: list[int],
     inp_arr_with_delta_start1_str = ", ".join([f"inp_with_delta_{i}" for i in range(1, len(inp_list))])
 
     code.raw(f"""
-    tv::array_nd<float, {out_shape_str}> out_arr = inp_arr_0.op<op::{op}>({inp_arr_start1_str}) * grad_scale;
-    tv::array_nd<float, {out_shape_str}> out_arr_with_delta = inp_with_delta_0.op<op::{op}>({inp_arr_with_delta_start1_str}) * grad_scale;
+    tv::array_nd<{dtype_str}, {out_shape_str}> out_arr = inp_arr_0.op<op::{op}>({inp_arr_start1_str}) * grad_scale;
+    tv::array_nd<{dtype_str}, {out_shape_str}> out_arr_with_delta = inp_with_delta_0.op<op::{op}>({inp_arr_with_delta_start1_str}) * grad_scale;
     auto out_arr_with_delta_sum = op::reshape<-1>(out_arr_with_delta - out_arr).op<op::sum>(); 
 
     """)
