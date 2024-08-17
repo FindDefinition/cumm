@@ -82,7 +82,7 @@ from cumm.gemm.codeops import div_up
 from cumm.tensorview import nullcontext
 from ccimport import compat
 
-_TORCH_MPS_SYNC: Callable[[], Any] | None = None 
+_TORCH_MPS_SYNC: Optional[Callable[[], Any]] = None 
 
 _TORCH_DTYPE_TO_TV: Dict[Any, int] = {}
 _TORCH_DTYPE_TO_TV_STR: Dict[Any, str] = {}
@@ -94,7 +94,7 @@ TORCH_PARAMETER_TENSOR_NAME = "torch.nn.parameter.Parameter"
 class InlinerKernelLaunchContext:
     pass
 
-INLINER_KERNEL_CTX: contextvars.ContextVar[InlinerKernelLaunchContext | None] = contextvars.ContextVar("InlinerKernelLaunchContext", default=None)
+INLINER_KERNEL_CTX: contextvars.ContextVar[Optional[InlinerKernelLaunchContext]] = contextvars.ContextVar("InlinerKernelLaunchContext", default=None)
 
 @contextlib.contextmanager
 def _enter_inliner_kernel_ctx(ctx: InlinerKernelLaunchContext):
@@ -305,17 +305,29 @@ class TVTensorPlugin(InlineBuilderPlugin):
                 ]
             else:
                 assert isinstance(obj, tv.Tensor)
-                res = [
-                    f"__{tgt_name}_tmp0 = {src_name}",
-                    f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
-                    f"{tgt_name} = (EMPTY_TENSOR, kDevicePointer, ",
-                    f"    __{tgt_name}_tmp0.byte_pointer(), 0)",
-                ]
-                return "\n".join(res), [
-                    "from cumm import tensorview as tv",
-                    "kDevicePointer = tv._NVRTCModule.kDevicePointer",
-                    "EMPTY_TENSOR = tv.Tensor()",
-                ]
+                if compat.IsAppleSiliconMacOs:
+                    res = [
+                        f"__{tgt_name}_tmp0 = {src_name}",
+                        f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
+                        f"{tgt_name} = (__{tgt_name}_tmp0, kTensor, ",
+                        f"    0, 0)",
+                    ]
+                    return "\n".join(res), [
+                        "from cumm import tensorview as tv",
+                        "kTensor = tv._NVRTCModule.kTensor",
+                    ]
+                else:
+                    res = [
+                        f"__{tgt_name}_tmp0 = {src_name}",
+                        f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
+                        f"{tgt_name} = (EMPTY_TENSOR, kDevicePointer, ",
+                        f"    __{tgt_name}_tmp0.byte_pointer(), 0)",
+                    ]
+                    return "\n".join(res), [
+                        "from cumm import tensorview as tv",
+                        "kDevicePointer = tv._NVRTCModule.kDevicePointer",
+                        "EMPTY_TENSOR = tv.Tensor()",
+                    ]
         else:
             if qname == TORCH_TENSOR_NAME or qname == TORCH_PARAMETER_TENSOR_NAME:
                 res: List[str] = []

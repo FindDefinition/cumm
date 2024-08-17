@@ -239,7 +239,7 @@ TV_HOST_DEVICE_INLINE constexpr auto create_array(Ts... vals) {
 template <typename T, size_t N, size_t Align> struct identity {
   template <class... Args>
   TV_HOST_DEVICE_INLINE auto
-  operator()(const TV_METAL_THREAD array<T, N, Align> &self, Args&& ...args) {
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self, TV_METAL_THREAD Args&& ...args) {
     return self;
   }
 };

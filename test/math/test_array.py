@@ -166,8 +166,8 @@ def test_matrix_ops():
 
 if __name__ == "__main__":
     test_transform_matrix()
-    # test_mv_and_grad()
+    test_mv_and_grad()
     test_variance_transform_and_grad()
-    # test_broadcast_op()
-    # test_normalize_and_grad()
-    # test_matrix_ops()
+    test_broadcast_op()
+    test_normalize_and_grad()
+    test_matrix_ops()

@@ -725,7 +725,7 @@ constexpr TV_METAL_CONSTANT int get_max_extent_v =
 
 template <int N, class TElement, class... Args>
 struct determine_broadcast_array_type_impl {
-  static constexpr int NShape = get_max_extent_v<Args...>;
+  static constexpr TV_METAL_CONSTANT int NShape = get_max_extent_v<Args...>;
   static_assert(NShape > 0, "error");
   using extent_is_valid_t = mp_list_c<bool, (get_extent_helper<Args>::type::value == -1 || detail::get_extent_helper<Args>::type::value == 1 || detail::get_extent_helper<Args>::type::value == NShape)...>;
   static_assert(true == mp_reduce_and<extent_is_valid_t, std::integral_constant<bool, true>>::value, "array shape must valid");
@@ -736,14 +736,14 @@ struct determine_broadcast_array_type_impl {
 
 template <class TElement, class... Args>
 struct determine_broadcast_array_type_impl<0, TElement, Args...>{
-  static constexpr int N = get_max_extent_v<Args...>;
+  static constexpr TV_METAL_CONSTANT int N = get_max_extent_v<Args...>;
   using type = typename std::conditional<(N <= 0), TElement, array<TElement, size_t(N)>>::type;
 };
 
 
 template <class TElement, class... Args>
 struct determine_broadcast_array_type {
-  static constexpr int Rank = mp_reduce_max<mp_transform<get_tv_array_rank, mp_list<std::decay_t<Args>...>>,
+  static constexpr TV_METAL_CONSTANT int Rank = mp_reduce_max<mp_transform<get_tv_array_rank, mp_list<std::decay_t<Args>...>>,
                                     std::integral_constant<size_t, 0>>::value;
   static_assert(Rank >= 0, "error");
   using type = typename determine_broadcast_array_type_impl<Rank, TElement, std::decay_t<Args>...>::type;
