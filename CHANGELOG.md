@@ -1,4 +1,8 @@
 # Changelog
+## [0.6.1] - 2024-08-27
+### Changed
+- debug macos ci
+
 ## [0.6.0] - 2024-07-28
 ### Added 
 - add cuda-like kernel in apple silicon, only RTC compile is supported.
