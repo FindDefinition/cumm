@@ -735,12 +735,7 @@ class CummMetalModule:
         self.name_to_meta = self.params.name_to_meta
 
     def load(self):
-        import llvmlite.binding as llvm
-        _lazy_load_llvm()
-        # use clang++ to get ir
         opts = self.params.opts
-        _lazy_load_lib_for_llvm(self.params.libraries,
-                                self.params.libpaths)
         with tempfile.TemporaryDirectory() as fdir:
             inc_dir = Path(fdir) / "include"
             for k, v in self.params.headers.items():

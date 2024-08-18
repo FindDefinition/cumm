@@ -284,11 +284,15 @@ class TVTensorPlugin(InlineBuilderPlugin):
                     # if we use ten.data_ptr(), the result will be 
                     # MTLBuffer + data_offset, which will cause
                     # segfault.
+                    tv_dtype_str = _cached_get_torch_dtype_to_tv_str()[obj.dtype]
+                    itemsize = obj.itemsize
+                    # storage offset isn't byte offset, so we need to multiply itemsize
+                    # when use raw device pointer.
                     res.extend([
                         f"__{tgt_name}_tmp0 = {src_name}",
                         f"assert __{tgt_name}_tmp0.dtype == {obj.dtype}",
                         f"{tgt_name} = (EMPTY_TENSOR, kDevicePointer, ",
-                        f"    __{tgt_name}_tmp0.untyped_storage().data_ptr(), __{tgt_name}_tmp0.storage_offset())",
+                        f"    __{tgt_name}_tmp0.untyped_storage().data_ptr(), __{tgt_name}_tmp0.storage_offset() * {itemsize})",
                     ])
                 else:
                     res.extend([
@@ -301,6 +305,7 @@ class TVTensorPlugin(InlineBuilderPlugin):
                     "import torch",
                     "from cumm import tensorview as tv",
                     "kDevicePointer = tv._NVRTCModule.kDevicePointer",
+                    # "kTensor = tv._NVRTCModule.kTensor",
                     "EMPTY_TENSOR = tv.Tensor()",
                 ]
             else:
@@ -400,15 +405,25 @@ class BuiltinTypePlugin(InlineBuilderPlugin):
             raise NotImplementedError
         assert user_arg is not None and isinstance(user_arg, _NVRTCInlineParams)
         if user_arg.unchecked_mode:
-            res.extend([
-                f"__{tgt_name}_tmp0 = {src_name}",
-                # f"assert isinstance(__{tgt_name}_tmp0, {obj_type_str})",
-                f"{tgt_name} = (tv.full([1], __{tgt_name}_tmp0, {tv_dtype}), kScalar, ",
-                f"    0, 0)",
-            ])
+            if isinstance(obj, bool):
+                # bools are func constants (only used in apple metal)
+                res.extend([
+                    f"__{tgt_name}_tmp0 = {src_name}",
+                    f"assert isinstance(__{tgt_name}_tmp0, bool)",
+                    f"{tgt_name} = (tv.full([1], __{tgt_name}_tmp0, tv.uint8), kConstant, ",
+                    f"    0, 0)",
+                ])
+            else:
+                res.extend([
+                    f"__{tgt_name}_tmp0 = {src_name}",
+                    # f"assert isinstance(__{tgt_name}_tmp0, {obj_type_str})",
+                    f"{tgt_name} = (tv.full([1], __{tgt_name}_tmp0, {tv_dtype}), kScalar, ",
+                    f"    0, 0)",
+                ])
             return "\n".join(res), [
                 "from cumm import tensorview as tv",
-                "kScalar = tv._NVRTCModule.kScalar"
+                "kScalar = tv._NVRTCModule.kScalar",
+                "kConstant = tv._NVRTCModule.kConstant"
             ]
         else:
             return f"{tgt_name} = {src_name}", [] 

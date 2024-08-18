@@ -1,9 +1,13 @@
 # Changelog
-## [0.6.2] - 2024-08-27
+## [0.6.3] - 2024-08-18
+### Fixed
+- fix bug in mac in inline kernels
+
+## [0.6.2] - 2024-08-17
 ### Fixed
 - fix mac os bug
 
-## [0.6.1] - 2024-08-27
+## [0.6.1] - 2024-08-17
 ### Changed
 - debug macos ci
 
