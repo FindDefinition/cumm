@@ -162,10 +162,10 @@ public:
   TV_HOST_DEVICE_INLINE static tv::array_nd<T, 4, 2>
   prepare_dfvt_corners(const TV_METAL_THREAD tv::array_nd<T, 4, 2> &corners,
                        const TV_METAL_THREAD tv::array<T, 2> &major_vector) {
-    auto &p_top_right = corners[0];
-    auto &p_bottom_right = corners[1];
-    auto &p_bottom_left = corners[2];
-    auto &p_top_left = corners[3];
+    TV_METAL_THREAD auto &p_top_right = corners[0];
+    TV_METAL_THREAD auto &p_bottom_right = corners[1];
+    TV_METAL_THREAD auto &p_bottom_left = corners[2];
+    TV_METAL_THREAD auto &p_top_left = corners[3];
     if (major_vector[0] >= 0 && major_vector[1] >= 0) {
       return {(p_bottom_left), (p_top_left), (p_bottom_right), (p_top_right)};
     } else if (major_vector[0] < 0 && major_vector[1] >= 0) {
