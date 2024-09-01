@@ -31,6 +31,8 @@ namespace tv {
 namespace arrayops {
 
 template <typename T> struct MathScalarOp {
+  TV_HOST_DEVICE_INLINE static T square(T x) { return x * x; }
+
 #ifndef __CUDACC__
   TV_HOST_DEVICE_INLINE static T copysign(T x, T y) { return std::copysign(x, y); }
 
@@ -59,7 +61,15 @@ template <typename T> struct MathScalarOp {
     return std::exp(x);
 #endif
   }
-  
+
+  TV_HOST_DEVICE_INLINE static T fast_sqrt(T x) { 
+#ifdef TV_METAL_RTC
+    return metal::fast::sqrt(x);
+#else 
+    return std::sqrt(x);
+#endif
+  }
+
   TV_HOST_DEVICE_INLINE static T exp2(T x) { return std::exp2(x); }
 
   TV_HOST_DEVICE_INLINE static T floor(T x) { return std::floor(x); }
@@ -77,6 +87,8 @@ template <typename T> struct MathScalarOp {
   TV_HOST_DEVICE_INLINE static T trunc(T x) { return std::trunc(x); }
 
   TV_HOST_DEVICE_INLINE static T abs(T x) { return std::abs(x); }
+
+  TV_HOST_DEVICE_INLINE static T fabs(T x) { return std::abs(x); }
 
   TV_HOST_DEVICE_INLINE static T tan(T x) { return std::tan(x); }
 
@@ -106,7 +118,45 @@ template <typename T> struct MathScalarOp {
 
   TV_HOST_DEVICE_INLINE static T min(T x, T y) { return std::min(x, y); }
 
+  TV_HOST_DEVICE_INLINE static T fmax(T x, T y) { return std::fmax(x, y); }
+
+  TV_HOST_DEVICE_INLINE static T fmin(T x, T y) { return std::fmin(x, y); }
+
   TV_HOST_DEVICE_INLINE static T clamp(T v, T lo, T hi) { return min(hi, max(lo, v)); }
+
+  TV_HOST_DEVICE_INLINE static T fma(T x, T y, T z) { return std::fma(x, y, z); }
+
+  TV_HOST_DEVICE_INLINE static float expm1(T x) {
+#ifdef TV_METAL_RTC
+     return std::exp(x) - T(1);
+#else
+     return std::expm1(x);
+#endif
+   }
+
+  TV_HOST_DEVICE_INLINE static float log1p(T x) {
+#ifdef TV_METAL_RTC
+     return std::log(x + T(1));
+#else
+     return std::log1p(x);
+#endif
+   }
+
+  TV_HOST_DEVICE_INLINE static float cbrt(T x) {
+#ifdef TV_METAL_RTC
+     return std::pow(x, T(1) / T(3));
+#else
+     return std::cbrt(x);
+#endif
+   }
+
+  TV_HOST_DEVICE_INLINE static float hypot(T x, T y) {
+#ifdef TV_METAL_RTC
+     return std::sqrt(x * x + y * y);
+#else
+     return std::hypot(x, y);
+#endif
+   }
 
 #else
 
@@ -145,6 +195,8 @@ template <typename T> struct MathScalarOp {
   TV_HOST_DEVICE_INLINE static T exp(T x) { return T(expf(float(x))); }
 
   TV_HOST_DEVICE_INLINE static T fast_exp(T x) { return __expf(float(x)); }
+
+  TV_HOST_DEVICE_INLINE static T fast_sqrt(T x) { return __fsqrt_rn(float(x)); }
 
   TV_HOST_DEVICE_INLINE static T exp2(T x) { return T(exp2f(float(x))); }
 
@@ -196,6 +248,8 @@ template <typename T> struct MathScalarOp {
 #ifdef TV_HARDWARE_ACC_CUDA
 template <> struct MathScalarOp<float> {
 
+  TV_HOST_DEVICE_INLINE static float square(float x) { return x * x; }
+
   TV_HOST_DEVICE_INLINE static float copysign(float x, float y) {
     return copysignf(x, y);
   }
@@ -229,6 +283,9 @@ template <> struct MathScalarOp<float> {
 
   TV_HOST_DEVICE_INLINE static float fast_exp(float x) { return __expf(x); }
 
+  TV_HOST_DEVICE_INLINE static float fast_sqrt(float x) { return __fsqrt_rn(x); }
+
+
   TV_HOST_DEVICE_INLINE static float exp10(float x) { return exp10f(x); }
 
   TV_HOST_DEVICE_INLINE static float exp2(float x) { return exp2f(x); }
@@ -248,6 +305,8 @@ template <> struct MathScalarOp<float> {
   TV_HOST_DEVICE_INLINE static float trunc(float x) { return truncf(x); }
 
   TV_HOST_DEVICE_INLINE static float abs(float x) { return fabsf(x); }
+
+  TV_HOST_DEVICE_INLINE static float fabs(float x) { return fabsf(x); }
 
   TV_HOST_DEVICE_INLINE static float tan(float x) { return tanf(x); }
 
@@ -274,12 +333,27 @@ template <> struct MathScalarOp<float> {
   TV_HOST_DEVICE_INLINE static float max(float x, float y) { return fmaxf(x, y); }
 
   TV_HOST_DEVICE_INLINE static float min(float x, float y) { return fminf(x, y); }
+  
+  TV_HOST_DEVICE_INLINE static float fmax(float x, float y) { return fmaxf(x, y); }
+
+  TV_HOST_DEVICE_INLINE static float fmin(float x, float y) { return fminf(x, y); }
+
 
   TV_HOST_DEVICE_INLINE static float clamp(float v, float lo, float hi) { return min(hi, max(lo, v)); }
 
+  TV_HOST_DEVICE_INLINE static float fma(float x, float y, float z) { return fmaf(x, y, z); }
+
+  TV_HOST_DEVICE_INLINE static float expm1(float x) { return expm1f(x); }
+
+  TV_HOST_DEVICE_INLINE static float log1p(float x) { return log1pf(x); }
+
+  TV_HOST_DEVICE_INLINE static float cbrt(float x) { return cbrtf(x); }
+
+  TV_HOST_DEVICE_INLINE static float hypot(float x, float y) { return hypotf(x, y); }
 };
 
 template <> struct MathScalarOp<double> {
+  TV_HOST_DEVICE_INLINE static double square(double x) { return x * x; }
 
   TV_HOST_DEVICE_INLINE static double copysign(double x, double y) {
     return ::copysign(x, y);
@@ -332,6 +406,8 @@ template <> struct MathScalarOp<double> {
 
   TV_HOST_DEVICE_INLINE static double abs(double x) { return ::fabs(x); }
 
+  TV_HOST_DEVICE_INLINE static double fabs(double x) { return ::fabs(x); }
+
   TV_HOST_DEVICE_INLINE static double tan(double x) { return ::tan(x); }
 
   TV_HOST_DEVICE_INLINE static double asin(double x) { return ::asin(x); }
@@ -358,8 +434,21 @@ template <> struct MathScalarOp<double> {
 
   TV_HOST_DEVICE_INLINE static double min(double x, double y) { return ::min(x, y); }
 
+  TV_HOST_DEVICE_INLINE static double fmax(double x, double y) { return ::max(x, y); }
+
+  TV_HOST_DEVICE_INLINE static double fmin(double x, double y) { return ::min(x, y); }
+
   TV_HOST_DEVICE_INLINE static double clamp(double v, double lo, double hi) { return min(hi, max(lo, v)); }
 
+  TV_HOST_DEVICE_INLINE static double fma(double x, double y, double z) { return ::fma(x, y, z); }
+
+  TV_HOST_DEVICE_INLINE static double expm1(double x) { return ::expm1(x); }
+
+  TV_HOST_DEVICE_INLINE static double log1p(double x) { return ::log1p(x); }
+
+  TV_HOST_DEVICE_INLINE static double cbrt(double x) { return ::cbrt(x); }
+
+  TV_HOST_DEVICE_INLINE static double hypot(double x, double y) { return ::hypot(x, y); }
 };
 
 #ifdef __CUDACC__
@@ -672,6 +761,8 @@ template <> struct MathScalarOp<__half> {
     return __half(-(float(x)));
 #endif
   }
+
+  TV_HOST_DEVICE_INLINE static __half fma(__half x, __half y, __half z) { return __hfma(x, y, z); }
 
   TV_HOST_DEVICE_INLINE static __half max(__half x, __half y) { return __hmax(x, y); }
 

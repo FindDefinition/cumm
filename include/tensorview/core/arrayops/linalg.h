@@ -1068,7 +1068,6 @@ template <typename T> struct transform_matrix_mm_nnn_grad_rfs<array<T, 3>, 4, 0>
   operator()(const TV_METAL_THREAD array<array<T, 3>, 4> &grad, const TV_METAL_THREAD array<array<T, 3>, 4> &self, const TV_METAL_THREAD array<array<T, 3>, 4> &other) {
     auto grad_R = slice<0, 3>(grad);
     auto self_R = slice<0, 3>(self);
-    auto other_R = slice<0, 3>(other);
     auto other_R_grad = grad_R.template op<mm_nnn_grad_rfs>(self_R);
     auto other_T_grad = grad[3].template op<mv_colmajor_grad_rfs>(self_R);
     return concat(other_R_grad, reshape<1, 3>(other_T_grad));

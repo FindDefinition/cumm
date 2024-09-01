@@ -1,4 +1,9 @@
 # Changelog
+## [0.6.4] - 2024-09-01
+### Added
+- add fast obb-grid overlap for 3dgs.
+- add sympy helper functions
+
 ## [0.6.3] - 2024-08-18
 ### Fixed
 - fix bug in mac in inline kernels

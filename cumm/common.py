@@ -630,6 +630,7 @@ class TensorViewArrayLinalg(pccm.Class):
         super().__init__()
         self.add_dependency(TensorViewCore)
         self.add_include("tensorview/core/arrayops/linalg.h")
+        self.add_include("tensorview/geometry/all.h")
 
 class EigenLib(pccm.Class):
     def __init__(self):

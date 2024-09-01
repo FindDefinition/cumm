@@ -65,6 +65,7 @@ import contextvars
 import re
 import time
 
+from matplotlib.pylab import f
 from requests import get
 
 import pccm
@@ -225,16 +226,19 @@ def measure_and_print_torch(name: str = "CUDATimer", *, stream: int = 0, out: Op
     else:
         import torch
         if compat.IsAppleSiliconMacOs:
-            start_ev = torch.mps.Event(enable_timing=True)
-            end_ev = torch.mps.Event(enable_timing=True)
-            start_ev.record()
+            torch.mps.synchronize()
+            t = time.time()
+            # start_ev = torch.mps.Event(enable_timing=True)
+            # end_ev = torch.mps.Event(enable_timing=True)
+            # start_ev.record()
             yield 
-            end_ev.record()
-            # torch.mps.synchronize()
+            # end_ev.record()
+            torch.mps.synchronize()
             # TODO sync event will hang
             # start_ev.synchronize()
             # end_ev.synchronize()
-            duration = start_ev.elapsed_time(end_ev)
+            # duration = start_ev.elapsed_time(end_ev)
+            duration = (time.time() - t) * 1000
             print(f"{name} duration: {duration} ms")
         else:
             start_ev = torch.cuda.Event(enable_timing=True)
@@ -918,6 +922,7 @@ class NVRTCInlineBuilder(InlineBuilder):
                    disable_cache: bool = False,
                    perf_context: Optional[ContextManager] = None,
                    run_in_process: bool = False,
+                   additional_vars: Optional[Dict[str, Any]] = None,
                    *,
                    _frame_cnt: int = 2):
         verbose = verbose_path != ""
@@ -930,6 +935,7 @@ class NVRTCInlineBuilder(InlineBuilder):
                         _frame_cnt=_frame_cnt,
                         user_arg=user_arg,
                         disable_cache=disable_cache,
+                        additional_vars=additional_vars,
                         generate_non_nested_code=True)
     
     def kernel_1d(self,
@@ -941,6 +947,7 @@ class NVRTCInlineBuilder(InlineBuilder):
                   disable_cache: bool = False,
                   perf_context: Optional[ContextManager] = None,
                   run_in_process: bool = False,
+                  additional_vars: Optional[Dict[str, Any]] = None,
                   *,
                   _frame_cnt: int = 2,
                   maximum_1d_threads: Optional[int] = None,
@@ -952,11 +959,17 @@ class NVRTCInlineBuilder(InlineBuilder):
                                       launch_param,
                                       verbose, verbose_path,
                                       perf_context=perf_context, run_in_process=run_in_process)
-        additional_args = {
-            _CUMM_KERNEL_1D_SIZE_NAME: num,
-        }
+        if additional_vars is not None:
+            additional_args = {
+                **additional_vars,
+                _CUMM_KERNEL_1D_SIZE_NAME: num,
+            }
+        else:
+            additional_args = {
+                _CUMM_KERNEL_1D_SIZE_NAME: num,
+            }
         if compat.InMacOS:
-            additional_args.clear()
+            additional_args.pop(_CUMM_KERNEL_1D_SIZE_NAME)
         return self.inline(name,
                            code,
                            ".cu",

@@ -238,8 +238,13 @@ TV_HOST_DEVICE_INLINE constexpr auto create_array(Ts... vals) {
 
 template <typename T, size_t N, size_t Align> struct identity {
   template <class... Args>
-  TV_HOST_DEVICE_INLINE auto
-  operator()(const TV_METAL_THREAD array<T, N, Align> &self, TV_METAL_THREAD Args&& ...args) {
+  TV_HOST_DEVICE_INLINE constexpr decltype(auto)
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self, TV_METAL_THREAD Args&& ...) {
+    return self;
+  }
+  template <class... Args>
+  TV_HOST_DEVICE_INLINE constexpr decltype(auto)
+  operator()(const TV_METAL_THREAD array<T, N, Align> &&self, TV_METAL_THREAD Args&& ...) {
     return self;
   }
 };
@@ -336,6 +341,24 @@ private:
   }
 };
 
+template <typename T, size_t N, size_t Align> struct floor {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(MathScalarOp<Tnested>::floor, self);
+  }
+};
+
+template <typename T, size_t N, size_t Align> struct ceil {
+  using Tnested = detail::get_nested_element_t<T>;
+
+  TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(MathScalarOp<Tnested>::ceil, self);
+  }
+};
+
 template <typename T, size_t N, size_t Align> struct sum {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -416,15 +439,16 @@ template <typename T, size_t N, size_t Align> struct normalize_grad_out {
   operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &out, const TV_METAL_THREAD array<T, N, Align> &inp) {
     auto length_squ = inp.template op<length2>();
     T length2_minus_3_div_2 = MathScalarOp<T>::rsqrt(length_squ * length_squ * length_squ);
-    auto grad_mul_inp = grad * out;
+    auto grad_mul_inp = grad * inp;
     auto grad_mul_inp_sum = grad_mul_inp.template op<sum>();
-    return ((length_squ - out * out) * grad - out * (grad_mul_inp_sum - grad_mul_inp)) * length2_minus_3_div_2;
+    return ((length_squ - inp * inp) * grad - inp * (grad_mul_inp_sum - grad_mul_inp)) * length2_minus_3_div_2;
   }
 };
+template <typename T, size_t N, size_t Align> struct exponential;
 
 template <typename T, size_t N, size_t Align> struct log {
   using Tnested = detail::get_nested_element_t<T>;
-
+  using inverse_t = exponential<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
     return apply(impl, self);
@@ -450,10 +474,10 @@ private:
   }
 };
 
-
+template <typename T, size_t N, size_t Align> struct logit;
 template <typename T, size_t N, size_t Align> struct sigmoid {
   using Tnested = detail::get_nested_element_t<T>;
-
+  using inverse_t = logit<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
     return apply(impl, self);
@@ -484,9 +508,23 @@ private:
   }
 };
 
+template <typename T, size_t N, size_t Align> struct logit {
+  using Tnested = detail::get_nested_element_t<T>;
+  using inverse_t = sigmoid<T, N, Align>;
+  TV_HOST_DEVICE_INLINE auto
+  operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
+    return apply(impl, self);
+  }
+private:
+  TV_HOST_DEVICE_INLINE static constexpr const Tnested
+  impl(const TV_METAL_THREAD Tnested& self) {
+    return MathScalarOp<Tnested>::log(self / (Tnested(1) - self));
+  }
+};
+
 template <typename T, size_t N, size_t Align> struct exponential {
   using Tnested = detail::get_nested_element_t<T>;
-
+  using inverse_t = log<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
     return apply(impl, self);
@@ -500,7 +538,7 @@ private:
 
 template <typename T, size_t N, size_t Align> struct fast_exponential {
   using Tnested = detail::get_nested_element_t<T>;
-
+  using inverse_t = log<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
     return apply(impl, self);

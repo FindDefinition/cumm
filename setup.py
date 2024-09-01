@@ -40,6 +40,7 @@ REQUIRED = [
     "pybind11>=2.6.0",
     "fire",
     "numpy",
+    "sympy",
     "contextvars; python_version == \"3.6\"",
 ]
 

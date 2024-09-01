@@ -410,15 +410,21 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                     lineno = int(re_search_res.group(2))
                     content = re_search_res.group(3)
                     # TODO: hard code
-                    if filename not in file_to_error_lines:
-                        file_to_error_lines[filename] = []
                     if HAS_RICH_PRINT:
                         nvrtc_build_log[i] = f"[red]{line}[/red]"
                     if PCCM_INLINE_CLASS_NAME in filename and PCCM_INLINE_NAMESPACE in filename:
+                        if filename not in file_to_error_lines:
+                            file_to_error_lines[filename] = []
+
                         file_to_error_lines[filename].append((lineno, line))
                         if filename not in file_to_contents:
                             file_to_contents[filename] = params.debug_code
                     else:
+                        if filename not in params.headers:
+                            continue 
+                        if filename not in file_to_error_lines:
+                            file_to_error_lines[filename] = []
+
                         if filename not in file_to_contents:
                             file_to_contents[filename] = params.headers[filename]
                         file_to_error_lines[filename].append((lineno, line))
@@ -426,6 +432,8 @@ class CummNVRTCModuleBase(tv.NVRTCModule):
                     total_error_line_cnt += len("\n".join(file_to_contents[filename].split("\n")))
             if HAS_RICH_PRINT:
                 richprint.rprint("\n".join(nvrtc_build_log))
+            if not file_to_error_lines:
+                print_rich_cpp(params.debug_code, set())
             for k, v in file_to_error_lines.items():
                 content = file_to_contents[k]
                 error_highlights = [x[0] for x in v]
