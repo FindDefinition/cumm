@@ -233,9 +233,9 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                 # we can't ensure arg isn't tv::Tensor.
                 if not isinstance(arg, Tensor):
                     assert not isinstance(arg, Tensor)
-                    dtype = get_npdtype_from_tvdtype(meta.simple_type)
                     tv_dtype = meta.simple_type
                     if isinstance(arg, np.ndarray):
+                        dtype = get_npdtype_from_tvdtype(meta.simple_type)
                         arg_array = arg.astype(dtype)
                         arg_type = _NVRTCModule.kArray
                     elif isinstance(arg, bool):
@@ -243,6 +243,7 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                         tv_dtype = uint8
                         arg_array = np.array(arg, dtype=np.uint8)
                     else:
+                        dtype = get_npdtype_from_tvdtype(meta.simple_type)
                         assert isinstance(arg, (int, float, np.integer, np.floating))
                         arg_type = _NVRTCModule.kScalar
                         arg_array = np.array(arg, dtype=dtype)
@@ -290,9 +291,9 @@ def _run_kernel(mod: Union[_NVRTCModule, _MetalModule], name: str, launch: Launc
                 return mod.run_kernel(name, launch.blocks, launch.threads,
                                     launch.smem, launch.ctx, kernel_args)
     if isinstance(mod, _NVRTCModule):
-        with measure_and_print(name):
-            return mod.run_kernel(name, launch.blocks, launch.threads,
-                                        launch.smem, launch.stream, kernel_args)
+        # with measure_and_print(name):
+        return mod.run_kernel(name, launch.blocks, launch.threads,
+                                    launch.smem, launch.stream, kernel_args)
     else:
         assert launch.ctx is not None 
         # print("preprocess time", time.time() - t)

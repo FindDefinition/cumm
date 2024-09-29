@@ -1056,6 +1056,13 @@ constant_impl(T val, mp_list_int<Inds...>) TV_NOEXCEPT_EXCEPT_METAL {
   return array<T, N, Align>{(Inds, val)...};
 }
 
+template <typename T, size_t N, size_t Align, int... Inds>
+TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
+arange_impl(mp_list_int<Inds...>) TV_NOEXCEPT_EXCEPT_METAL {
+  return array<T, N, Align>{T(Inds)...};
+}
+
+
 template <typename T, size_t N, int... Inds>
 TV_HOST_DEVICE_INLINE constexpr array<T, sizeof...(Inds)>
 slice_impl(TV_METAL_THREAD const array<T, N> &arr, mp_list_int<Inds...>) TV_NOEXCEPT_EXCEPT_METAL {
@@ -1103,6 +1110,13 @@ TV_HOST_DEVICE_INLINE constexpr auto constant_array(T val) TV_NOEXCEPT_EXCEPT_ME
   return detail::constant_impl<T, N, Align>(
       val, mp_make_list_c_sequence_reverse<int, N>{});
 }
+
+template <typename T, size_t N, size_t Align = 0>
+TV_HOST_DEVICE_INLINE constexpr auto arange_array() TV_NOEXCEPT_EXCEPT_METAL {
+  return detail::arange_impl<T, N, Align>(
+      mp_make_list_c_sequence<int, N>{});
+}
+
 
 template <typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<T, N>

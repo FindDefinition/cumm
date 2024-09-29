@@ -6,6 +6,35 @@
 namespace tv {
 namespace arrayops {
 
+
+namespace arrayops_detail {
+template <class T, int... Inds>
+TV_HOST_DEVICE_INLINE constexpr array<const TV_METAL_DEVICE T*, sizeof...(Inds)>
+create_ptr_arange_impl(const TV_METAL_DEVICE T* ptr,
+          mp_list_int<Inds...>) {
+  return array<TV_METAL_DEVICE T*, sizeof...(Inds)>{(ptr + Inds)...};
+}
+template <class T, int... Inds>
+TV_HOST_DEVICE_INLINE constexpr array<TV_METAL_DEVICE T*, sizeof...(Inds)>
+create_ptr_arange_impl(TV_METAL_DEVICE T* ptr,
+          mp_list_int<Inds...>) {
+  return array<TV_METAL_DEVICE T*, sizeof...(Inds)>{(ptr + Inds)...};
+}
+
+}
+
+template <int N, class T>
+TV_HOST_DEVICE_INLINE constexpr array<const TV_METAL_DEVICE T*, N>
+create_ptr_arange(const TV_METAL_DEVICE T* ptr) {
+  return arrayops_detail::create_ptr_arange_impl(ptr, mp_make_list_c_sequence<int, N>{});
+}
+
+template <int N, class T>
+TV_HOST_DEVICE_INLINE constexpr array<TV_METAL_DEVICE T*, N>
+create_ptr_arange(TV_METAL_DEVICE T* ptr) {
+  return arrayops_detail::create_ptr_arange_impl(ptr, mp_make_list_c_sequence<int, N>{});
+}
+
 template <size_t N, typename T>
 TV_HOST_DEVICE_INLINE tv::array<T, N> read_ptr(TV_METAL_CONSTANT const T *ptr) {
   return reinterpret_cast<const TV_METAL_CONSTANT tv::array<T, N> *>(ptr)[0];

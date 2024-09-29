@@ -126,6 +126,15 @@ template <typename T> struct MathScalarOp {
 
   TV_HOST_DEVICE_INLINE static T fma(T x, T y, T z) { return std::fma(x, y, z); }
 
+  TV_HOST_DEVICE_INLINE static T mix(T x, T y, T t) { 
+#ifdef TV_METAL_RTC
+    return metal::mix(x, y, t);
+#else 
+    return fma(t, y, fma(-t, x, x));
+#endif
+  }
+
+
   TV_HOST_DEVICE_INLINE static float expm1(T x) {
 #ifdef TV_METAL_RTC
      return std::exp(x) - T(1);
@@ -350,6 +359,9 @@ template <> struct MathScalarOp<float> {
   TV_HOST_DEVICE_INLINE static float cbrt(float x) { return cbrtf(x); }
 
   TV_HOST_DEVICE_INLINE static float hypot(float x, float y) { return hypotf(x, y); }
+
+  TV_HOST_DEVICE_INLINE static float mix(float x, float y, float t) { return fma(t, y, fma(-t, x, x)); }
+
 };
 
 template <> struct MathScalarOp<double> {
@@ -449,6 +461,9 @@ template <> struct MathScalarOp<double> {
   TV_HOST_DEVICE_INLINE static double cbrt(double x) { return ::cbrt(x); }
 
   TV_HOST_DEVICE_INLINE static double hypot(double x, double y) { return ::hypot(x, y); }
+
+  TV_HOST_DEVICE_INLINE static double mix(double x, double y, double t) { return fma(t, y, fma(-t, x, x)); }
+
 };
 
 #ifdef __CUDACC__
@@ -770,6 +785,8 @@ template <> struct MathScalarOp<__half> {
 
   TV_HOST_DEVICE_INLINE static __half clamp(__half v, __half lo, __half hi) { return min(hi, max(lo, v)); }
 
+  TV_HOST_DEVICE_INLINE static __half mix(__half x, __half y, __half t) { return fma(t, y, fma(-t, x, x)); }
+
 };
 #endif
 #if (defined(__CUDACC_VER_MAJOR__) && (__CUDACC_VER_MAJOR__ >= 11))
@@ -1088,6 +1105,11 @@ template <> struct MathScalarOp<__nv_bfloat16> {
   TV_HOST_DEVICE_INLINE static __nv_bfloat16 min(__nv_bfloat16 x, __nv_bfloat16 y) { return __hmin(x, y); }
 
   TV_HOST_DEVICE_INLINE static __nv_bfloat16 clamp(__nv_bfloat16 v, __nv_bfloat16 lo, __nv_bfloat16 hi) { return min(hi, max(lo, v)); }
+
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 fma(__nv_bfloat16 x, __nv_bfloat16 y, __nv_bfloat16 z) { return __hfma(x, y, z); }
+
+  TV_HOST_DEVICE_INLINE static __nv_bfloat16 mix(__nv_bfloat16 x, __nv_bfloat16 y, __nv_bfloat16 t) { return fma(t, y, fma(-t, x, x)); }
+
 #endif
 
 };
