@@ -1,4 +1,10 @@
 # Changelog
+## [0.7.0] - 2024-10-14
+### Changed
+- drop python 3.8, add python 3.13.
+- change cuda prebuilt to 11.4, 11.8, 12.1, 12.4, 12.6.
+- change all linux prebuilt to `manylinux_2_28`, drop manylinux2014 support.
+
 ## [0.6.4] - 2024-09-01
 ### Added
 - add fast obb-grid overlap for 3dgs.

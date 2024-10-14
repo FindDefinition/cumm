@@ -19,21 +19,17 @@ Now ```pccm``` become a foundational framework of ```cumm``` and my other c++ pr
 
 ### Prebuilt
 
-We offer python 3.7-3.11 and cuda 10.2/11.3/11.4/11.7/12.0 prebuilt binaries for linux (manylinux).
+We offer python 3.9-3.13 and cuda 11.4/11.8/12.1/12.4/12.6 prebuilt binaries for linux (`manylinux_2_28`).
 
-We offer python 3.7-3.11 and cuda 10.2/11.3/11.4/11.7/12.0 prebuilt binaries for windows 10/11.
+We offer python 3.9-3.13 and cuda 11.4/11.8/12.1/12.4/12.6 prebuilt binaries for windows 10/11.
+
+We offer python 3.9-3.13 prebuilt binaries for Mac OS X >= 14.0 (Apple Silicon Only).
 
 ```pip install cumm``` for CPU-only
 
-```pip install cumm-cu102``` for CUDA 10.2
-
-```pip install cumm-cu113``` for CUDA 11.3
-
 ```pip install cumm-cu114``` for CUDA 11.4
 
-```pip install cumm-cu117``` for CUDA 11.7
-
-```pip install cumm-cu120``` for CUDA 12.0
+```pip install cumm-cu126``` for CUDA 12.6
 
 ### Build from source for development (JIT, recommend for develop)
 
