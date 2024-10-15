@@ -495,7 +495,7 @@ public:
   std::uintptr_t cuda_stream_int() {
     check_ptr_valid();
 #if defined(TV_HARDWARE_ACC_CUDA)
-    return reinterpret_cast<std::uintptr_t>(cuda_stream());
+    return get_item(ContextType::kCudaStream);
 #else 
     return 0;
 #endif 

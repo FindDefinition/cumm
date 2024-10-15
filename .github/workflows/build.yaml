@@ -32,7 +32,7 @@ jobs:
         shell: powershell
         run: .\tools\install_windows_cuda.ps1
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - uses: ilammy/msvc-dev-cmd@v1
@@ -82,7 +82,7 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -97,7 +97,7 @@ jobs:
           CUDA_VERSION: ${{ matrix.cuda-version }}
           PYTHON_VERSION: ${{ matrix.python-version }}
           DOCKER_IMAGE: scrin/manylinux2014-cuda:cu${{ matrix.cuda-version }}-devel-1.0.0
-          PLAT: manylinux_2_28_x86_64
+          PLAT: ${{ matrix.cuda-version > '123' && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
         if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags')) && (env.CUDA_VERSION != '') ) || env.CUDA_VERSION == '126'
         run: |
           docker run --rm -e PLAT=$PLAT -e CUMM_CUDA_VERSION=${{ matrix.cuda-version }} -v `pwd`:/io $DOCKER_IMAGE bash -c "source /etc/bashrc && /io/tools/build-wheels.sh"
@@ -108,8 +108,8 @@ jobs:
         env:
           CUDA_VERSION: ${{ matrix.cuda-version }}
           PYTHON_VERSION: ${{ matrix.python-version }}
-          DOCKER_IMAGE: scrin/manylinux2014-cuda:cu126-devel-1.0.0
-          PLAT: manylinux_2_28_x86_64
+          DOCKER_IMAGE: scrin/manylinux2014-cuda:cu121-devel-1.0.0
+          PLAT: manylinux2014_x86_64
         if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags')) && (env.CUDA_VERSION == '') )
         run: |
           docker run --rm -e PLAT=$PLAT -e CUMM_CUDA_VERSION=${{ matrix.cuda-version }} -v `pwd`:/io $DOCKER_IMAGE bash -c "source /etc/bashrc && /io/tools/build-wheels.sh"
@@ -129,7 +129,7 @@ jobs:
     steps:
       - uses: actions/checkout@master
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install pep build
