@@ -1,4 +1,8 @@
 # Changelog
+## [0.7.1] - 2024-12-05
+### Fixed 
+- fix ci
+
 ## [0.7.0] - 2024-10-14
 ### Changed
 - drop python 3.8, add python 3.13.
