@@ -62,7 +62,7 @@ uint __apple_metal_warp_index [[simdgroup_index_in_threadgroup]];
 uint __apple_metal_lane_index [[thread_index_in_simdgroup]];
 
 uint3 __apple_metal_block_indexes [[threadgroup_position_in_grid]];
-uint3 __apple_metal_block_dims [[threadgroup_size_in_grid]];
+uint3 __apple_metal_block_dims [[threadgroups_per_grid]];
 uint3 __apple_metal_grid_dims [[grid_size]];
 uint3 __apple_metal_thread_indexes [[thread_position_in_threadgroup]];
 
@@ -181,7 +181,7 @@ template <typename T> TV_DEVICE_INLINE T atomicAdd(TV_METAL_DEVICE T *ctr, T val
 
 template <typename T, size_t N> TV_DEVICE_INLINE array<T, N> atomicAdd(TV_METAL_DEVICE array<T, N> *ctr, const TV_METAL_THREAD array<T, N>& val) {
   auto ptr_array = arrayops::create_ptr_arange<N>(reinterpret_cast<TV_METAL_DEVICE T*>(ctr));
-  return arrayops::apply(atomicAdd<float>, reinterpret_cast<tv::array<T*, N>&>(ptr_array), val);
+  return arrayops::apply(atomicAdd<float>, reinterpret_cast<TV_METAL_DEVICE tv::array<TV_METAL_DEVICE T*, N>&>(ptr_array), val);
 }
 
 template <typename T> TV_DEVICE_INLINE T atomicMax(TV_METAL_DEVICE T *ctr, T val) {
@@ -259,12 +259,12 @@ TV_DEVICE_INLINE float atomicMin (device float * addr, float value) {
 
 template <typename T, size_t N> TV_DEVICE_INLINE array<T, N> atomicMax(TV_METAL_DEVICE array<T, N> *ctr, const TV_METAL_THREAD array<T, N>& val) {
   auto ptr_array = arrayops::create_ptr_arange<N>(reinterpret_cast<TV_METAL_DEVICE T*>(ctr));
-  return arrayops::apply(atomicMax<float>, reinterpret_cast<tv::array<T*, N>&>(ptr_array), val);
+  return arrayops::apply(atomicMax<float>, reinterpret_cast<TV_METAL_DEVICE tv::array<TV_METAL_DEVICE T*, N>&>(ptr_array), val);
 }
 
 template <typename T, size_t N> TV_DEVICE_INLINE array<T, N> atomicMin(TV_METAL_DEVICE array<T, N> *ctr, const TV_METAL_THREAD array<T, N>& val) {
   auto ptr_array = arrayops::create_ptr_arange<N>(reinterpret_cast<TV_METAL_DEVICE T*>(ctr));
-  return arrayops::apply(atomicMin<float>, reinterpret_cast<tv::array<T*, N>&>(ptr_array), val);
+  return arrayops::apply(atomicMin<float>, reinterpret_cast<TV_METAL_DEVICE tv::array<TV_METAL_DEVICE T*, N>&>(ptr_array), val);
 }
 
 #ifdef TV_METAL_RTC

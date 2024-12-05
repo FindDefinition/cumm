@@ -164,7 +164,7 @@ jobs:
       - name: Store the binary wheel
         uses: actions/upload-artifact@v4
         with:
-          name: python-package-distributions
+          name: python-package-distributions-${{ matrix.python-version }}
           path: dist
 
   deploy-macos:
@@ -176,7 +176,7 @@ jobs:
       - name: Download all the dists
         uses: actions/download-artifact@v4
         with:
-          name: python-package-distributions
+          name: python-package-distributions-*
           path: dist/
       - name: Publish a Python distribution to PyPI
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')

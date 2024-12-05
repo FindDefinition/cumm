@@ -17,6 +17,7 @@
 #include "defs.h"
 #ifndef TV_PARALLEL_RTC
 #include <cstdio>
+#include <cstdint>
 #endif
 #include "const_string.h"
 namespace tv {
