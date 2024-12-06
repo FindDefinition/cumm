@@ -1,4 +1,9 @@
 # Changelog
+## [0.7.2] - 2024-12-06
+### Fixed 
+- fix metal compile problem
+- fix ci
+
 ## [0.7.1] - 2024-12-05
 ### Fixed 
 - fix ci
