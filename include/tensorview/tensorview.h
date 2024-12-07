@@ -882,7 +882,7 @@ struct TensorView {
   TensorView<T, (Rank == -1 ? -1 : Rank - 1), PtrTraits, Tindex>
   squeeze(int dim) const {
     return TensorView<T, (Rank == -1 ? -1 : Rank - 1), PtrTraits, Tindex>(
-        ptr_, shape_.squeeze < Rank == -1 ? TV_MAX_DIM : Rank - 1 > (dim));
+        ptr_, shape_.squeeze() < Rank == -1 ? TV_MAX_DIM : Rank - 1 > (dim));
   }
   TV_HOST_DEVICE_INLINE size_t size() const { return shape_.size(); }
 

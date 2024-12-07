@@ -18,11 +18,14 @@ TODO add CAS
 */
 #pragma once
 #include <tensorview/core/all.h>
+#include <tensorview/core/arrayops/simple.h>
 #if defined(TV_METAL_RTC)
 #include <metal_stdlib>
 #endif
-#if defined(TV_HARDWARE_ACC_CUDA) && defined(__CUDACC_RTC__)
+#if defined(TV_HARDWARE_ACC_CUDA)
+#if defined(__CUDACC_RTC__)
 #include <tensorview/core/nvrtc_std.h>
+#endif
 #include <cooperative_groups.h>
 #endif
 
@@ -153,6 +156,9 @@ template <typename T> TV_DEVICE_INLINE T atomicAggIncCuda(TV_METAL_DEVICE T *ctr
 }
 
 }
+
+#if defined(TV_CUDA_CC) || defined(TV_METAL_RTC)
+
 template <typename T> TV_DEVICE_INLINE T atomicAggInc(TV_METAL_DEVICE T *ctr) {
 #ifdef TV_METAL_RTC
   T warp_res = 0;
@@ -386,19 +392,21 @@ TV_DEVICE_INLINE vote_t ballot_sync(bool expr){
 #endif
 }
 
-TV_DEVICE_INLINE vote_t match_all_sync(int compare, TV_METAL_THREAD int* pred){
 #if defined(TV_CUDA_CC)
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
+TV_DEVICE_INLINE vote_t match_all_sync(int compare, TV_METAL_THREAD int* pred){
   return __match_all_sync(0xffffffff, compare, pred);
+}
+#endif 
 #elif defined(TV_METAL_RTC)
+TV_DEVICE_INLINE vote_t match_all_sync(int compare, TV_METAL_THREAD int* pred){
   int compare_in_first = metal::simd_broadcast_first(compare);
   bool is_same = compare == compare_in_first;
   auto mask = vote_t(metal::simd_ballot(is_same));
   pred[0] = mask == 0xffffffff;
   return mask;
-#else 
-  static_assert(false, "not implemented");
-#endif
 }
+#endif
 
 template <typename T> TV_DEVICE_INLINE T warp_broadcast(T val, int src_lane) {
 #if defined(TV_CUDA_CC)
@@ -756,7 +764,7 @@ template <size_t BlockSize, class T, size_t N, size_t WarpSize = 32>
 TV_DEVICE_INLINE array<T, N> block_reduce_array_max_full(const TV_METAL_THREAD array<T, N>& val, TV_METAL_THREADGROUP T* shared_mem_ptr){
   return block_reduce_array_full<BlockSize, T, WarpSize>(warp_max_with_offset<T>, val, shared_mem_ptr);
 }
-
+#endif
 } // namespace parallel
 
 } // namespace tv

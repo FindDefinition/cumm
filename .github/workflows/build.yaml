@@ -77,7 +77,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.12'] # this version is only used for upload.
-        cuda-version: ['114', '118', '121', '124', '126']
+        cuda-version: ['114', '118', '121', '124', '126', '']
 
     steps:
       - uses: actions/checkout@master

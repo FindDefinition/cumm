@@ -25,7 +25,6 @@ namespace hash {
 
 namespace detail {
 template <size_t Nbits> struct MortonCore;
-
 template <> struct MortonCore<32> {
   TV_HOST_DEVICE_INLINE static uint32_t split_by_3bits(uint32_t a) {
     uint32_t x = a & 0x000003ff; // we only look at the first 10 bits
@@ -136,6 +135,24 @@ template <> struct Morton<uint64_t> : public detail::MortonCore<64> {
     return get_third_bits(d >> Axis);
   }
 };
+
+template <> struct Morton<std::conditional_t<std::is_same_v<uint64_t, unsigned long long>, detail::__place_holder_t, unsigned long long>> : public detail::MortonCore<64> {
+  static constexpr TV_METAL_CONSTANT int kNumBits = 64;
+  TV_HOST_DEVICE_INLINE static uint64_t encode(uint32_t x, uint32_t y,
+                                               uint32_t z) {
+    return (split_by_3bits(z) << 2) | (split_by_3bits(y) << 1) |
+           (split_by_3bits(x) << 0);
+  }
+
+  TV_HOST_DEVICE_INLINE static tv::array<uint32_t, 3> decode(uint64_t d) {
+    return {get_third_bits(d), get_third_bits(d >> 1), get_third_bits(d >> 2)};
+  }
+  template <uint32_t Axis>
+  TV_HOST_DEVICE_INLINE static uint32_t decode_axis(uint64_t d) {
+    return get_third_bits(d >> Axis);
+  }
+};
+
 
 template <typename K> struct Murmur3Hash {
   using key_type = tv::hash::to_unsigned_t<K>;

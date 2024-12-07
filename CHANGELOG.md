@@ -1,4 +1,8 @@
 # Changelog
+## [0.7.3] - 2024-12-08
+- fix missing linux cpu prebuilt
+- fix some cuda compile problem
+
 ## [0.7.2] - 2024-12-06
 ### Fixed 
 - fix metal compile problem

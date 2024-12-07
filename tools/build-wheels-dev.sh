@@ -13,7 +13,7 @@ function repair_wheel {
 
 export CUMM_DISABLE_JIT="1"
 export CUMM_CUDA_ARCH_LIST="7.5;8.6"
-"/opt/python/cp313-cp313t/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp
+"/opt/python/cp313-cp313/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp
 
 # Bundle external shared libraries into the wheels
 for whl in /io/wheelhouse_tmp/*.whl; do

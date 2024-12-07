@@ -203,10 +203,11 @@ template <typename T> struct MathScalarOp {
 
   TV_HOST_DEVICE_INLINE static T exp(T x) { return T(expf(float(x))); }
 
-  TV_HOST_DEVICE_INLINE static T fast_exp(T x) { return __expf(float(x)); }
+#ifdef __CUDACC__
+  TV_DEVICE_INLINE static T fast_exp(T x) { return __expf(float(x)); }
 
-  TV_HOST_DEVICE_INLINE static T fast_sqrt(T x) { return __fsqrt_rn(float(x)); }
-
+  TV_DEVICE_INLINE static T fast_sqrt(T x) { return __fsqrt_rn(float(x)); }
+#endif
   TV_HOST_DEVICE_INLINE static T exp2(T x) { return T(exp2f(float(x))); }
 
   TV_HOST_DEVICE_INLINE static T floor(T x) { return T(floorf(float(x))); }
@@ -254,7 +255,7 @@ template <typename T> struct MathScalarOp {
 #endif
 };
 
-#ifdef TV_HARDWARE_ACC_CUDA
+#ifdef __CUDACC__
 template <> struct MathScalarOp<float> {
 
   TV_HOST_DEVICE_INLINE static float square(float x) { return x * x; }
@@ -282,7 +283,9 @@ template <> struct MathScalarOp<float> {
 
   TV_HOST_DEVICE_INLINE static float sqrt(float x) { return sqrtf(x); }
 
-  TV_HOST_DEVICE_INLINE static float rsqrt(float x) { return rsqrtf(x); }
+  TV_HOST_DEVICE_INLINE static float rsqrt(float x) { 
+    return rsqrtf(x);
+  }
 
   TV_HOST_DEVICE_INLINE static float ceil(float x) { return ceilf(x); }
 
@@ -290,10 +293,9 @@ template <> struct MathScalarOp<float> {
 
   TV_HOST_DEVICE_INLINE static float exp(float x) { return expf(x); }
 
-  TV_HOST_DEVICE_INLINE static float fast_exp(float x) { return __expf(x); }
+  TV_DEVICE_INLINE static float fast_exp(float x) { return __expf(x); }
 
-  TV_HOST_DEVICE_INLINE static float fast_sqrt(float x) { return __fsqrt_rn(x); }
-
+  TV_DEVICE_INLINE static float fast_sqrt(float x) { return __fsqrt_rn(x); }
 
   TV_HOST_DEVICE_INLINE static float exp10(float x) { return exp10f(x); }
 
@@ -466,7 +468,6 @@ template <> struct MathScalarOp<double> {
 
 };
 
-#ifdef __CUDACC__
 template <> struct MathScalarOp<__half> {
 
   TV_DEVICE_INLINE static __half sqrt(__half x) {
@@ -777,7 +778,13 @@ template <> struct MathScalarOp<__half> {
 #endif
   }
 
-  TV_HOST_DEVICE_INLINE static __half fma(__half x, __half y, __half z) { return __hfma(x, y, z); }
+  TV_DEVICE_INLINE static __half fma(__half x, __half y, __half z) { 
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750))
+    return __hfma(x, y, z); 
+#else 
+    return __half(fmaf(float(x), float(y), float(z)));
+#endif
+  }
 
   TV_HOST_DEVICE_INLINE static __half max(__half x, __half y) { return __hmax(x, y); }
 
@@ -785,10 +792,10 @@ template <> struct MathScalarOp<__half> {
 
   TV_HOST_DEVICE_INLINE static __half clamp(__half v, __half lo, __half hi) { return min(hi, max(lo, v)); }
 
-  TV_HOST_DEVICE_INLINE static __half mix(__half x, __half y, __half t) { return fma(t, y, fma(-t, x, x)); }
+  TV_DEVICE_INLINE static __half mix(__half x, __half y, __half t) { return fma(t, y, fma(-t, x, x)); }
 
 };
-#endif
+
 #if (defined(__CUDACC_VER_MAJOR__) && (__CUDACC_VER_MAJOR__ >= 11))
 template <> struct MathScalarOp<__nv_bfloat16> {
 

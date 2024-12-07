@@ -26,6 +26,7 @@ namespace tv {
 namespace hash {
 
 namespace detail {
+struct __place_holder_t;
 
 template <int N, bool Signed> struct SizeToInt;
 
@@ -41,13 +42,17 @@ template <bool Signed> struct SizeToInt<4, Signed> {
   using type = std::conditional_t<Signed, int32_t, uint32_t>;
 };
 
-#ifdef TV_METAL_CC
+#if defined(TV_METAL_CC)
 template <bool Signed> struct SizeToInt<8, Signed> {
   using type = std::conditional_t<Signed, int64_t, uint64_t>;
 };
+#elif defined(TV_CUDA_CC) 
+template <bool Signed> struct SizeToInt<8, Signed> {
+  using type = std::conditional_t<Signed, int64_t, std::conditional_t<std::is_same_v<uint64_t, unsigned long long>, uint64_t, unsigned long long>>;
+};
 #else 
 template <bool Signed> struct SizeToInt<8, Signed> {
-  using type = std::conditional_t<Signed, int64_t, unsigned long long>;
+  using type = std::conditional_t<Signed, int64_t, uint64_t>;
 };
 
 #endif
@@ -144,7 +149,6 @@ struct default_empty_key<uint64_t>{
 #endif 
 };
 #ifdef TV_CUDA_CC
-struct __place_holder_t;
 
 template <>
 struct default_empty_key<
