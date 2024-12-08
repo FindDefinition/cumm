@@ -248,7 +248,7 @@ def _get_cuda_include_lib():
                             _CACHED_CUDA_INCLUDE_LIB = ([include], lib)
                         return _CACHED_CUDA_INCLUDE_LIB
                     elif (lib / "x64" / "cudart.lib").exists() and (include / "cuda.h").exists():
-                        _CACHED_CUDA_INCLUDE_LIB = ([include], lib)
+                        _CACHED_CUDA_INCLUDE_LIB = ([include], lib / "x64")
                         return _CACHED_CUDA_INCLUDE_LIB
             except:
                 pass 
