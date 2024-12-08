@@ -1,4 +1,7 @@
 # Changelog
+## [0.7.5] - 2024-12-08
+- fix linux compile problem
+
 ## [0.7.4] - 2024-12-08
 - fix windows dll load problem and msvc compile problem
 

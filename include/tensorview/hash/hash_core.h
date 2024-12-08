@@ -48,7 +48,7 @@ template <bool Signed> struct SizeToInt<8, Signed> {
 };
 #elif defined(TV_CUDA_CC) 
 template <bool Signed> struct SizeToInt<8, Signed> {
-  using type = std::conditional_t<Signed, int64_t, std::conditional_t<std::is_same_v<uint64_t, unsigned long long>, uint64_t, unsigned long long>>;
+  using type = std::conditional_t<Signed, int64_t, std::conditional_t<std::is_same<uint64_t, unsigned long long>::value, uint64_t, unsigned long long>>;
 };
 #else 
 template <bool Signed> struct SizeToInt<8, Signed> {

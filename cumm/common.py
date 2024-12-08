@@ -241,7 +241,7 @@ def _get_cuda_include_lib():
                 include = Path(nvcc_path).parent.parent / "include"
                 if lib.exists() and include.exists():
                     if (lib / "cudart.lib").exists() and (include / "cuda.h").exists():
-                        # should be nvidia conda/pip package
+                        # should be nvidia conda package
                         if (include / "targets" / "x64" / "cuda").exists():
                             _CACHED_CUDA_INCLUDE_LIB = ([include, include / "targets" / "x64"], lib)
                         else:
@@ -261,13 +261,27 @@ def _get_cuda_include_lib():
             windows_cuda_root = Path(
                 "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA")
             if not windows_cuda_root.exists():
-                raise ValueError(f"can't find cuda in {windows_cuda_root}.")
+                raise ValueError(f"can't find cuda in {windows_cuda_root}. install via cuda installer or conda first.")
             include = windows_cuda_root / f"v{version_str}\\include"
             lib64 = windows_cuda_root / f"v{version_str}\\lib\\x64"
         else:
+            try:
+                nvcc_path = subprocess.check_output(["which", "nvcc"
+                                                    ]).decode("utf-8").strip()
+                lib = Path(nvcc_path).parent.parent / "lib"
+                include = Path(nvcc_path).parent.parent / "targets/x86_64-linux/include"
+                if lib.exists() and include.exists():
+                    if (lib / "libcudart.so").exists() and (include / "cuda.h").exists():
+                        # should be nvidia conda package
+                        _CACHED_CUDA_INCLUDE_LIB = ([include], lib)
+                        return _CACHED_CUDA_INCLUDE_LIB
+            except:
+                pass 
+
             linux_cuda_root = Path("/usr/local/cuda")
             include = linux_cuda_root / f"include"
             lib64 = linux_cuda_root / f"lib64"
+            assert linux_cuda_root.exists(), f"can't find cuda in {linux_cuda_root} install via cuda installer or conda first."
         _CACHED_CUDA_INCLUDE_LIB = ([include], lib64)
         return _CACHED_CUDA_INCLUDE_LIB
     else:

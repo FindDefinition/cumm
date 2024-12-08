@@ -136,7 +136,7 @@ template <> struct Morton<uint64_t> : public detail::MortonCore<64> {
   }
 };
 
-template <> struct Morton<std::conditional_t<std::is_same_v<uint64_t, unsigned long long>, detail::__place_holder_t, unsigned long long>> : public detail::MortonCore<64> {
+template <> struct Morton<std::conditional_t<std::is_same<uint64_t, unsigned long long>::value, detail::__place_holder_t, unsigned long long>> : public detail::MortonCore<64> {
   static constexpr TV_METAL_CONSTANT int kNumBits = 64;
   TV_HOST_DEVICE_INLINE static uint64_t encode(uint32_t x, uint32_t y,
                                                uint32_t z) {
