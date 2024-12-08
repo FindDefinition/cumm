@@ -826,11 +826,11 @@ constexpr TV_METAL_CONSTANT bool is_tv_array_v = detail::is_tv_array<std::decay_
 namespace arrayops {
 template <class F, class... Args>
 TV_HOST_DEVICE_INLINE constexpr auto apply(TV_METAL_THREAD F &&f, TV_METAL_THREAD Args &&...args) {
-  constexpr int N = detail::get_max_extent_v<Args...>;
+  constexpr int N = tv::detail::get_max_extent_v<Args...>;
   static_assert(N > 0, "error");
-  using extent_is_valid_t = mp_list_c<bool, (detail::get_extent_helper<Args>::type::value == -1 || detail::get_extent_helper<Args>::type::value == 1 || detail::get_extent_helper<Args>::type::value == N)...>;
+  using extent_is_valid_t = mp_list_c<bool, (tv::detail::get_extent_helper<Args>::type::value == -1 || tv::detail::get_extent_helper<Args>::type::value == 1 || tv::detail::get_extent_helper<Args>::type::value == N)...>;
   static_assert(true == mp_reduce_and<extent_is_valid_t, std::integral_constant<bool, true>>::value, "array shape must valid");
-  return detail::index_transform_impl(TV_FORWARD_EXCEPT_METAL(F, f), detail::gen_seq<N>{},
+  return tv::detail::index_transform_impl(TV_FORWARD_EXCEPT_METAL(F, f), tv::detail::gen_seq<N>{},
                                       std::forward<Args>(args)...);
 }
 // template <class F, class... Args>
@@ -1102,18 +1102,18 @@ concat(TV_METAL_THREAD const array<T, N> &arr, TV_METAL_THREAD const array<T, Ns
 template <typename F, typename T, size_t N, size_t Align>
 TV_HOST_DEVICE_INLINE constexpr T reduce(TV_METAL_THREAD F &&f,
                                          TV_METAL_THREAD const array<T, N, Align> &a) TV_NOEXCEPT_EXCEPT_METAL {
-  return detail::array_reduce_impl<N>::run(TV_FORWARD_EXCEPT_METAL(F, f), a);
+  return tv::detail::array_reduce_impl<N>::run(TV_FORWARD_EXCEPT_METAL(F, f), a);
 }
 
 template <typename T, size_t N, size_t Align = 0>
 TV_HOST_DEVICE_INLINE constexpr auto constant_array(T val) TV_NOEXCEPT_EXCEPT_METAL {
-  return detail::constant_impl<T, N, Align>(
+  return tv::detail::constant_impl<T, N, Align>(
       val, mp_make_list_c_sequence_reverse<int, N>{});
 }
 
 template <typename T, size_t N, size_t Align = 0>
 TV_HOST_DEVICE_INLINE constexpr auto arange_array() TV_NOEXCEPT_EXCEPT_METAL {
-  return detail::arange_impl<T, N, Align>(
+  return tv::detail::arange_impl<T, N, Align>(
       mp_make_list_c_sequence<int, N>{});
 }
 
@@ -1121,14 +1121,14 @@ TV_HOST_DEVICE_INLINE constexpr auto arange_array() TV_NOEXCEPT_EXCEPT_METAL {
 template <typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<T, N>
 reverse(TV_METAL_THREAD const array<T, N> &a) TV_NOEXCEPT_EXCEPT_METAL {
-  return detail::reverse_impl(a, mp_make_list_c_sequence_reverse<int, N>{});
+  return tv::detail::reverse_impl(a, mp_make_list_c_sequence_reverse<int, N>{});
 }
 template <int Start, int End, typename T, size_t N>
 TV_HOST_DEVICE_INLINE constexpr array<
     T, (End > 0 ? End : End + int64_t(N)) - Start>
 slice(TV_METAL_THREAD const array<T, N> &arr) {
   // TODO this function have problem in intellisense engine
-  return detail::slice_impl(
+  return tv::detail::slice_impl(
       arr, mp_list_int_range<Start, (End > 0 ? End : End + int64_t(N))>{});
 }
 
@@ -1136,7 +1136,7 @@ template <int Start1, int Start2, int End1, int End2, typename T, size_t N1, siz
 TV_HOST_DEVICE_INLINE constexpr array<
     array<T, (End2 > 0 ? End2 : End2 + int64_t(N2)) - Start2>, (End1 > 0 ? End1 : End1 + int64_t(N1)) - Start1>
 slice_2d(TV_METAL_THREAD const array<array<T, N2>, N1> &arr) {
-  return detail::slice_2d_impl<Start2, (End2 > 0 ? End2 : End2 + int64_t(N2))>(
+  return tv::detail::slice_2d_impl<Start2, (End2 > 0 ? End2 : End2 + int64_t(N2))>(
       arr, mp_list_int_range<Start1, (End1 > 0 ? End1 : End1 + int64_t(N1))>{});
 }
 

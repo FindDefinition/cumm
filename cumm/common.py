@@ -228,12 +228,31 @@ def get_cuda_version_by_nvcc():
                                     nvcc_version_str)[0]
     return version_str
 
-_CACHED_CUDA_INCLUDE_LIB: Optional[Tuple[Path, Path]] = None 
+_CACHED_CUDA_INCLUDE_LIB: Optional[Tuple[List[Path], Path]] = None 
 
 def _get_cuda_include_lib():
     global _CACHED_CUDA_INCLUDE_LIB
     if _CACHED_CUDA_INCLUDE_LIB is None:
         if compat.InWindows:
+            try:
+                nvcc_path = subprocess.check_output(["powershell", "-command", "(Get-Command nvcc).Source"
+                                                    ]).decode("utf-8").strip()
+                lib = Path(nvcc_path).parent.parent / "lib"
+                include = Path(nvcc_path).parent.parent / "include"
+                if lib.exists() and include.exists():
+                    if (lib / "cudart.lib").exists() and (include / "cuda.h").exists():
+                        # should be nvidia conda/pip package
+                        if (include / "targets" / "x64" / "cuda").exists():
+                            _CACHED_CUDA_INCLUDE_LIB = ([include, include / "targets" / "x64"], lib)
+                        else:
+                            _CACHED_CUDA_INCLUDE_LIB = ([include], lib)
+                        return _CACHED_CUDA_INCLUDE_LIB
+                    elif (lib / "x64" / "cudart.lib").exists() and (include / "cuda.h").exists():
+                        _CACHED_CUDA_INCLUDE_LIB = ([include], lib)
+                        return _CACHED_CUDA_INCLUDE_LIB
+            except:
+                pass 
+            # failed to get nvcc path, use default cuda path
             nvcc_version = subprocess.check_output(["nvcc", "--version"
                                                     ]).decode("utf-8").strip()
             nvcc_version_str = nvcc_version.split("\n")[3]
@@ -249,7 +268,7 @@ def _get_cuda_include_lib():
             linux_cuda_root = Path("/usr/local/cuda")
             include = linux_cuda_root / f"include"
             lib64 = linux_cuda_root / f"lib64"
-        _CACHED_CUDA_INCLUDE_LIB = (include, lib64)
+        _CACHED_CUDA_INCLUDE_LIB = ([include], lib64)
         return _CACHED_CUDA_INCLUDE_LIB
     else:
         return _CACHED_CUDA_INCLUDE_LIB
@@ -261,8 +280,8 @@ class GemmKernelFlags(pccm.Class):
     def __init__(self):
         super().__init__()
         gpu_arch_flags, self.cuda_archs, self.has_ptx = _get_cuda_arch_flags(True)
-        include, lib64 = _get_cuda_include_lib()
-        self.build_meta.add_public_includes(include)
+        includes, lib64 = _get_cuda_include_lib()
+        self.build_meta.add_public_includes(*includes)
         self.build_meta.add_public_cflags("nvcc", *gpu_arch_flags)
         self.build_meta.add_public_cflags("nvcc",
             "-Xcudafe \"--diag_suppress=implicit_return_from_non_void_function\"",
@@ -272,8 +291,8 @@ class GenericKernelFlags(pccm.Class):
     def __init__(self):
         super().__init__()
         gpu_arch_flags, self.cuda_archs, self.has_ptx = _get_cuda_arch_flags(False)
-        include, lib64 = _get_cuda_include_lib()
-        self.build_meta.add_public_includes(include)
+        includes, lib64 = _get_cuda_include_lib()
+        self.build_meta.add_public_includes(*includes)
         self.build_meta.add_public_cflags("nvcc", *gpu_arch_flags)
         # http://www.ssl.berkeley.edu/~jimm/grizzly_docs/SSL/opt/intel/cc/9.0/lib/locale/en_US/mcpcom.msg
         self.build_meta.add_public_cflags("nvcc",
@@ -596,8 +615,8 @@ class TensorViewNVRTC(pccm.Class):
         if not CUMM_CPU_ONLY_BUILD:
             # here we can't depend on GemmKernelFlags
             # because nvrtc don't support regular arch flags.
-            include, lib64 = _get_cuda_include_lib()
-            self.build_meta.add_public_includes(include, TENSORVIEW_INCLUDE_PATH)
+            includes, lib64 = _get_cuda_include_lib()
+            self.build_meta.add_public_includes(*includes, TENSORVIEW_INCLUDE_PATH)
 
             self.add_include("tensorview/cuda/kernel_utils.h")
             self.build_meta.add_public_cflags("nvcc", "-DTV_ENABLE_HARDWARE_ACC")

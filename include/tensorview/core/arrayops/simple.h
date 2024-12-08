@@ -123,7 +123,7 @@ reinterpret_cast_alignedarray(const T *ptr) {
                            std::integral_constant<int, int(0)>>::value,        \
         "shape can't have negative number other than -1");                     \
     return reinterpret_cast<metal_type tv::array_nd<                           \
-        detail::get_nested_element_t<T>,                                       \
+        tv::detail::get_nested_element_t<T>,                                       \
         (Ns == -1 ? int(shapeProd) / reshapeProd : Ns)...>                     \
                                 ref_type>(arr);                                \
   }
@@ -279,7 +279,7 @@ template <typename T, size_t N, size_t Align> struct identity {
 };
 
 template <typename T, size_t N, size_t Align> struct reduce_max {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -294,7 +294,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct reduce_min {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -308,7 +308,7 @@ private:
   }
 };
 template <typename T, size_t N, size_t Align> struct maximum {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self, TOther other) {
@@ -323,7 +323,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct minimum {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   template <typename TOther>
   TV_HOST_DEVICE_INLINE constexpr auto
@@ -340,7 +340,7 @@ private:
 
 
 template <typename T, size_t N, size_t Align> struct clamp {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   template <typename T1, typename T2>
   TV_HOST_DEVICE_INLINE constexpr auto
@@ -356,7 +356,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct abs {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -371,7 +371,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct floor {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -380,7 +380,7 @@ template <typename T, size_t N, size_t Align> struct floor {
 };
 
 template <typename T, size_t N, size_t Align> struct ceil {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE constexpr array<T, N, Align>
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -391,21 +391,21 @@ template <typename T, size_t N, size_t Align> struct ceil {
 template <typename T, size_t N, size_t Align> struct sum {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
-    return reduce(detail::array_sum<T>, self);
+    return reduce(tv::detail::array_sum<T>, self);
   }
 };
 
 template <typename T, size_t N, size_t Align> struct mean {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
-    return reduce(detail::array_sum<T>, self) / T(N);
+    return reduce(tv::detail::array_sum<T>, self) / T(N);
   }
 };
 
 template <typename T, size_t N, size_t Align> struct prod {
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
-    return reduce(detail::array_mul<T>, self);
+    return reduce(tv::detail::array_mul<T>, self);
   }
 };
 
@@ -476,7 +476,7 @@ template <typename T, size_t N, size_t Align> struct normalize_grad_out {
 template <typename T, size_t N, size_t Align> struct exponential;
 
 template <typename T, size_t N, size_t Align> struct log {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
   using inverse_t = exponential<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -490,7 +490,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct log_grad{
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -505,7 +505,7 @@ private:
 
 template <typename T, size_t N, size_t Align> struct logit;
 template <typename T, size_t N, size_t Align> struct sigmoid {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
   using inverse_t = logit<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -519,7 +519,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct sigmoid_grad_out {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &out) {
@@ -538,7 +538,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct logit {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
   using inverse_t = sigmoid<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -552,7 +552,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct exponential {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
   using inverse_t = log<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -566,7 +566,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct fast_exponential {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
   using inverse_t = log<T, N, Align>;
   TV_HOST_DEVICE_INLINE auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &self) {
@@ -580,7 +580,7 @@ private:
 };
 
 template <typename T, size_t N, size_t Align> struct exponential_grad_out {
-  using Tnested = detail::get_nested_element_t<T>;
+  using Tnested = tv::detail::get_nested_element_t<T>;
 
   TV_HOST_DEVICE_INLINE constexpr auto
   operator()(const TV_METAL_THREAD array<T, N, Align> &grad, const TV_METAL_THREAD array<T, N, Align> &out) {

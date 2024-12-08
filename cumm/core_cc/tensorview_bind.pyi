@@ -6,6 +6,8 @@ class AppleMetalImpl:
 class TensorViewBind:
     @staticmethod
     def hello() -> None: ...
+    @staticmethod
+    def _compile_test() -> None: ...
 # Copyright 2024 Yan Yan
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

@@ -20,7 +20,7 @@ import pccm
 from ccimport import compat
 from pccm.utils import project_is_editable, project_is_installed
 
-from cumm.common import PyBind11, TensorView, TensorViewCPU, TensorViewCompileLinkFlags, TensorViewHeader, TensorViewImplFlags, get_cuda_version_by_nvcc
+from cumm.common import PyBind11, TensorView, TensorViewCPU, TensorViewCompileLinkFlags, TensorViewHeader, TensorViewImplFlags, get_cuda_version_by_nvcc, TensorViewArrayLinalg
 from cumm.constants import CUMM_CPU_ONLY_BUILD, PACKAGE_ROOT
 from .constants import CUMM_APPLE_METAL_CPP_ROOT, CUMM_CUDA_VERSION, PACKAGE_NAME
 from cumm.conv.nvrtc_code import nvrtc_conv_template
@@ -70,7 +70,7 @@ std::shared_ptr<AppleMetalContext> AppleMetalContext::getInstance()
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView, PyBind11, TensorViewImplFlags, AppleMetalImpl)
+        self.add_dependency(TensorView, TensorViewArrayLinalg, PyBind11, TensorViewImplFlags, AppleMetalImpl)
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
         self.add_include("limits")
@@ -111,6 +111,24 @@ class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     @pccm.static_function
     def hello(self):
         code = pccm.code()
+        return code
+
+    @pccm.pybind.mark
+    @pccm.static_function
+    def _compile_test(self):
+        # compile some code to check msvc problem during cumm build
+        # msvc is the best compiler in the world.
+        code = pccm.code()
+        code.raw(f"""
+        namespace op = tv::arrayops;
+        auto a = tv::array_nd<float, 1, 3>{{}};
+        auto b = tv::array_nd<float, 3, 1>{{}};
+        
+        tv::ssprint(a + b, a - b);
+        auto p = tv::array_nd<float, 3>{{}};
+        auto m = tv::array_nd<float, 4, 4>{{}};
+        tv::ssprint(p.op<op::maximum>(p), p.op<op::transform_3d>(m));
+        """)
         return code
 
     @pccm.static_function
