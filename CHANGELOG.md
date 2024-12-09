@@ -1,4 +1,7 @@
 # Changelog
+## [0.7.6] - 2024-12-09
+- fix missing windows cpu prebuilt
+
 ## [0.7.5] - 2024-12-08
 - fix linux compile problem
 

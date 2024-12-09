@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12', '3.13'] 
-        cuda-version: ['11.4', '11.8', '12.1', '12.4', '12.6']
+        cuda-version: ['11.4', '11.8', '12.1', '12.4', '12.6', '']
     steps:
       - uses: actions/checkout@master
       - name: Install CUDA
