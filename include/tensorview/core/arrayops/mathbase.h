@@ -786,13 +786,13 @@ template <> struct MathScalarOp<__half> {
 #endif
   }
 
-  TV_HOST_DEVICE_INLINE static __half max(__half x, __half y) { return __hmax(x, y); }
+  TV_DEVICE_INLINE static __half max(__half x, __half y) { return __hmax(x, y); }
 
-  TV_HOST_DEVICE_INLINE static __half min(__half x, __half y) { return __hmin(x, y); }
+  TV_DEVICE_INLINE static __half min(__half x, __half y) { return __hmin(x, y); }
 
-  TV_HOST_DEVICE_INLINE static __half clamp(__half v, __half lo, __half hi) { return min(hi, max(lo, v)); }
+  TV_DEVICE_INLINE static __half clamp(__half v, __half lo, __half hi) { return min(hi, max(lo, v)); }
 
-  TV_DEVICE_INLINE static __half mix(__half x, __half y, __half t) { return fma(t, y, fma(-t, x, x)); }
+  TV_DEVICE_INLINE static __half mix(__half x, __half y, __half t) { return fma(t, y, fma(neg(t), x, x)); }
 
 };
 
@@ -1107,15 +1107,15 @@ template <> struct MathScalarOp<__nv_bfloat16> {
 #endif
   }
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 max(__nv_bfloat16 x, __nv_bfloat16 y) { return __hmax(x, y); }
+  TV_DEVICE_INLINE static __nv_bfloat16 max(__nv_bfloat16 x, __nv_bfloat16 y) { return __hmax(x, y); }
 
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 min(__nv_bfloat16 x, __nv_bfloat16 y) { return __hmin(x, y); }
+  TV_DEVICE_INLINE static __nv_bfloat16 min(__nv_bfloat16 x, __nv_bfloat16 y) { return __hmin(x, y); }
 
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 clamp(__nv_bfloat16 v, __nv_bfloat16 lo, __nv_bfloat16 hi) { return min(hi, max(lo, v)); }
+  TV_DEVICE_INLINE static __nv_bfloat16 clamp(__nv_bfloat16 v, __nv_bfloat16 lo, __nv_bfloat16 hi) { return min(hi, max(lo, v)); }
 
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 fma(__nv_bfloat16 x, __nv_bfloat16 y, __nv_bfloat16 z) { return __hfma(x, y, z); }
+  TV_DEVICE_INLINE static __nv_bfloat16 fma(__nv_bfloat16 x, __nv_bfloat16 y, __nv_bfloat16 z) { return __hfma(x, y, z); }
 
-  TV_HOST_DEVICE_INLINE static __nv_bfloat16 mix(__nv_bfloat16 x, __nv_bfloat16 y, __nv_bfloat16 t) { return fma(t, y, fma(-t, x, x)); }
+  TV_DEVICE_INLINE static __nv_bfloat16 mix(__nv_bfloat16 x, __nv_bfloat16 y, __nv_bfloat16 t) { return fma(t, y, fma(neg(t), x, x)); }
 
 #endif
 

@@ -1,4 +1,7 @@
 # Changelog
+## [0.7.7] - 2024-12-09
+- fix cuda 11 compile problem
+
 ## [0.7.6] - 2024-12-09
 - fix missing windows cpu prebuilt
 
