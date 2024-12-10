@@ -1,4 +1,7 @@
 # Changelog
+## [0.7.9] - 2024-12-10
+- fix cuda 11.4 compile problem
+
 ## [0.7.8] - 2024-12-10
 - fix cuda 11.4 compile problem
 
