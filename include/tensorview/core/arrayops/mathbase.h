@@ -786,9 +786,21 @@ template <> struct MathScalarOp<__half> {
 #endif
   }
 
-  TV_DEVICE_INLINE static __half max(__half x, __half y) { return __hmax(x, y); }
+  TV_DEVICE_INLINE static __half max(__half x, __half y) { 
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750))
+    return __hmax(x, y);
+#else
+    return __half(fmaxf(float(x), float(y)));
+#endif
+ }
 
-  TV_DEVICE_INLINE static __half min(__half x, __half y) { return __hmin(x, y); }
+  TV_DEVICE_INLINE static __half min(__half x, __half y) { 
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 750))
+    return __hmin(x, y); 
+#else
+    return __half(fminf(float(x), float(y)));
+#endif
+  }
 
   TV_DEVICE_INLINE static __half clamp(__half v, __half lo, __half hi) { return min(hi, max(lo, v)); }
 
