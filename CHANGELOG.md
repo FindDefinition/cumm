@@ -1,4 +1,9 @@
 # Changelog
+## [0.7.10] - 2024-12-15
+### Fixed
+- fix cuda 11.4 compile problem
+- better cuda library finding for windows
+
 ## [0.7.9] - 2024-12-10
 - fix cuda 11.4 compile problem
 
