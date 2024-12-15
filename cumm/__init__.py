@@ -58,8 +58,12 @@ def _determine_windows_cuda_dll_dir():
     spec = importlib.util.find_spec("torch")
     if spec is not None and spec.origin is not None:
         torch_path = Path(spec.origin).parent
-        cuda_dll_paths = [str(torch_path / "lib")]
-        return cuda_dll_paths, res_msgs
+        libdir = torch_path / "lib"
+        nvrtc_paths = list(libdir.glob("nvrtc*.dll"))
+        cudart_paths = list(libdir.glob("cudart*.dll"))
+        if cudart_paths and nvrtc_paths:
+            cuda_dll_paths = [str(torch_path / "lib")]
+            return cuda_dll_paths, res_msgs
 
     res_msgs.append("Step 2: Can't find pytorch cuda libraries "
             "you may need to install cuda pytorch first.")
@@ -83,7 +87,7 @@ def _determine_windows_cuda_dll_dir():
             "you may need to install cuda by `conda install cuda -c nvidia` to base env.")
     # step 3: try to load cuda dll from system installed cuda path
     cuda_path = os.getenv("CUDA_PATH", None)
-    if cuda_path is not None:
+    if cuda_path is not None and (Path(cuda_path) / "bin").exists():
         return [Path(cuda_path) / "bin"], res_msgs
 
     res_msgs.append("Step 4: Can't find system cuda or system cuda version mismatch, "
