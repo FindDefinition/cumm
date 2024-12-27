@@ -626,17 +626,17 @@ class TensorViewNVRTC(pccm.Class):
         self.add_include("tensorview/core/arrayops/linalg.h")
         self.add_include("tensorview/parallel/ops.h")
 
-        if not CUMM_CPU_ONLY_BUILD:
-            # here we can't depend on GemmKernelFlags
-            # because nvrtc don't support regular arch flags.
-            includes, lib64 = _get_cuda_include_lib()
-            self.build_meta.add_public_includes(*includes, TENSORVIEW_INCLUDE_PATH)
-
-            self.add_include("tensorview/cuda/kernel_utils.h")
-            self.build_meta.add_public_cflags("nvcc", "-DTV_ENABLE_HARDWARE_ACC")
         if compat.InMacOS:
             self.build_meta.add_public_includes(TENSORVIEW_INCLUDE_PATH)
         else:
+            if not CUMM_CPU_ONLY_BUILD:
+                # here we can't depend on GemmKernelFlags
+                # because nvrtc don't support regular arch flags.
+                includes, lib64 = _get_cuda_include_lib()
+                self.build_meta.add_public_includes(*includes, TENSORVIEW_INCLUDE_PATH)
+
+                self.add_include("tensorview/cuda/kernel_utils.h")
+                self.build_meta.add_public_cflags("nvcc", "-DTV_ENABLE_HARDWARE_ACC")
             self.add_include("tensorview/tensorview.h")
 
             # if compat.InLinux:

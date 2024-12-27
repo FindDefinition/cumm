@@ -135,7 +135,7 @@ template <> struct Morton<uint64_t> : public detail::MortonCore<64> {
     return get_third_bits(d >> Axis);
   }
 };
-
+#ifndef TV_METAL_CC
 template <> struct Morton<std::conditional_t<std::is_same<uint64_t, unsigned long long>::value, detail::__place_holder_t, unsigned long long>> : public detail::MortonCore<64> {
   static constexpr TV_METAL_CONSTANT int kNumBits = 64;
   TV_HOST_DEVICE_INLINE static uint64_t encode(uint32_t x, uint32_t y,
@@ -152,7 +152,7 @@ template <> struct Morton<std::conditional_t<std::is_same<uint64_t, unsigned lon
     return get_third_bits(d >> Axis);
   }
 };
-
+#endif
 
 template <typename K> struct Murmur3Hash {
   using key_type = tv::hash::to_unsigned_t<K>;

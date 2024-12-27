@@ -1,4 +1,8 @@
 # Changelog
+## [0.7.12] - 2024-12-27
+### Fixed 
+- fix apple mps compile problem
+
 ## [0.7.10] - 2024-12-15
 ### Fixed
 - fix cuda 11.4 compile problem

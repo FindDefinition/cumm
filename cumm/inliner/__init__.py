@@ -65,9 +65,6 @@ import contextvars
 import re
 import time
 
-from matplotlib.pylab import f
-from requests import get
-
 import pccm
 from pccm.builder.inliner import InlineBuilder, InlineBuilderPlugin, PCCM_INLINE_NAMESPACE, PCCM_INLINE_FUNCTION_NAME, PCCM_INLINE_FUNCTION_NAME_FORMAT, get_base_type_string
 from cumm.nvrtc import CummLLVMModule, CummMetalModule, CummNVRTCModule, CummNVRTCModuleBase, create_nvrtc_code
