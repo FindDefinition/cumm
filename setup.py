@@ -139,15 +139,23 @@ class CopyHeaderCallback(ExtCallback):
         include_path = package_dir / "cumm" / "include"
         target_lib_path = package_dir / "cumm" / "lib"
         target_nvrtc_include_path = package_dir / "cumm" / "nvrtc_include"
+        libcudacxx_include_path = package_dir / "cumm" / "libcudacxx_include"
         if target_lib_path.exists():
             shutil.rmtree(target_lib_path)
         if target_nvrtc_include_path.exists():
             shutil.rmtree(target_nvrtc_include_path)
         if include_path.exists():
             shutil.rmtree(include_path)
+        if libcudacxx_include_path.exists():
+            shutil.rmtree(libcudacxx_include_path)
         root = Path(__file__).parent.resolve()
         code_path = root / "include"
+        cccl_path = root / "third_party" / "cccl"
         shutil.copytree(code_path, include_path)
+        if cccl_path.exists():
+            libcudacxx_include = cccl_path / "libcudacxx" / "include"
+            if libcudacxx_include.exists():
+                shutil.copytree(libcudacxx_include, libcudacxx_include_path)
         if compat.InLinux:
             # copy /usr/local/cuda/lib64/libcudadevrt.a
             cudadevrt = Path("/usr/local/cuda/lib64/libcudadevrt.a")

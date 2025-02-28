@@ -23,7 +23,7 @@ from typing import List, Optional, Tuple
 import pccm
 from ccimport import compat
 
-from cumm.constants import CUMM_APPLE_METAL_CPP_ROOT, CUMM_CPU_ONLY_BUILD, TENSORVIEW_INCLUDE_PATH
+from cumm.constants import CUMM_APPLE_METAL_CPP_ROOT, CUMM_CPU_ONLY_BUILD, TENSORVIEW_LIBCUDACXX_PATH, TENSORVIEW_INCLUDE_PATH
 from cumm.constants import PACKAGE_ROOT
 
 def get_executable_path(executable: str) -> str:
@@ -616,6 +616,47 @@ class TensorViewKernel(pccm.Class):
         self.add_include("tensorview/cuda/device_ops.h")
         self.add_include("tensorview/gemm/debug.h")
 
+def get_cuda_version():
+    try:
+        nvcc_output = subprocess.check_output(["nvcc", "--version"]).decode("utf-8")
+        version_match = re.search(r"release (\d+\.\d+)", nvcc_output)
+        if version_match:
+            return version_match.group(1)
+        else:
+            raise ValueError("CUDA version not found in nvcc output")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Failed to run nvcc: {e}")
+
+def _locate_cudart_includes_for_nvrtc():
+    try:
+        from nvidia import cuda_runtime
+        res = [Path(cuda_runtime.__file__).resolve().parent / "include"]
+        return res
+    except:
+        pass
+    # try to use include files in triton, assume you install cumm with
+    # lower version than pytorch (triton)
+    try:
+        import triton 
+        triton_path = Path(triton.__file__).resolve().parent
+        inc_path = triton_path / "backends" / "nvidia" / "include"
+        if inc_path.exists() and (inc_path / "cuda_fp16.h").exists():
+            return [inc_path]
+    except:
+        pass
+    try:
+        from cumm.core_cc.common import CompileInfo
+        cuda_ver_compiled = CompileInfo.get_compiled_cuda_version()
+        includes, _ = _get_cuda_include_lib()
+        cuda_ver = get_cuda_version()
+        cuda_ver_ints = tuple(map(int, cuda_ver.split(".")))[:2]
+        assert cuda_ver_ints >= cuda_ver_compiled, f"cuda version {cuda_ver} is less than compiled version {cuda_ver_compiled}"
+        return includes
+    except:
+        pass 
+
+    raise ValueError("can't find cudart include for nvrtc, you must either install cuda to your system "
+        "or use nvidia pip package (nvidia-cuda-runtime-cu12) (see https://docs.nvidia.com/cuda/cuda-installation-guide-microsoft-windows/).")
 
 class TensorViewNVRTC(pccm.Class):
     """a class that contains all tensorview features with nvrtc support.
@@ -632,7 +673,11 @@ class TensorViewNVRTC(pccm.Class):
             if not CUMM_CPU_ONLY_BUILD:
                 # here we can't depend on GemmKernelFlags
                 # because nvrtc don't support regular arch flags.
-                includes, lib64 = _get_cuda_include_lib()
+                if TENSORVIEW_LIBCUDACXX_PATH.exists():
+                    includes = [str(TENSORVIEW_LIBCUDACXX_PATH)]
+                    includes += _locate_cudart_includes_for_nvrtc()
+                else:
+                    includes, lib64 = _get_cuda_include_lib()
                 self.build_meta.add_public_includes(*includes, TENSORVIEW_INCLUDE_PATH)
 
                 self.add_include("tensorview/cuda/kernel_utils.h")

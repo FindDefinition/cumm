@@ -36,7 +36,8 @@ assert TENSORVIEW_INCLUDE_PATH.exists()
 
 TENSORVIEW_INCLUDE_PATH = str(TENSORVIEW_INCLUDE_PATH)
 TENSORVIEW_INCLUDE_PATH = os.getenv("CUMM_INCLUDE_PATH", TENSORVIEW_INCLUDE_PATH)
-
+TENSORVIEW_LIBCUDACXX_PATH = PACKAGE_ROOT / "libcudacxx_include"
+TENSORVIEW_IS_CUDA_PREBUILT = TENSORVIEW_LIBCUDACXX_PATH.exists()
 CUTLASS_MODE = False
 CUTLASS_INPUT_ITER = CUTLASS_MODE and True
 CUTLASS_SMEM_WARP_ITER = CUTLASS_MODE and True
@@ -44,14 +45,17 @@ CUTLASS_OUTPUT_ITER = CUTLASS_MODE and True
 CUTLASS_DEBUG = False
 
 CUMM_CUDA_VERSION = os.getenv("CUMM_CUDA_VERSION", None)
-try:
-    subprocess.check_output(["nvcc", "--version"
-                                            ]).decode("utf-8").strip()
+if TENSORVIEW_IS_CUDA_PREBUILT:
     CUMM_CPU_ONLY_BUILD = False 
-except:
-    CUMM_CPU_ONLY_BUILD = not compat.IsAppleSiliconMacOs
-if CUMM_CUDA_VERSION is not None:
-    CUMM_CPU_ONLY_BUILD = CUMM_CUDA_VERSION.strip() == ""
+else:
+    try:
+        subprocess.check_output(["nvcc", "--version"
+                                                ]).decode("utf-8").strip()
+        CUMM_CPU_ONLY_BUILD = False 
+    except:
+        CUMM_CPU_ONLY_BUILD = not compat.IsAppleSiliconMacOs
+    if CUMM_CUDA_VERSION is not None:
+        CUMM_CPU_ONLY_BUILD = CUMM_CUDA_VERSION.strip() == ""
 
 CUMM_DISABLE_JIT = os.getenv("CUMM_DISABLE_JIT", "0") == "1"
 

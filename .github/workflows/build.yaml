@@ -55,6 +55,19 @@ jobs:
             )
           )
         run: |
+          # clone nvidia cuda cccl to cumm/third_party/cccl
+          if ($env:CUDA_VERSION -lt "12.0") {
+              $CCCL_BRANCH_NAME = "2.7.0"
+          }
+          elseif ($env:CUDA_VERSION -lt "12.2"){
+              $CCCL_BRANCH_NAME = "2.2.0"
+          }
+          else {
+              $CCCL_MINOR_VERSION = $env:CUDA_VERSION.split(".")[1]
+              $CCCL_BRANCH_NAME = "2.$CCCL_MINOR_VERSION.0"
+          }
+          git clone https://github.com/NVIDIA/cccl.git third_party/cccl -b v$CCCL_BRANCH_NAME
+
           # if we use $env to set a var with empty string, this env will be deteted...
           # f**k windows
           $env:CUMM_CUDA_ARCH_LIST = "all"
@@ -101,6 +114,17 @@ jobs:
           PLAT: ${{ matrix.cuda-version > '123' && 'manylinux_2_28_x86_64' || 'manylinux2014_x86_64' }}
         if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags')) && (env.CUDA_VERSION != '') ) || env.CUDA_VERSION == '126'
         run: |
+          # clone nvidia cuda cccl to third_party/
+          if [ $CUDA_VERSION -lt "12.0" ]; then
+              CCCL_BRANCH_NAME="2.7.0"
+          elif [ $CUDA_VERSION -lt "12.2" ]; then
+              CCCL_BRANCH_NAME="2.2.0"
+          else
+              CCCL_MINOR_VERSION=$(echo $CUDA_VERSION | cut -d'.' -f2)
+              CCCL_BRANCH_NAME="2.$CCCL_MINOR_VERSION.0"
+          fi
+          git clone https://github.com/NVIDIA/cccl.git third_party/cccl -b v$CCCL_BRANCH_NAME
+
           docker run --rm -e PLAT=$PLAT -e CUMM_CUDA_VERSION=${{ matrix.cuda-version }} -v `pwd`:/io $DOCKER_IMAGE bash -c "source /etc/bashrc && /io/tools/build-wheels.sh"
           # python -m pip install myclang -f ./dist
           # pytest ./test

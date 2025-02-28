@@ -1,4 +1,8 @@
 # Changelog
+## [0.7.13] - 2025-02-29
+### Fixed 
+- fix nvrtc compile problem when use prebuilt. user may need to install nvidia pip package if system cuda isn't installed or version too low.
+
 ## [0.7.12] - 2024-12-27
 ### Fixed 
 - fix apple mps compile problem

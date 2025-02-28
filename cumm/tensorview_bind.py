@@ -20,7 +20,7 @@ import pccm
 from ccimport import compat
 from pccm.utils import project_is_editable, project_is_installed
 
-from cumm.common import PyBind11, TensorView, TensorViewCPU, TensorViewCompileLinkFlags, TensorViewHeader, TensorViewImplFlags, get_cuda_version_by_nvcc, TensorViewArrayLinalg
+from cumm.common import CompileInfo, PyBind11, TensorView, TensorViewCPU, TensorViewCompileLinkFlags, TensorViewHeader, TensorViewImplFlags, get_cuda_version_by_nvcc, TensorViewArrayLinalg
 from cumm.constants import CUMM_CPU_ONLY_BUILD, PACKAGE_ROOT
 from .constants import CUMM_APPLE_METAL_CPP_ROOT, CUMM_CUDA_VERSION, PACKAGE_NAME
 from cumm.conv.nvrtc_code import nvrtc_conv_template
@@ -70,7 +70,7 @@ std::shared_ptr<AppleMetalContext> AppleMetalContext::getInstance()
 class TensorViewBind(pccm.Class, pccm.pybind.PybindClassMixin):
     def __init__(self):
         super().__init__()
-        self.add_dependency(TensorView, TensorViewArrayLinalg, PyBind11, TensorViewImplFlags, AppleMetalImpl)
+        self.add_dependency(TensorView, TensorViewArrayLinalg, PyBind11, TensorViewImplFlags, AppleMetalImpl, CompileInfo)
         self.add_include("tensorview/pybind_utils.h")
         self.add_include("tensorview/profile/all.h")
         self.add_include("limits")
