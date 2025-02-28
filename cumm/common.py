@@ -426,7 +426,7 @@ class _CudaInclude(pccm.Class):
 class CompileInfo(pccm.Class):
     def __init__(self):
         super().__init__()
-        if not CUMM_CPU_ONLY_BUILD:
+        if not CUMM_CPU_ONLY_BUILD and not compat.IsAppleSiliconMacOs:
             include, lib64 = _get_cuda_include_lib()
             _, self.cuda_archs, self.has_ptx = _get_cuda_arch_flags()
             self.ptx_arch = self.cuda_archs[-1]
