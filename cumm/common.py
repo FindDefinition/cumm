@@ -418,7 +418,7 @@ class CummNVRTCLink(pccm.Class):
 class _CudaInclude(pccm.Class):
     def __init__(self):
         super().__init__()
-        if not CUMM_CPU_ONLY_BUILD:
+        if not CUMM_CPU_ONLY_BUILD and not compat.IsAppleSiliconMacOs:
             include, lib64 = _get_cuda_include_lib()
             self.add_include("cuda.h")
             self.build_meta.add_private_includes(include)
