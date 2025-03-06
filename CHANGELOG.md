@@ -1,4 +1,8 @@
 # Changelog
+## [0.8.0] - 2025-03-06
+### Changed 
+- CI environment gcc changed, so we need to increment minor version to avoid conflict.
+
 ## [0.7.13] - 2025-02-29
 ### Fixed 
 - fix nvrtc compile problem when use prebuilt. user may need to install nvidia pip package if system cuda isn't installed or version too low.
