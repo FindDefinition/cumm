@@ -442,7 +442,7 @@ class CompileInfo(pccm.Class):
         self.add_include("vector", "tuple")
         self.add_include("string")
     
-    if CUMM_CPU_ONLY_BUILD:
+    if CUMM_CPU_ONLY_BUILD or compat.IsAppleSiliconMacOs:
         _STATIC_FUNC = pccm.static_function
     else:
         _STATIC_FUNC = pccm.cuda.static_function
@@ -451,7 +451,7 @@ class CompileInfo(pccm.Class):
     @_STATIC_FUNC
     def get_compiled_cuda_version(self):
         code = pccm.code()
-        if CUMM_CPU_ONLY_BUILD:
+        if CUMM_CPU_ONLY_BUILD or compat.IsAppleSiliconMacOs:
             code.raw(f"return std::make_tuple(-1, -1);")
         else:
             code.add_dependency(_CudaInclude)
@@ -590,6 +590,7 @@ class CompileInfo(pccm.Class):
         code = pccm.code()
         code.arg("min_arch", "std::tuple<int, int>")
         cuda_ver_to_max_arch = [
+            ((12, 8), (10, 0)),
             ((11, 8), (9, 0)),
             ((11, 1), (8, 6)),
             ((11, 0), (8, 0)),
