@@ -1,4 +1,9 @@
 # Changelog
+
+## [0.8.1] - 2025-05-14
+### Fixed
+- fix nvrtc problem in cuda >= 12.6
+
 ## [0.8.0] - 2025-03-06
 ### Changed 
 - CI environment gcc changed, so we need to increment minor version to avoid conflict.

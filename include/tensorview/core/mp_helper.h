@@ -29,7 +29,7 @@
 #ifdef __APPLE__
 #include "nvrtc_std.h"
 #else 
-#include "nvrtc/type_traits.h"
+#include "nvrtc_std.h"
 #endif
 #else
 #include "cc17.h"

@@ -34,9 +34,11 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#define CUDA_NAMESPACE_STD std
 #else 
 #include "fp_nvrtc.h"
 #include <tensorview/core/nvrtc_std.h>
+#define CUDA_NAMESPACE_STD cuda::std
 #endif
 #include "half.h"
 
@@ -235,7 +237,7 @@ tfloat32_t copysign(tfloat32_t const &a, tfloat32_t const &b) {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-namespace std {
+namespace CUDA_NAMESPACE_STD {
 
 #if !defined(__CUDACC_RTC__)
 /// Numeric limits

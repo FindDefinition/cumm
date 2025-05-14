@@ -40,9 +40,11 @@
 #include <cstdint>
 #include <limits>
 #include  <cstring>
+#define CUDA_NAMESPACE_STD std
 #else 
 #include "fp_nvrtc.h"
 #include <tensorview/core/nvrtc_std.h>
+#define CUDA_NAMESPACE_STD cuda::std
 #endif
 #include "half.h"
 #include <tensorview/core/all.h>
@@ -1059,7 +1061,7 @@ struct equivalent_data_type<float_e5m2_t> {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-namespace std {
+namespace CUDA_NAMESPACE_STD {
 
 /// Numeric limits common to all float8 types
 template <typename T>

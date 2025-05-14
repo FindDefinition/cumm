@@ -23,11 +23,21 @@
 #pragma once
 #ifndef __APPLE__
 
+#if ((__CUDACC_VER_MAJOR__ > 13) || (__CUDACC_VER_MAJOR__ == 12 && __CUDACC_VER_MINOR__ >= 6))
+#include <cuda/std/limits>
+#include <cuda/std/type_traits>
+#include <cuda/std/tuple>
+#include <cuda/std/array>
+namespace std {
+    using namespace cuda::std;
+}
+#else 
 #include "nvrtc/core.h"
 #include "nvrtc/type_traits.h"
 #include "nvrtc/limits.h"
 #include "nvrtc/tuple.h"
 
+#endif
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif

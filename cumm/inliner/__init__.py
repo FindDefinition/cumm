@@ -647,6 +647,7 @@ class NVRTCInlineBuilder(InlineBuilder):
         self._remote_addr = remote_addr
         self._mps_sync_func = mps_sync_func
         self._mps_context = mps_context
+        self._nvrtc_fn_name_cache: dict[str, str] = {}
         self.ctx = tv.Context() if context is None or mps_context is not None else context
         if compat.InMacOS and not self.ctx.has_apple_metal_context():
             if self._mps_context is None:
@@ -886,11 +887,15 @@ class NVRTCInlineBuilder(InlineBuilder):
                  *args,
                  user_args: Optional[_NVRTCInlineParams] = None):
         assert user_args is not None
-        real_name = self._get_nvrtc_inline_func_name_for_debug(name)
-        launch = user_args.launch.copy()
-        if launch.ctx is None or not launch.ctx.has_apple_metal_context():
-            launch.ctx = self.ctx
+        if name in self._nvrtc_fn_name_cache:
+            real_name = self._nvrtc_fn_name_cache[name]
+        else:
+            real_name = self._get_nvrtc_inline_func_name_for_debug(name)
+            self._nvrtc_fn_name_cache[name] = real_name
         if isinstance(func, CummMetalModule):
+            launch = user_args.launch.copy()
+            if launch.ctx is None or not launch.ctx.has_apple_metal_context():
+                launch.ctx = self.ctx
             is_kernel_raw = user_args.mode == CUDAMode.KernelRaw
             with self.enter_inliner_scope():
                 if user_args.unchecked_mode:
@@ -903,12 +908,12 @@ class NVRTCInlineBuilder(InlineBuilder):
                 return res
         else:
             if user_args.run_in_process:
-                func.run_kernel_in_spawn_process(real_name, launch, *args)
+                func.run_kernel_in_spawn_process(real_name, user_args.launch, *args)
             else:
                 if user_args.unchecked_mode:
-                    func.run_kernel_unchecked(real_name, launch, args)
+                    func.run_kernel_unchecked(real_name, user_args.launch, args)
                 else:
-                    func.run_kernel(real_name, launch, *args, perf_context=user_args.perf_context)
+                    func.run_kernel(real_name, user_args.launch, *args, perf_context=user_args.perf_context)
         return 
 
     def kernel_raw(self,

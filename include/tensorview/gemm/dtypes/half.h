@@ -40,9 +40,13 @@
 #if defined(__CUDACC_RTC__)
 #include "fp_nvrtc.h"
 #include <tensorview/core/nvrtc_std.h>
+#define CUDA_NAMESPACE_STD cuda::std
+
 #undef CUTLASS_ENABLE_F16C
 #define CUTLASS_ENABLE_F16C 0
 #else
+#define CUDA_NAMESPACE_STD std
+
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -493,7 +497,7 @@ half_t copysign(half_t const &a, half_t const &b) {
 //
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-namespace std {
+namespace CUDA_NAMESPACE_STD {
 
 #if !defined(__CUDACC_RTC__)
 /// Numeric limits

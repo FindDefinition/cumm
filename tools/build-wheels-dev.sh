@@ -12,7 +12,7 @@ function repair_wheel {
 }
 
 export CUMM_DISABLE_JIT="1"
-export CUMM_CUDA_ARCH_LIST="7.5;8.6"
+export CUMM_CUDA_ARCH_LIST="all"
 export CUDA_VERSION="126"
 if [ -d /io/third_party/cccl ]; then
   echo "CCCL already cloned."
@@ -28,8 +28,9 @@ else
     fi
     git clone https://github.com/NVIDIA/cccl.git /io/third_party/cccl -b v$CCCL_BRANCH_NAME
 fi
+"/opt/python/cp39-cp39/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp -v
 
-"/opt/python/cp311-cp311/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp -v
+# "/opt/python/cp311-cp311/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp -v
 
 # "/opt/python/cp313-cp313/bin/pip" wheel /io/ --no-deps -w /io/wheelhouse_tmp
 
