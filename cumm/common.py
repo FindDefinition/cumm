@@ -132,22 +132,22 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
                     _arch_list = "3.7;5.0;5.2;6.0;6.1;7.0;7.5+PTX"
                 elif (major, minor) < (11, 8):
                     _arch_list = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
-                elif (major, minor) < (12, 0):
+                elif (major, minor) < (12, 8):
                     _arch_list = "6.0;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
                 else:
                     # remove sm < 70 prebuilt gemm kernels in CUDA 12.
                     # these gemm kernels will be compiled via nvrtc.
-                    _arch_list = "6.0;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
+                    _arch_list = "7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX"
             else:
                 # flag for non-gemm kernels, they are usually simple and small.
                 if (major, minor) < (11, 0):
                     _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5+PTX"
                 elif (major, minor) < (11, 8):
                     _arch_list = "3.5;3.7;5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
-                elif (major, minor) < (12, 0):
+                elif (major, minor) < (12, 8):
                     _arch_list = "5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
                 else:
-                    _arch_list = "5.0;5.2;6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0+PTX"
+                    _arch_list = "7.5;8.0;8.6;8.9;9.0;10.0;12.0+PTX"
     _all_arch = "5.2;6.0;6.1;7.0;7.5;8.0;8.6+PTX"
     for named_arch, archval in named_arches.items():
         _all_arch = _all_arch.replace(named_arch, archval)
