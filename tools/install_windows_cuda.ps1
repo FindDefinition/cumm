@@ -20,6 +20,7 @@ $CUDA_KNOWN_URLS = @{
     "12.4" = "https://developer.download.nvidia.com/compute/cuda/12.4.1/network_installers/cuda_12.4.1_windows_network.exe";
     "12.5" = "https://developer.download.nvidia.com/compute/cuda/12.5.1/network_installers/cuda_12.5.1_windows_network.exe";
     "12.6" = "https://developer.download.nvidia.com/compute/cuda/12.6.1/network_installers/cuda_12.6.1_windows_network.exe";
+    "12.8" = "https://developer.download.nvidia.com/compute/cuda/12.8.1/network_installers/cuda_12.8.1_windows_network.exe";
 }
 
 # cuda_runtime.h is in nvcc <= 10.2, but cudart >= 11.0
