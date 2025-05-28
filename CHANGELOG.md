@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.8.2] - 2025-05-28
+### Added
+- add cuda 12.8 support
+
 ## [0.8.1] - 2025-05-14
 ### Fixed
 - fix nvrtc problem in cuda >= 12.6
