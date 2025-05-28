@@ -91,7 +91,7 @@ def _get_cuda_arch_flags(is_gemm: bool = False) -> Tuple[List[str], List[Tuple[i
 
     supported_arches = [
         '3.5', '3.7', '5.0', '5.2', '6.0', '6.1', '7.0', '7.2', '7.5', '8.0',
-        '8.6', '8.9', '9.0'
+        '8.6', '8.9', '9.0', "10.0", "12.0",
     ]
     supported_arches += ['5.3', '6.2', '7.2', '8.7']
     valid_arch_strings = supported_arches + [
