@@ -330,7 +330,7 @@ def _get_cuda_include_lib():
                 traceback.print_exc()
                 pass 
 
-            linux_cuda_root = Path("/usr/local/cuda")
+            linux_cuda_root = Path(os.getenv("CUDA_HOME", "/usr/local/cuda"))
             include = linux_cuda_root / f"include"
             lib64 = linux_cuda_root / f"lib64"
             assert linux_cuda_root.exists(), f"can't find cuda in {linux_cuda_root} install via cuda installer or conda first."
