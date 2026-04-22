@@ -122,9 +122,11 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
                         str(dtypes.uint32),
                         array=f"[{self.num_pred_32}]")
         if self.shuffle_in_stride:
+            # indices_ stores gather offsets in bytes. For large inputs the
+            # product can exceed INT32_MAX, so use int64_t.
             self.add_member(
                 "indices_",
-                str(dtypes.int32),
+                str(dtypes.int64),
                 array=f"[{self.tmap.iterations[0] * self.sub_tile_shape[0]}]")
 
         # cudasim members
@@ -338,9 +340,9 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
             TV_PRAGMA_UNROLL
             for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
                 if (thread_offset_[0] + s * {self.tmap.delta[0]} + ss < extent_[0])
-                    indices_[s * {self.sub_tile_shape[0]} + ss] = 
-                        params_.indice_ptr_[thread_offset_[0] + 
-                            s * {self.tmap.delta[0]} + ss] * 
+                    indices_[s * {self.sub_tile_shape[0]} + ss] =
+                        int64_t(params_.indice_ptr_[thread_offset_[0] +
+                            s * {self.tmap.delta[0]} + ss]) *
                             params_.stride_ * {self.dtype.bitsize()} / 8;
                 else{{
                     indices_[s * {self.sub_tile_shape[0]} + ss] = 0;
@@ -363,8 +365,8 @@ class MaskTileIteratorGather(bases.GemmInputIterator):
             TV_PRAGMA_UNROLL
             for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
                 if (thread_offset_[0] + s * {self.tmap.delta[0]} + ss < extent_[0])
-                    indices_[s * {self.sub_tile_shape[0]} + ss] = 
-                        (thread_offset_[0] + s * {self.tmap.delta[0]} + ss) * 
+                    indices_[s * {self.sub_tile_shape[0]} + ss] =
+                        int64_t(thread_offset_[0] + s * {self.tmap.delta[0]} + ss) *
                             params_.stride_ * {self.dtype.bitsize()} / 8;
                 else{{
                     indices_[s * {self.sub_tile_shape[0]} + ss] = 0;
