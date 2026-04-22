@@ -114,7 +114,7 @@ def nvrtc_conv_template(code: pccm.FunctionCode):
     sp_kernel_params.act_beta = kernel_params.act_beta;
     sp_kernel_params.act_type = kernel_params.act_type;
 
-    constexpr int int_max = std::numeric_limits<int32_t>::max();
+    constexpr int64_t int_max = std::numeric_limits<int64_t>::max();
 
     if (algo_desp.mask_sparse){{
         if (algo_desp.op_type == tv::gemm::ConvOpType::kBackwardWeight){{

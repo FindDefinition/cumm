@@ -76,7 +76,7 @@ def nvrtc_gemm_template(code: pccm.FunctionCode):
 
     }}
     int m, n, k, k2;
-    constexpr int int_max = std::numeric_limits<int32_t>::max();
+    constexpr int64_t int_max = std::numeric_limits<int64_t>::max();
     if (algo_desp.shuffle_type == tv::gemm::ShuffleStrideType::kShuffleAC){{
         TV_ASSERT_RT_ERR(!trans_a, "a of shuffle AB must be row major");
         if (!a_inds.empty()){{

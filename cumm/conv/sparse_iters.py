@@ -188,9 +188,11 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                         f"tv::array<uint32_t, {self.access_per_vector}>")
 
         # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
+        # indices_ stores gather offsets in bytes. For large inputs the product
+        # index * channel * nbytes can exceed INT32_MAX, so use int64_t.
         self.add_member(
             "indices_",
-            str(dtypes.int32),
+            str(dtypes.int64),
             array=f"[{self.tmap.iterations[0] * self.sub_tile_shape[0]}]")
 
     def get_params(self) -> pccm.ParameterizedClass:
@@ -282,8 +284,11 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         code = pccm.cuda.PTXCode()
         C_or_K = "C" if self.op_type == ConvOpType.kForward else "K"
         if self.is_wgrad_out:
-            # if False:
-            # wgrad out only need shuffle.
+            # wgrad out only need shuffle. PTX loads 32-bit values into a
+            # temporary int mask_inds[] array (indices_ is int64 now).
+            code.raw(
+                f"int mask_inds[{self.tmap.iterations[0] * self.sub_tile_shape[0]}];"
+            )
             for s in range(self.tmap.iterations[0]):
                 for ss in range(self.sub_tile_shape[0]):
                     code.raw(f"uint32_t pred{s}_{ss};")
@@ -291,7 +296,7 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                         f"pred{s}_{ss} = mask_[0] & (1u << ({s * self.sub_tile_shape[0] * self.tmap.iterations[1]} + {ss}));"
                     )
                     with code.asm_block() as asm:
-                        mask_ptr = asm.reg_ptr("indices_", RegDType.B32)
+                        mask_ptr = asm.reg_ptr("mask_inds", RegDType.B32)
                         pred_ptr = asm.ext_reg(f"pred{s}_{ss}", RegDType.B32)
                         mask_arg_ptr = asm.global_ptr(
                             "params_.mask_argsort_ptr_")
@@ -300,16 +305,13 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                                 mask_arg_ptr +
                                 (s * self.tmap.delta[0] + ss) * 4,
                                 mask_ptr[s * self.sub_tile_shape[0] + ss])
-                    # code.raw(f"""
-                    # indices_[{s * self.sub_tile_shape[0] + ss}] = pred{s}_{ss} ? params_.mask_argsort_ptr_[{(s * self.tmap.delta[0] + ss)}] : 0;
-
-                    # """)
             code.raw(f"""
             TV_PRAGMA_UNROLL
             for (int s = 0; s < {self.tmap.iterations[0]}; ++s){{
                 TV_PRAGMA_UNROLL
                 for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
-                    indices_[s * {self.sub_tile_shape[0]} + ss] = indices_[s * {self.sub_tile_shape[0]} + ss] * 
+                    indices_[s * {self.sub_tile_shape[0]} + ss] =
+                        int64_t(mask_inds[s * {self.sub_tile_shape[0]} + ss]) *
                             problem_.K * {self.dtype.nbytes_str()} ;
                 }}
             }}
@@ -334,10 +336,6 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                                 mask_arg_ptr +
                                 (s * self.tmap.delta[0] + ss) * 4,
                                 mask_ptr[s * self.sub_tile_shape[0] + ss])
-                    # code.raw(f"""
-                    # mask_inds[{s * self.sub_tile_shape[0] + ss}] = pred ? params_.mask_argsort_ptr_[{(s * self.tmap.delta[0] + ss)}] : 0;
-
-                    # """)
 
             if self.is_wgrad_input:
                 C_or_K = "C"
@@ -347,8 +345,8 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
                 TV_PRAGMA_UNROLL
                 for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
                     if (mask_[0] & (1u << (s * {self.sub_tile_shape[0] * self.tmap.iterations[1]} + ss))){{
-                        indices_[s * {self.sub_tile_shape[0]} + ss] = 
-                        indice_ptr_[mask_inds[s * {self.sub_tile_shape[0]} + ss]] * 
+                        indices_[s * {self.sub_tile_shape[0]} + ss] =
+                        int64_t(indice_ptr_[mask_inds[s * {self.sub_tile_shape[0]} + ss]]) *
                             problem_.{C_or_K} * {self.dtype.nbytes_str()} ;
                     }}
                 }}
@@ -592,12 +590,12 @@ class ForwardDgradSparseIOIterator(bases.ConvInputIterator):
         code.raw(f"""
         return indices_[stride * {self.sub_tile_shape[0]} + ss];
         """)
-        return code.ret(f"int")
+        return code.ret(f"int64_t")
 
     @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
-        code.arg("indice_offset", f"int")
+        code.arg("indice_offset", f"int64_t")
         code.raw(f"""
         return reinterpret_cast<{self.const_access_pointer}>( pointer_ + indice_offset);
         """)
@@ -778,9 +776,11 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         self.add_member("mask_", f"Mask")
 
         # self.add_member("filter_kernel_idxes_", f"tv::array<int, {self.ndim}>")
+        # indices_ stores gather offsets in bytes. For large inputs the product
+        # index * channel * nbytes can exceed INT32_MAX, so use int64_t.
         self.add_member(
             "indices_",
-            str(dtypes.int32),
+            str(dtypes.int64),
             array=f"[{self.tmap.iterations[0] * self.sub_tile_shape[0]}]")
 
     def get_params(self) -> pccm.ParameterizedClass:
@@ -872,19 +872,19 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         code = pccm.cuda.PTXCode()
         C_or_K = "C" if self.op_type == ConvOpType.kForward else "K"
         if self.is_wgrad_out:
-            # if False:
-            # wgrad out only need shuffle.
+            # wgrad out only need shuffle. PTX loads 32-bit values into a
+            # temporary int mask_inds[] array (indices_ is int64 now).
+            code.raw(
+                f"int mask_inds[{self.tmap.iterations[0] * self.sub_tile_shape[0]}];"
+            )
             for s in range(self.tmap.iterations[0]):
                 for ss in range(self.sub_tile_shape[0]):
                     code.raw(f"uint32_t pred{s}_{ss};")
-                    # code.raw(
-                    #     f"pred{s}_{ss} = mask_[0] & (1u << ({s} * {self.sub_tile_shape[0]} + {ss}));"
-                    # )
                     code.raw(
                         f"pred{s}_{ss} = mask_.query_coord({s}, 0, {ss}, 0);")
 
                     with code.asm_block() as asm:
-                        mask_ptr = asm.reg_ptr("indices_", RegDType.B32)
+                        mask_ptr = asm.reg_ptr("mask_inds", RegDType.B32)
                         pred_ptr = asm.ext_reg(f"pred{s}_{ss}", RegDType.B32)
                         mask_arg_ptr = asm.global_ptr(
                             "params_.mask_argsort_ptr_")
@@ -898,7 +898,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
             for (int s = 0; s < {self.tmap.iterations[0]}; ++s){{
                 TV_PRAGMA_UNROLL
                 for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
-                    indices_[s * {self.sub_tile_shape[0]} + ss] = indices_[s * {self.sub_tile_shape[0]} + ss] * 
+                    indices_[s * {self.sub_tile_shape[0]} + ss] =
+                        int64_t(mask_inds[s * {self.sub_tile_shape[0]} + ss]) *
                             problem_.K * {self.dtype.nbytes_str()} ;
                 }}
             }}
@@ -933,8 +934,8 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
                 for (int ss = 0; ss < {self.sub_tile_shape[0]}; ++ss){{
                     // if (mask_[0] & (1u << (s * {self.sub_tile_shape[0]} + ss)))
                     if (mask_.query_coord(s, 0, ss, 0)){{
-                        indices_[s * {self.sub_tile_shape[0]} + ss] = 
-                        indice_ptr_[mask_inds[s * {self.sub_tile_shape[0]} + ss]] * 
+                        indices_[s * {self.sub_tile_shape[0]} + ss] =
+                        int64_t(indice_ptr_[mask_inds[s * {self.sub_tile_shape[0]} + ss]]) *
                             problem_.{C_or_K} * {self.dtype.nbytes_str()} ;
                     }}
                 }}
@@ -1122,12 +1123,12 @@ class ForwardDgradSparseIOIteratorV2Mask(bases.ConvInputIterator):
         code.raw(f"""
         return indices_[stride * {self.sub_tile_shape[0]} + ss];
         """)
-        return code.ret(f"int")
+        return code.ret(f"int64_t")
 
     @pccm.cuda.member_function(device=True, forceinline=True, const=True)
     def get(self):
         code = FunctionCode()
-        code.arg("indice_offset", f"int")
+        code.arg("indice_offset", f"int64_t")
         code.raw(f"""
         return reinterpret_cast<{self.const_access_pointer}>( pointer_ + indice_offset);
         """)

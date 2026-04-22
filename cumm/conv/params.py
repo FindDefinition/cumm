@@ -259,7 +259,7 @@ class ConvProblem(pccm.ParameterizedClass):
         lines: List[str] = []
         for i in range(self.ndim + 1):
             lines.append(f"int64_t(shape[{i}])")
-        code.raw("std::abs(" + " * ".join(lines) + ") <= std::numeric_limits<int>::max()")
+        code.raw("std::abs(" + " * ".join(lines) + ") <= std::numeric_limits<int64_t>::max()")
         code.raw(");")
         code.ret("bool")
         return code
